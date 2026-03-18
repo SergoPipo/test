@@ -4,8 +4,62 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Привет!</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #fff;
+    }
+    #hello {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 48px;
+      font-weight: bold;
+      color: red;
+      text-align: center;
+      white-space: nowrap;
+    }
+  </style>
 </head>
 <body>
-  <h1>Привет!</h1>
+  <h1 id="hello">Привет!</h1>
+  <script>
+    const el = document.getElementById('hello');
+    let y = 0;
+    const baseFontSize = 48;
+    const speed = 1.5; // пикселей за кадр
+
+    const margin = 20; // отступ от нижнего края
+    let finished = false;
+
+    function animate() {
+      if (finished) return;
+
+      const elHeight = el.offsetHeight;
+      const maxY = window.innerHeight - elHeight - margin;
+
+      if (y < maxY) {
+        y += speed;
+        if (y >= maxY) {
+          y = maxY;
+          el.style.top = y + 'px';
+          // Увеличиваем шрифт и пересчитываем позицию
+          el.style.fontSize = (baseFontSize * 2) + 'px';
+          requestAnimationFrame(() => {
+            const newHeight = el.offsetHeight;
+            el.style.top = (window.innerHeight - newHeight - margin) + 'px';
+            finished = true;
+          });
+          return;
+        }
+        el.style.top = y + 'px';
+      }
+
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+  </script>
 </body>
 </html>
