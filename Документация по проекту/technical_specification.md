@@ -822,6 +822,12 @@ GET    /api/v1/auth/me
 PATCH  /api/v1/auth/password
        Body: { current_password, new_password }
        Response: 200
+
+GET    /api/v1/auth/setup-status
+       Response: 200 { is_configured: bool }
+       -- Возвращает true если в таблице users есть хотя бы один пользователь.
+       -- Используется frontend для автоматического редиректа на /setup при первом запуске.
+       -- Доступен без JWT.
 ```
 
 ### 4.2 Strategy API
@@ -1225,6 +1231,8 @@ GET    /api/v1/export/tax-report
 
 **Мастер первого запуска:**
 - При старте: проверка `SELECT COUNT(*) FROM users`. Если 0 — endpoint `/api/v1/auth/setup` доступен без JWT. После создания первого пользователя — endpoint становится недоступен (возвращает 403).
+- Frontend UX flow: при загрузке `LoginPage` вызывается `GET /api/v1/auth/setup-status`. Если `is_configured: false` — автоматический редирект на `/setup` (страница регистрации первого пользователя). На странице логина отображается ссылка «Первый запуск? Создать аккаунт» → `/setup`. На странице Setup — ссылка «Уже есть аккаунт? Войти» → `/login`.
+- При недоступности backend — LoginPage показывает Alert «Backend недоступен» и ссылку на Setup.
 
 **Подготовка к 2FA (фаза 2):**
 - Таблица `users` проектируется с учётом будущих полей (добавляются миграцией в фазе 2): `totp_secret: String(32), NULLABLE`, `totp_enabled: Boolean, DEFAULT False`.
@@ -2146,6 +2154,9 @@ class Settings(BaseSettings):
 
 При старте: проверка `os.stat('.env').st_mode` — если файл readable others, выводится WARNING.
 
+**Защита от dev-секретов в production:**
+При `DEBUG=False` — `model_validator` проверяет, что `SECRET_KEY` и `ENCRYPTION_KEY` не содержат префикс `dev-`. Если содержат — выводится `warnings.warn` с требованием задать безопасные значения в `.env`.
+
 ---
 
 ## 8. РАЗВЁРТЫВАНИЕ И ЭКСПЛУАТАЦИЯ
@@ -2158,6 +2169,9 @@ class Settings(BaseSettings):
 - Python 3.11+ с pip
 - Node.js 20+ с pnpm (или npm)
 - Системные библиотеки: TA-Lib C library (libta-lib), компилятор C (gcc/clang)
+
+**Конфигурация сборки (`backend/pyproject.toml`):**
+- В `[tool.setuptools.packages.find]` указать `include = ["app*"]`, чтобы setuptools не включал директории `data/`, `alembic/` как пакеты (flat-layout error).
 
 **Скрипт установки (`scripts/install.sh`):**
 
