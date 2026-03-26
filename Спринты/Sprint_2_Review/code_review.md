@@ -1,94 +1,94 @@
 # Ревью кода — после Sprint 1 + Sprint 2
 
 > Чеклист проверки реализованного кода.
-> Статус: ⬜ Не проведено
+> Статус: ✅ Проведено 2026-03-26
 
 ---
 
 ## 1. Архитектура и модули
 
-- [ ] **Разделение на слои:** доменная логика (service.py), доступ к данным (models.py/ORM), API (router.py), UI (React components) — каждый файл в своём слое
-- [ ] **Когезия модулей:** каждый пакет (`auth/`, `broker/`, `market_data/`, `trading/`) отвечает за одну зону ответственности, нет "божественных" модулей
-- [ ] **Нет циклических зависимостей:** модули не импортируют друг друга по кругу (допустимы только lazy imports через `if TYPE_CHECKING`)
-- [ ] **Конфигурация вынесена:** URL'ы API, ключи, DSN БД — только через `config.py` → `.env`, нет хардкода в коде
-- [ ] **Соответствие структуре из CLAUDE.md:** файловая структура совпадает с описанной в `Develop/CLAUDE.md`
+- [x] **Разделение на слои:** ✅ service.py / models.py / router.py / React components — корректно разделены
+- [x] **Когезия модулей:** ✅ каждый пакет отвечает за одну зону, «божественных» модулей нет
+- [x] **Нет циклических зависимостей:** ✅ граф импортов ацикличен; lazy imports в `market_data/service.py` (строки 212, 230, 238) — допустимы
+- [ ] **Конфигурация вынесена:** ⚠️ Два хардкода: CORS origin `main.py:46`, API base URL `frontend/src/api/client.ts:5` — вынести в .env
+- [x] **Соответствие структуре из CLAUDE.md:** ✅ файловая структура совпадает; нереализованные модули (strategy, trading, ai и др.) — заглушки по плану
 
 ## 2. Backend — API-слой
 
-- [ ] **Эндпоинты соответствуют ТЗ:** URL, HTTP-методы, коды ответов, JSON-схемы ответов
-- [ ] **Валидация входных данных:** Pydantic-схемы с `Field(...)` — типы, диапазоны, обязательные поля
-- [ ] **Ошибки формируются явно:** кастомные исключения (`NotFoundError` → 404, `AuthenticationError` → 401), а не generic 500
-- [ ] **CORS настроен корректно:** `allow_origins` содержит только frontend origin
-- [ ] **Версионирование API:** все endpoints под `/api/v1/`
+- [x] **Эндпоинты соответствуют ТЗ:** ✅ URL, HTTP-методы (POST 201, GET 200, DELETE 204), JSON-схемы корректны
+- [x] **Валидация входных данных:** ✅ Pydantic v2 с `Field(min_length, max_length, pattern)` на всех схемах
+- [ ] **Ошибки формируются явно:** ⚠️ auth/router.py (строки 30, 41-43, 46, 55, 67, 88) использует HTTPException вместо кастомных исключений; нет AccountLockedError для 423
+- [x] **CORS настроен корректно:** ✅ `allow_origins=["http://localhost:5173"]` — конкретный origin, не wildcard (но хардкод — см. п.1)
+- [x] **Версионирование API:** ✅ все endpoints под `/api/v1/`
 
 ## 3. Backend — Бизнес-логика
 
-- [ ] **Логика в сервисах:** бизнес-логика в `service.py`, а не в `router.py`; роутеры тонкие
-- [ ] **Функции компактны и читаемы:** нет методов длиннее ~50 строк, понятные имена
-- [ ] **Dependency Injection:** FastAPI `Depends()` для БД-сессий, auth, сервисов
+- [x] **Логика в сервисах:** ✅ все роутеры тонкие, делегируют в service.py
+- [ ] **Функции компактны и читаемы:** ⚠️ `market_data/service.py` — 5 методов превышают 50 строк: `get_candles` (51), `_fetch_via_broker` (53), `_save_to_cache` (54), `_fetch_via_iss` (57), `_validate_candles` (65)
+- [x] **Dependency Injection:** ✅ `Depends(get_db)`, `Depends(get_current_user)` — корректно
 
 ## 4. Backend — Работа с базой данных
 
-- [ ] **ORM-запросы:** все обращения к БД через SQLAlchemy ORM/Core, нет неконтролируемого raw SQL
-- [ ] **Миграции согласованы:** Alembic-миграции соответствуют текущим моделям
-- [ ] **Индексы на месте:** критические запросы покрыты индексами
-- [ ] **Async I/O:** все запросы к БД через `async/await` (AsyncSession)
+- [x] **ORM-запросы:** ✅ 100% SQLAlchemy ORM; 2 safe raw SQL (WAL pragma в database.py:39, health check в main.py:69)
+- [x] **Миграции согласованы:** ✅ единственная миграция `3d3e4e3036a6` полностью соответствует моделям
+- [x] **Индексы на месте:** ✅ 17 индексов на критических запросах (ohlcv_lookup, broker_user, notif_user_unread и др.)
+- [x] **Async I/O:** ✅ все запросы через AsyncSession, async/await
 
 ## 5. Backend — Ошибки и логирование
 
-- [ ] **Middleware перехватывает исключения:** пользователю не улетает stack trace
-- [ ] **Структурированные логи:** structlog с уровнями INFO/WARNING/ERROR
-- [ ] **Нет логирования секретов:** API-ключи, пароли, токены **никогда** не попадают в логи
+- [ ] **Middleware перехватывает исключения:** ⚠️ Обработчики для 5 кастомных исключений есть, но нет generic Exception handler — необработанные ошибки (SQLAlchemy и др.) могут вернуть stack trace
+- [x] **Структурированные логи:** ✅ structlog с контекстными полями, INFO/WARNING уровни
+- [x] **Нет логирования секретов:** ✅ API-ключи, пароли, токены не логируются
 
 ## 6. Финансовые данные ⚠️
 
-- [ ] **Decimal для денег и цен:** `Decimal` в Python, `Numeric(18,8)` / `Numeric(18,2)` в БД. **НЕ float!**
-- [ ] **Корректная сериализация:** в JSON-ответах цены — числа (не строки), внутри системы — Decimal
-- [ ] **Форматирование ru-RU:** числа `1 234 567,89 ₽`, даты `ДД.ММ.ГГГГ` на frontend
-- [ ] **Часовые пояса:** все даты в БД в UTC, отображение в МСК, нет путаницы naive/aware datetime
+- [x] **Decimal для денег и цен:** ✅ `Numeric(18,8)` для цен, `Numeric(18,2)` для денег во всех моделях; парсинг через `Decimal(str(val))`
+- [ ] **Корректная сериализация:** ⚠️ КРИТИЧНО — `CandleResponse` в `schemas.py:20-23` объявляет цены как `float`, теряя точность Decimal при сериализации в JSON
+- [x] **Форматирование ru-RU:** ✅ `formatters.ts` — `toLocaleString('ru-RU')`, `1 234 567,89 ₽`, `ДД.ММ.ГГГГ`
+- [ ] **Часовые пояса:** ⚠️ UTC в БД ✅, MSK в router ✅, но: `market_data/service.py:64-67` стрипает timezone info; `moex_iss/parser.py:35,63` создаёт naive datetime без TZ; `tinvest/mapper.py:80-84` — непоследовательная обработка
 
 ## 7. Frontend — Структура и компоненты
 
-- [ ] **Разделение ответственности:** компоненты не содержат бизнес-логику (она в stores/api)
-- [ ] **Состояние централизовано:** Zustand stores, нет дублирования запросов
-- [ ] **Формы:** валидация на клиенте + обработка ошибок от сервера
-- [ ] **Cleanup:** `useEffect` cleanup для таймеров, подписок, chart.remove()
-- [ ] **Соответствие ui_spec:** frontend реализован по утверждённой UI-спецификации
-- [ ] **Тексты на русском:** все пользовательские строки
+- [x] **Разделение ответственности:** ✅ компоненты делегируют в stores/api; мелкое замечание: `BrokerSettingsPage.tsx:29` и `StatusFooter.tsx:33` вызывают API напрямую, минуя store
+- [x] **Состояние централизовано:** ✅ Zustand stores (auth, marketData, settings, ui)
+- [x] **Формы:** ✅ клиентская валидация + обработка серверных ошибок (включая 423 lockout)
+- [ ] **Cleanup:** ⚠️ chart.remove() ✅; ResizeObserver ✅; но `ChartPage.tsx:31` — eslint-disable для exhaustive-deps; `Header.tsx` — нет cleanup для debounce timeout
+- [x] **Соответствие ui_spec:** ✅ (UI-спецификация в Sprint_2/ui_spec_s2.md)
+- [x] **Тексты на русском:** ✅ 100% русский текст в интерфейсе
 
 ## 8. Безопасность
 
 **Аутентификация и авторизация:**
-- [ ] Защищённые endpoints проверяют JWT
-- [ ] Публичные endpoints (health, market-status) — явно без auth
-- [ ] JWT: access (30 мин) + refresh (7 дней), Argon2id для паролей
-- [ ] Брутфорс-защита: блокировка после 5 попыток
+- [x] Защищённые endpoints проверяют JWT ✅ через `Depends(get_current_user)`
+- [x] Публичные endpoints (health, market-status, calendar, setup-status) — явно без auth ✅
+- [x] JWT: access (30 мин) + refresh (7 дней), Argon2id для паролей ✅ (уникальный JTI для отзыва)
+- [x] Брутфорс-защита: блокировка после 5 попыток на 15 мин ✅
 
 **Шифрование:**
-- [ ] API-ключи брокера зашифрованы AES-256-GCM в БД
-- [ ] API-ключи **не возвращаются** в API-ответах
-- [ ] PasswordInput на frontend для полей с ключами
+- [ ] API-ключи брокера зашифрованы AES-256-GCM в БД — ⛔ КРИТИЧНО: `broker/service.py:36-40` сохраняет ключи БЕЗ шифрования (комментарий «Временно»). CryptoService и crypto_helpers.py готовы, но НЕ интегрированы
+- [x] API-ключи **не возвращаются** в API-ответах ✅ (schemas.py явно исключает)
+- [x] PasswordInput на frontend для полей с ключами ✅ (Mantine PasswordInput)
 
 **Секреты:**
-- [ ] `.env` в `.gitignore`, никаких ключей в репозитории
-- [ ] Dev-ключи вызывают предупреждения в production
+- [x] `.env` в `.gitignore` ✅, `.env.example` с плейсхолдерами
+- [x] Dev-ключи вызывают предупреждения в production ✅ (`config.py:22-35` — model_validator)
 
 ## 9. Качество кода и инфраструктура
 
-- [ ] **Стиль кода:** ruff (Python), eslint (TypeScript) — единообразие
-- [ ] **Типизация:** TypeScript strict mode; Python type hints
-- [ ] **Тесты:** unit-тесты на ключевую логику и API; запускаются локально
-- [ ] **Покрытие:** какие области не покрыты тестами
-- [ ] **Зависимости:** нет неиспользуемых пакетов, версии зафиксированы
-- [ ] **Скрипты:** `install.sh`, `start.sh` работают
-- [ ] **CI/CD:** GitHub Actions pipeline проходит
+- [x] **Стиль кода:** ✅ ruff (py311, line 100) + eslint v9 (flat config) — оба в CI
+- [x] **Типизация:** ✅ TypeScript `strict: true` + 4 доп. проверки; Python type hints + mypy ≥1.9 в CI
+- [x] **Тесты:** ✅ 21 тест-файл backend (pytest-asyncio), 11 тест-файлов frontend (vitest)
+- [ ] **Покрытие:** ⚠️ Не покрыты тестами: strategy, backtest, trading, scheduler, sandbox, AI, notification, circuit_breaker, corporate_actions; frontend: CandlestickChart, API layer, Header search. Coverage не настроен в CI
+- [ ] **Зависимости:** ⚠️ Backend: `>=` без верхних границ; `httpx>=0.27` дублируется; `tinkoff-investments` не в pyproject.toml (ручная установка)
+- [x] **Скрипты:** ✅ `install.sh` (проверки Python 3.11+, Node 18+, pnpm), `start.sh` (оба сервиса + trap SIGINT)
+- [x] **CI/CD:** ✅ GitHub Actions: lint → typecheck → tests для обоих стеков
 
 ## 10. Производительность
 
-- [ ] **Кеширование данных:** OHLCV-свечи кешируются, нет повторных запросов
-- [ ] **Размер ответов API:** MAX_REQUEST_SPAN ограничивает объём
-- [ ] **Frontend chart:** chart.remove() на unmount, ResizeObserver с проверкой
-- [ ] **Debounce на поиске:** autocomplete с debounce 300ms
+- [x] **Кеширование данных:** ✅ DB-кеш с gap detection, fallback broker→ISS, source tracking, conflict resolution
+- [x] **Размер ответов API:** ✅ `MAX_REQUEST_SPAN = 365 дней` с logger.warning при превышении
+- [x] **Frontend chart:** ✅ chart.remove(), resizeObserver.disconnect(), unsubscribeCrosshairMove(), null refs
+- [x] **Debounce на поиске:** ✅ 300ms debounce, min 2 символа, кеш результатов
 
 ---
 
@@ -112,13 +112,15 @@ grep -r "SECRET_KEY\|ENCRYPTION_KEY\|api_key" --include="*.py" app/ | grep -v "c
 
 | Раздел | Статус | Замечания |
 |--------|--------|-----------|
-| 1. Архитектура | ⬜ | |
-| 2. API-слой | ⬜ | |
-| 3. Бизнес-логика | ⬜ | |
-| 4. База данных | ⬜ | |
-| 5. Ошибки и логи | ⬜ | |
-| 6. Финансовые данные | ⬜ | |
-| 7. Frontend | ⬜ | |
-| 8. Безопасность | ⬜ | |
-| 9. Качество кода | ⬜ | |
-| 10. Производительность | ⬜ | |
+| 1. Архитектура | ✅ | 1 замечание: хардкод CORS + API URL |
+| 2. API-слой | ⚠️ | auth/router.py: HTTPException вместо кастомных; нет AccountLockedError |
+| 3. Бизнес-логика | ⚠️ | market_data/service.py: 5 методов > 50 строк |
+| 4. База данных | ✅ | Без замечаний |
+| 5. Ошибки и логи | ⚠️ | Нет generic Exception handler — возможна утечка stack trace |
+| 6. Финансовые данные | ⛔ | CandleResponse: float вместо Decimal; timezone inconsistency |
+| 7. Frontend | ⚠️ | 2 прямых вызова API минуя store; eslint-disable в ChartPage |
+| 8. Безопасность | ⛔ | API-ключи брокера хранятся БЕЗ шифрования (crypto готов, не интегрирован) |
+| 9. Качество кода | ⚠️ | Coverage не настроен; зависимости без верхних границ; модули S3-S8 не покрыты |
+| 10. Производительность | ✅ | Без замечаний |
+
+**Легенда:** ✅ OK · ⚠️ Есть замечания · ⛔ Критично

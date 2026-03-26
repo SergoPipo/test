@@ -1508,6 +1508,7 @@ class BaseBrokerAdapter(ABC):
 - Автоматическое переподключение: exponential backoff 1s -> 2s -> 4s -> ... -> 60s, до 10 попыток.
 - Token bucket state сохраняется в файл `data/.rate_limit_state` при graceful shutdown и восстанавливается при старте — для предотвращения превышения лимитов брокера при быстром рестарте.
 - Маппер `TInvestMapper` — конвертирует Protobuf-объекты в доменные модели.
+- **Sandbox vs Production (per-account):** Поле `BrokerAccount.is_sandbox` определяет, к какому эндпоинту подключается адаптер (`sandbox-invest-public-api.tbank.ru` или `invest-public-api.tbank.ru`). Тип токена определяется автоматически при подключении через пробный вызов `get_accounts()` / `get_sandbox_accounts()`. Sandbox-аккаунты доступны только при `DEBUG=true`.
 
 **5.5.3 MOEX ISS fallback:**
 
@@ -1543,6 +1544,30 @@ class BrokerFactory:
 **Алгоритм загрузки с учётом rate limits:**
 
 Для T-Invest: данные загружаются порциями не более 1 года за запрос (для дневного ТФ). Для минутного ТФ — порции по 1 день. Между запросами — пауза, рассчитанная по token bucket.
+
+**Алгоритм выбора источника рыночных данных:**
+
+```
+Приоритет:
+1. Production-аккаунт T-Invest (is_sandbox=false, is_active=true)
+   → MarketDataService, 600 req/min, точные данные
+2. MOEX ISS (бесплатный публичный API, без токена)
+   → Fallback, менее точные данные
+
+Sandbox-аккаунт НИКОГДА не используется для получения рыночных данных:
+- MarketDataService недоступен через sandbox-эндпоинт T-Invest
+- Sandbox-эндпоинт содержит только SandboxService (эмуляция торговли)
+
+При конфликте в ohlcv_cache:
+- Данные T-Invest перезаписывают данные MOEX ISS (более точные)
+- Данные MOEX ISS не перезаписывают данные T-Invest (ON CONFLICT DO NOTHING)
+```
+
+**Sandbox T-Invest — режим разработки:**
+
+Sandbox-аккаунты доступны только при `DEBUG=true`. Используются для тестирования интеграции с API T-Invest (отправка ордеров в sandbox-среду). Обычному пользователю в production sandbox-токен добавить нельзя — система автоматически определяет тип токена и отклоняет sandbox в non-DEBUG режиме.
+
+Подробная документация по T-Invest API: `tinvest_api_overview.md`, `tinvest_api_services.md`, `tinvest_api_sandbox.md`.
 
 **Реал-тайм данные:**
 
