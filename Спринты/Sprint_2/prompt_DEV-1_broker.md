@@ -289,8 +289,21 @@ router = APIRouter(prefix="/api/v1/broker-accounts", tags=["broker"])
 Добавь в `[project] dependencies`:
 ```
 "grpcio>=1.60",
-"tinkoff-investments>=0.2.0",
+"protobuf>=4.25,<5",
 ```
+
+Пакет `tinkoff-investments` на карантине в PyPI. Установи из GitHub:
+```bash
+pip install "git+https://github.com/RussianInvestments/invest-python.git" --no-deps
+```
+
+Также добавь в pyproject.toml comment для документации:
+```toml
+# tinkoff-investments: install from GitHub (PyPI quarantined)
+# pip install "git+https://github.com/RussianInvestments/invest-python.git" --no-deps
+```
+
+Зависимости tinkoff-investments (grpcio, protobuf) уже включены в основные dependencies выше.
 
 ## 8. Config
 

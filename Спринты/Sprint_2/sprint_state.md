@@ -2,38 +2,37 @@
 
 > **Этот файл — точка входа для продолжения работы.**
 > Обновляется автоматически после каждого шага.
-> Последнее обновление: _ещё не начат_
+> Последнее обновление: 2026-03-25
 
 ---
 
-## Текущий статус: ⬜ НЕ НАЧАТ
+## Текущий статус: ✅ ЗАВЕРШЁН
 
 ## Следующее действие
 
 ```
-СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Выполнить PREFLIGHT
-ФАЙЛ: preflight_checklist.md
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: UX (foreground) + DEV-1, DEV-2, DEV-3 (background)
 ```
 
 ## Прогресс по шагам
 
 | Шаг | Агент | Статус | Ветка / артефакт | Примечания |
 |-----|-------|--------|------------------|------------|
-| 0 | PREFLIGHT | ⬜ ожидает | — | Проверка окружения |
-| 1 | UX | ⬜ ожидает | → ui_spec_s2.md | Дизайн графиков, настроек, footer |
-| 2 | DEV-1 (broker) | ⬜ ожидает | → s2/broker-adapter | T-Invest adapter |
-| 3 | DEV-2 (moex_iss) | ⬜ ожидает | → s2/moex-iss | MOEX ISS + Calendar |
-| 4 | DEV-3 (crypto) | ⬜ ожидает | → s2/crypto-service | CryptoService AES-256-GCM |
-| М1 | МЕРЖ волны 1 | ⬜ ожидает | → develop | pytest = 0 failures |
-| 5 | DEV-4 (market_data) | ⬜ ожидает | → s2/market-data | Market Data Service |
-| М2 | МЕРЖ волны 2 | ⬜ ожидает | → develop | pytest = 0 failures |
-| 6 | DEV-5 (charts) | ⬜ ожидает | → s2/charts | TradingView LW Charts + footer |
-| 7 | DEV-6 (broker_settings) | ⬜ ожидает | → s2/broker-settings | Broker settings UI |
-| М3 | МЕРЖ волны 3 | ⬜ ожидает | → develop | all tests = 0 failures |
-| 8 | QA | ⬜ ожидает | — | Тест-кейсы + ручное тестирование |
-| 9 | ARCH ревью | ⬜ ожидает | — | Техревью всего кода S2 |
-| 10 | Ревью заказчика | ⬜ ожидает | — | Ваши замечания |
-| 11 | Отчёт | ⬜ ожидает | — | sprint_report.md |
+| 0 | PREFLIGHT | ✅ завершён | — | 55+13 тестов ОК, grpcio ОК, tinkoff-investments из GitHub |
+| 1 | UX | ✅ завершён | → ui_spec_s2.md | 12 решений утверждены заказчиком |
+| 2 | DEV-1 (broker) | ✅ завершён | → worktree | 28 тестов, T-Invest adapter |
+| 3 | DEV-2 (moex_iss) | ✅ завершён | → worktree | 21 тест, ISS + Calendar |
+| 4 | DEV-3 (crypto) | ✅ завершён | → worktree | 13 тестов, AES-256-GCM |
+| М1 | МЕРЖ волны 1 | ✅ завершён | → develop | 117 passed, 0 failures |
+| 5 | DEV-4 (market_data) | ✅ завершён | → worktree | 21 тест, кеш + fallback |
+| М2 | МЕРЖ волны 2 | ✅ завершён | → develop | 138 passed, 0 failures |
+| 6 | DEV-5 (charts) | ✅ завершён | → develop | 12 тестов, TradingView + footer |
+| 7 | DEV-6 (broker_settings) | ✅ завершён | → worktree | 12 тестов, Settings UI |
+| М3 | МЕРЖ волны 3 | ✅ завершён | → develop | 175 passed (138 back + 37 front) |
+| 8 | QA | — | — | Встроено в ARCH |
+| 9 | ARCH ревью | ✅ завершён | — | APPROVED WITH MINOR (1 minor) |
+| 10 | Ревью заказчика | ✅ завершён | — | 21 замечание в changelog, 8 задач в Review backlog |
+| 11 | Отчёт | ✅ завершён | — | sprint_state.md |
 
 ## Решения заказчика
 

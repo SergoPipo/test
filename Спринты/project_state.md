@@ -14,7 +14,7 @@
 | Спринт | Название | Статус | Ключевой результат | Отчёт |
 |--------|----------|--------|-------------------|-------|
 | S1 | Фундамент | ✅ завершён | Auth, дашборд, CI, 68 тестов | Sprint_1/sprint_report.md |
-| S2 | Данные и графики | 🔄 подготовлен | Брокер, графики, шифрование | Sprint_2/sprint_report.md |
+| S2 | Данные и графики | ✅ завершён | Брокер, графики, шифрование, 175 тестов | Sprint_2/sprint_report.md |
 | S3 | Стратегии + редактор | ⬜ не начат | Blockly, Sandbox, CSRF | Sprint_3/sprint_report.md |
 | S4 | AI + бэктестинг | ⬜ не начат | AI chat, Backtest Engine | Sprint_4/sprint_report.md |
 | S5 | Торговля | ⬜ не начат | Paper Trading, Circuit Breaker | Sprint_5/sprint_report.md |
@@ -27,9 +27,9 @@
 ## Что делать дальше
 
 ```
-СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Запустить Спринт 2 (PREFLIGHT → UX + DEV волна 1)
-ФАЙЛ СОСТОЯНИЯ: Sprint_2/sprint_state.md
-ПОРЯДОК РАБОТЫ: Sprint_2/execution_order.md
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Sprint_2_Review (ревью кода + бэклог доработок)
+ФАЙЛ СОСТОЯНИЯ: Sprint_2_Review/backlog.md
+ПОРЯДОК РАБОТЫ: Sprint_2_Review/README.md
 ```
 
 ## Ключевые решения (кросс-спринтовые)
@@ -58,6 +58,15 @@ _Задачи, не выполненные в спринте и перенесё
 | # | Из спринта | Задача | Перенесена в | Причина |
 |---|------------|--------|-------------|---------|
 | — | — | — | — | — |
+
+## Промежуточные ревью
+
+| Ревью | После спринтов | Milestone | Статус | Бэклог |
+|-------|---------------|-----------|--------|--------|
+| Sprint_2_Review | S1 + S2 | M1: Каркас | 🔄 в процессе | Sprint_2_Review/backlog.md |
+| Sprint_4_Review | S3 + S4 | M2: Бэктест | ⬜ не начат | Sprint_4_Review/backlog.md |
+| Sprint_6_Review | S5 + S6 | M3: Торговля | ⬜ не начат | Sprint_6_Review/backlog.md |
+| Sprint_8_Review | S7 + S8 | M4: Production | ⬜ не начат | Sprint_8_Review/backlog.md |
 
 ## Milestones
 
