@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-03-25
+> Последнее обновление: 2026-03-31
 
 ---
 
-## Текущий спринт: S3 (Стратегии + редактор)
+## Текущий спринт: S4 (AI + бэктестинг)
 
 ## Прогресс по спринтам
 
@@ -15,8 +15,8 @@
 |--------|----------|--------|-------------------|-------|
 | S1 | Фундамент | ✅ завершён | Auth, дашборд, CI, 68 тестов | Sprint_1/sprint_report.md |
 | S2 | Данные и графики | ✅ завершён | Брокер, графики, шифрование, 175 тестов | Sprint_2/sprint_report.md |
-| S3 | Стратегии + редактор | 🔄 в процессе | Blockly, Sandbox, CSRF | Sprint_3/sprint_report.md |
-| S4 | AI + бэктестинг | ⬜ не начат | AI chat, Backtest Engine | Sprint_4/sprint_report.md |
+| S3 | Стратегии + редактор | ✅ завершён | Blockly, Sandbox, CSRF, 320 тестов | Sprint_3/sprint_report.md |
+| S4 | AI + бэктестинг | 🔄 в процессе | AI chat, Backtest Engine | Sprint_4/sprint_report.md |
 | S5 | Торговля | ⬜ не начат | Paper Trading, Circuit Breaker | Sprint_5/sprint_report.md |
 | S6 | Уведомления | ⬜ не начат | Telegram, Email, Recovery | Sprint_6/sprint_report.md |
 | S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
@@ -27,9 +27,9 @@
 ## Что делать дальше
 
 ```
-СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Sprint_3 (Стратегии + Blockly-редактор)
-ФАЙЛ СОСТОЯНИЯ: Sprint_3/sprint_state.md
-ПОРЯДОК РАБОТЫ: Sprint_3/execution_order.md
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Sprint_4 — Preflight Check
+ФАЙЛ СОСТОЯНИЯ: Sprint_4/sprint_state.md
+ПОРЯДОК РАБОТЫ: Sprint_4/execution_order.md
 ```
 
 ## Ключевые решения (кросс-спринтовые)
