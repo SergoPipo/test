@@ -7,6 +7,61 @@
 
 ---
 
+## 2026-04-07 — Sprint 4 Review: исправление Critical #1-7
+
+### #1 chat_router.py: undefined `response_text` (Critical)
+- `response_text = result.get("response", "")` перемещено выше первого использования (строка 203 → 196)
+- Файл: `backend/app/ai/chat_router.py`
+
+### #2 backtest/engine.py: hardened exec namespace (Critical)
+- Пустой namespace заменён на hardened: убраны `eval`, `exec`, `compile`, `__import__`, `open`, `globals`, `locals`, `getattr`, `setattr`, `delattr`
+- Оставлены только безопасные builtins + `bt`, `math`, `Decimal`
+- Файл: `backend/app/backtest/engine.py`
+
+### #3 sandbox/executor.py: async exec (Critical)
+- `exec()` обёрнут в `loop.run_in_executor()` + `asyncio.wait_for()` — не блокирует event loop
+- Файл: `backend/app/sandbox/executor.py`
+
+### #4 rate_limit.py: thread-safe (Critical)
+- Добавлен `threading.Lock()`, sliding window операции обёрнуты в `with self._lock:`
+- Файл: `backend/app/middleware/rate_limit.py`
+
+### #5 StrategyTesterPanel.tsx: event listener cleanup (Critical)
+- mousedown/mouseup обработчики сохранены как именованные функции и удаляются в cleanup
+- Файл: `frontend/src/components/backtest/StrategyTesterPanel.tsx`
+
+### #6 backtestStore.ts: per-backtest WebSocket (Critical)
+- Глобальные `ws`/`pollIntervalId` → `Map<backtestId, state>`, параллельные бэктесты не конфликтуют
+- Файл: `frontend/src/stores/backtestStore.ts`
+
+### #7 aiChatStore.ts: per-strategy AbortController (Critical)
+- Глобальный `abortController` → `Map<strategyId, AbortController>`, race condition `isStreaming` исправлен
+- Файл: `frontend/src/stores/aiChatStore.ts`
+
+---
+
+## 2026-04-07 — Sprint 4 Review: исправление High #8-12
+
+### #8 CORS_ORIGINS: расширены порты ✅
+- Добавлены порты 5174-5177 в `.env` → `CORS_ORIGINS=http://localhost:5173,...,http://localhost:5177`
+
+### #9 aiChatStore: isStreaming race condition ✅
+- Исправлено в рамках #7 — `isStreaming: true` устанавливается до async операций
+
+### #10 aiStreamClient: SSE buffer remainder ✅
+- Добавлена обработка оставшегося буфера после завершения потока (до `onDone`)
+- Файл: `frontend/src/services/aiStreamClient.ts`
+
+### #11 csrf.py: улучшен комментарий ✅
+- CSRF fail-open для API-клиентов оставлен (backward compatibility), комментарий уточнён
+- Файл: `backend/app/middleware/csrf.py`
+
+### #12 ws.py: user_id=0 → None ✅
+- `payload.get("sub", 0)` заменён на проверку `if not sub: return None`
+- Файл: `backend/app/backtest/ws.py`
+
+---
+
 ## 2026-04-01 — Ревью заказчика: исправление замечаний по секциям 1 и 2
 
 ### Критический баг: несовпадение имён полей frontend ↔ backend (2.4)
