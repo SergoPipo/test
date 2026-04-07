@@ -1,0 +1,74 @@
+# Sprint 5: Состояние
+
+> **Статус:** 🔄 планирование
+> **Ветка:** s5/trading
+> **Начало:** 2026-04-07
+> **Milestone:** M3 — Paper Trading
+
+---
+
+## Прогресс задач
+
+### Фаза 0: Подготовка
+
+| # | Задача | Статус |
+|---|--------|--------|
+| 0.0 | Предполётная проверка (ПО, зависимости, модули) | ✅ |
+| 0.1 | Отложенные задачи S4 Review (#15, #16, #23, #24, #28) | ✅ |
+
+### Фаза 1: UX + Backend (Волна 1 — параллельно)
+
+| # | Задача | Агент | Статус |
+|---|--------|-------|--------|
+| 1.0 | UX: дизайн Trading Panel, Account, Favorites, RT | UX | ✅ |
+| 1.1 | Trading Engine (session, signal, order, position) | DEV-1 | ✅ |
+| 1.2 | Paper Trading Engine (виртуальный портфель, T+1) | DEV-1 | ✅ |
+| 1.4 | Broker Adapter (orders, streaming) | DEV-1 | ✅ |
+| 1.5 | Rate limiter (token bucket + persist) | DEV-1 | ✅ |
+| 1.6 | Bond Service + Corporate Actions | DEV-3 | ✅ |
+| 1.7 | Налоговый экспорт (FIFO, 3-НДФЛ) | DEV-3 | ✅ |
+
+### Фаза 1.5: Circuit Breaker (Волна 2)
+
+| # | Задача | Агент | Статус |
+|---|--------|-------|--------|
+| 1.3 | Circuit Breaker (9 проверок, asyncio.Lock) | DEV-2 | ✅ |
+
+### Фаза 2: Frontend (Волна 3)
+
+| # | Задача | Агент | Статус |
+|---|--------|-------|--------|
+| 2.2 | Trading Panel (карточки, форма, P&L) | DEV-4 | ✅ |
+| 2.3 | Real-time графики через WebSocket | DEV-4 | ✅ |
+| 2.4 | Экран «Счёт» | DEV-5 | ✅ |
+| 2.5 | Панель «Избранные инструменты» ★ | DEV-5 | ✅ |
+
+### Фаза 3: Тестирование (Волна 4)
+
+| # | Задача | Агент | Статус |
+|---|--------|-------|--------|
+| 3.1 | E2E-тесты S5 | ARCH | ✅ |
+| 3.2 | Архитектурное ревью S5 | ARCH | ✅ |
+
+---
+
+**Легенда:** ⬜ не начат · 🔄 в процессе · ✅ завершён
+
+## Prompt-файлы
+
+| Файл | Агент | Волна | Статус |
+|------|-------|-------|--------|
+| preflight_checklist.md | Оркестратор | 0 | ✅ создан |
+| prompt_UX.md | UX | 1 | ✅ создан |
+| prompt_DEV-1.md | BACK1 (Trading Engine + Broker) | 1 | ✅ создан |
+| prompt_DEV-2.md | SEC (Circuit Breaker) | 2 | ✅ создан |
+| prompt_DEV-3.md | BACK2 (Bond + Tax) | 1 | ✅ создан |
+| prompt_DEV-4.md | FRONT1 (Trading Panel + RT) | 3 | ✅ создан |
+| prompt_DEV-5.md | FRONT2 (Account + Favorites) | 3 | ✅ создан |
+| prompt_ARCH_review.md | ARCH + QA | 4 | ✅ создан |
+
+## Следующее действие
+
+```
+ШАГ: Sprint 5 завершён — все задачи выполнены. Далее: Sprint 6 (Уведомления)
+```
