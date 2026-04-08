@@ -7,7 +7,7 @@
 
 ---
 
-## Текущий спринт: S5 (Торговля)
+## Текущий спринт: S5 завершён → следующий S6 (Уведомления)
 
 ## Прогресс по спринтам
 
@@ -17,7 +17,7 @@
 | S2 | Данные и графики | ✅ завершён | Брокер, графики, шифрование, 175 тестов | Sprint_2/sprint_report.md |
 | S3 | Стратегии + редактор | ✅ завершён | Blockly, Sandbox, CSRF, 320 тестов | Sprint_3/sprint_report.md |
 | S4 | AI + бэктестинг | ✅ завершён | AI chat, Backtest Engine, 577 тестов | Sprint_4/sprint_report.md |
-| S5 | Торговля | ⬜ не начат | Paper Trading, Circuit Breaker | Sprint_5/sprint_report.md |
+| S5 | Торговля | ✅ завершён | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E | Sprint_5/arch_review_s5.md |
 | S6 | Уведомления | ⬜ не начат | Telegram, Email, Recovery | Sprint_6/sprint_report.md |
 | S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
@@ -27,9 +27,9 @@
 ## Что делать дальше
 
 ```
-СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Sprint 5 — планирование и запуск
-ФАЙЛ СОСТОЯНИЯ: Sprint_5/sprint_state.md
-ПОРЯДОК РАБОТЫ: Sprint_5/execution_order.md
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Sprint 6 — Уведомления (Telegram, Email, In-App, Recovery)
+ПРЕДВАРИТЕЛЬНО: Sprint_6_Review после S5+S6 (обновить ФТ/ТЗ)
+ФАЙЛ СОСТОЯНИЯ: Sprint_5/sprint_state.md (завершён)
 ```
 
 ## Ключевые решения (кросс-спринтовые)
@@ -51,6 +51,8 @@ _Накапливается по мере продвижения, берётся
 | # | Спринт | Описание | Приоритет | Когда исправить |
 |---|--------|----------|-----------|-----------------|
 | 1 | S1 | Footer со статическими данными | Low | S2 (DEV-5) |
+| 2 | S4 | 30+ E2E тестов S4 падают (AI Chat, Backtest, Blockly) | Medium | S6 или раньше |
+| 3 | S5 | LOW-2: DateRangePicker компонент для Account (frontend) | Low | S6 |
 
 ## Перенесённые задачи
 
@@ -75,7 +77,7 @@ _Задачи, не выполненные в спринте и перенесё
 |-----------|--------|--------|----------|
 | M1: Каркас | S1 | ✅ | Auth, дашборд, CI, 68 тестов |
 | M2: Бэктест | S4 | ✅ | Стратегия → бэктест → результаты. Ревью: 21/28 задач исправлено, 7 отложено |
-| M3: Paper Trading | S5 | ⬜ | Paper + Circuit Breaker + НКД |
+| M3: Paper Trading | S5 | ✅ | Paper Trading + Circuit Breaker + Bond НКД + Tax FIFO + 23 E2E. ARCH: PASS |
 | M4: Production-ready | S8 | ⬜ | Coverage 80%, security, performance |
 
 ---
