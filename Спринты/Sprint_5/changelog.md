@@ -4,6 +4,135 @@
 
 ---
 
+## 2026-04-08 — Замечания по ручному тестированию
+
+**Замечание 1: Скроллинг на странице торговли**
+- `components/layout/AppShell.tsx`: `overflow: 'hidden'` → `overflowY: 'auto'` в AppShell.Main
+- Причина: контент за пределами viewport обрезался, список сессий не прокручивался
+
+**Замечание 2: Несоответствие mode/status между списком и деталями сессии**
+- `backend/app/trading/schemas.py`: добавлены поля `strategy_name` и `current_pnl` в `SessionResponse`
+- `backend/app/trading/service.py`: добавлены методы `_get_strategy_name()` и `_get_session_pnl()`, заполняют новые поля в `get_sessions()` и `get_session()`
+- `frontend/stores/tradingStore.ts`: `fetchSession` теперь извлекает `raw.session` из вложенного `SessionDetailResponse`
+- Причина: API деталей возвращал `{ session: {...} }`, а store записывал весь объект как `activeSession` — поля mode/status были undefined
+
+**Замечание 3: Кнопка «Назад» на странице деталей сессии**
+- `components/trading/SessionDashboard.tsx`: добавлен `IconArrowLeft` с навигацией на `/trading`
+- Добавлены импорты `useNavigate`, `IconArrowLeft`
+
+**Замечание 4: Тестовые сессии**
+- Проверено: 23 сессии в БД, все от E2E тестов (TEST*, LNC* — мусорные тикеры; SBER/GAZP/LKOH — тестовые без реальных данных)
+- Стратегия «Тестовая» (id=1) — пустой код, все сессии привязаны к ней
+- Решение: не баг, следствие E2E тестирования. Очистка по запросу
+
+**Замечание 6: Красные чёрточки P&L и кнопка удаления**
+- `components/trading/SessionCard.tsx`: P&L=0 и null теперь отображаются серым (dimmed), а не красным
+- `components/trading/SessionDashboard.tsx`: аналогичный фикс цвета P&L
+- `components/trading/SessionCard.tsx`: добавлена кнопка удаления (IconTrash), активна только для остановленных сессий
+- `backend/app/trading/router.py`: новый endpoint `DELETE /sessions/{id}` (204, только stopped)
+- `backend/app/trading/service.py`: метод `delete_session()` — удаляет сессию + связанные LiveTrade, DailyStat, PaperPortfolio
+- `frontend/api/tradingApi.ts`: добавлен `deleteSession(id)`
+- `frontend/stores/tradingStore.ts`: добавлен `deleteSession(id)` — удаляет из списка и сбрасывает activeSession
+
+**Замечание 9: Маркеры сделок на графике**
+- `pages/ChartPage.tsx`: подключён `useTradingStore`, находит активную/paused сессию для текущего тикера
+- Передаёт `sessionId={activeSessionId}` в `CandlestickChart`
+- Компонент уже поддерживает маркеры (▲ Buy / ▼ Sell) через WebSocket `trades:{sessionId}`
+- Ранее не работало из-за отсутствия передачи sessionId
+
+**Замечание 8+: Стриминг свечей в реальном времени (РЕАЛИЗОВАНО)**
+- `backend/app/market_data/stream_manager.py`: новый `MarketDataStreamManager` — подписка на T-Invest gRPC стрим, публикация через Event Bus → WebSocket
+- `backend/app/market_data/router.py`: новый endpoint `POST /candles/subscribe` — возвращает WebSocket channel для подписки
+- `frontend/api/marketDataApi.ts`: добавлен `subscribeCandleStream(ticker, timeframe)`
+- `frontend/pages/ChartPage.tsx`: при загрузке графика подписывается на стрим, передаёт `wsChannel` в CandlestickChart
+- CandlestickChart уже поддерживал wsChannel и обновление свечей через `candle.update` — теперь подключён
+
+**Замечание 19: Убрано поле «Макс. одновременных позиций» из модалки запуска сессии**
+- `components/trading/LaunchSessionModal.tsx`: удалён `NumberInput` для `maxPositions`
+- Причина: Blockly-стратегии не поддерживают множественные позиции (обсуждено ранее)
+- Значение по умолчанию изменено с 3 на 1, передаётся в API скрыто
+
+**Замечание 18: Номер сессии на странице деталей**
+- `components/trading/SessionDashboard.tsx`: добавлен `#{session.id}` между тикером и названием стратегии
+- Также `strategy_name` показывает «(удалённая стратегия)» если пусто
+
+**Замечание 17: Выравнивание карточек сессий в списке + стратегия всегда видна**
+- `components/trading/SessionCard.tsx`: карточки теперь фиксированной минимальной высоты (180px)
+  - `Stack justify="space-between"` — кнопки всегда внизу карточки
+  - `strategy_name` отображается всегда: если стратегия удалена → «(удалённая стратегия)»
+  - `lineClamp={1}` — длинные названия обрезаются
+- `components/trading/SessionDashboard.tsx`: откачены изменения (кнопки остались раздельные для active/stopped)
+- `backend/app/trading/models.py`: добавлено поле `strategy_name` в модель TradingSession (VARCHAR 200)
+- `backend/app/trading/service.py`: `_get_strategy_name()` возвращает «(удалённая стратегия)» если JOIN не нашёл запись
+- БД: колонка добавлена, существующие 8 сессий заполнены через UPDATE
+
+**E2E тест: Актуальность данных на всех таймфреймах**
+- `frontend/e2e/s5-chart-timeframes.spec.ts`: 5 тестов (D, 4h, 1h, 15m, 5m)
+- Каждый тест: переключает ТФ → запрашивает API → проверяет что последняя свеча не старше порога
+- Пороги: D=24ч, 4h=4ч, 1h=1ч, 15m=30мин, 5m=12мин
+
+**Замечание 16: Текущая формирующаяся свеча через агрегацию 1m**
+- `backend/app/market_data/service.py`: новый метод `_build_current_candle()`
+  - T-Invest GetCandles возвращает только завершённые свечи
+  - Для текущей незакрытой свечи: запрашиваем 1m свечи за текущий период и агрегируем OHLCV
+  - Работает для 5m, 15m, 1h, 4h, D, W
+  - Результат добавляется/обновляется в конце массива свечей
+- `components/charts/CandlestickChart.tsx`: `parseUtcTimestamp()` — таймштампы без Z парсятся как UTC
+
+**Замечание 15: Номер сессии на карточке в списке**
+- `components/trading/SessionCard.tsx`: добавлен `#{session.id}` рядом с тикером
+
+**Замечание 14: Стриминг не работал (500 ошибка)**
+- `backend/app/market_data/router.py`: добавлен `from sqlalchemy import select` — отсутствовал, вызывал NameError при подписке на стрим
+- `backend/app/market_data/router.py`: выбор аккаунта `ORDER BY is_sandbox ASC` — production первым
+- После исправления: `POST /candles/subscribe?ticker=SBER&timeframe=1h` → `{"channel": "market:SBER:1h", "source": "tinvest"}`
+
+**Замечание 13: Баннер сессии в строку таймфреймов, свежие данные на всех ТФ, избранное**
+- `pages/ChartPage.tsx`: баннер сессии перенесён в строку таймфреймов (справа, компактно)
+- `backend/app/market_data/service.py`: tail_tolerance теперь точно соответствует таймфрейму:
+  D=6ч, 4h=4ч, 1h=1ч, 5m/15m=duration×2 — данные всегда актуальны при смене ТФ
+- `components/charts/FavoritesPanel.tsx`: убран вводящий в заблуждение процент (avg_pnl_pct=0)
+- `components/charts/CandlestickChart.tsx`: `parseUtcTimestamp()` — таймштампы без Z интерпретируются как UTC
+
+**Замечание 12: Кнопка графика внутри торговой сессии**
+- `components/trading/SessionDashboard.tsx`: добавлена кнопка графика (IconChartLine) — видна всегда, переходит на `/chart/{ticker}`
+- Кнопка «Назад» на графике использует `navigate(-1)` — вернёт обратно внутрь сессии
+
+**Замечание 10: Кнопка «Назад» на странице графика**
+- `pages/ChartPage.tsx`: добавлена кнопка ← (IconArrowLeft) с `navigate(-1)` — возвращает на предыдущую страницу (торговля, бэктесты и т.д.)
+
+**Замечание 11: Агрегация минутных свечей для старших таймфреймов**
+- `backend/app/market_data/stream_manager.py`: T-Invest gRPC поддерживает подписку только на 1m и 5m
+- Для 15m, 1h, 4h, D, W, M — подписка на 1m с агрегацией через `_AggregatingCandle`
+- Агрегатор: определяет начало периода (`_candle_period_start`), аккумулирует OHLCV минутных свечей в текущую формирующуюся свечу нужного ТФ
+
+**Замечание 8++: Исправление timezone MOEX ISS**
+- `backend/app/broker/moex_iss/parser.py`: MOEX ISS возвращает время в МСК → теперь явно конвертируется в UTC через `.astimezone(timezone.utc)`
+- Ранее: `.replace(tzinfo=MOSCOW_TZ)` — привязывал таймзону, но не конвертировал, вызывая сдвиг при сравнении с UTC-данными T-Invest
+
+**Замечание 8: График не показывает данные до текущего момента**
+- `backend/app/market_data/service.py`: разделён tolerance на два уровня:
+  - `mid_tolerance` — для промежуточных gap'ов (выходные/праздники): D=5 дней, W=14, M=45, интрадей=3 дня
+  - `tail_tolerance` — для правого края (актуальность данных): D/W/M=2 дня, интрадей=2 часа
+- Причина: единый tolerance=5 дней для D приводил к тому, что кеш с данными от 06.04 считался актуальным 08.04 и не дозапрашивал свежие свечи
+- После исправления: tail_tolerance учитывает что T-Invest и MOEX поддерживают торги в выходные для ряда инструментов
+  - M: 2 дня, W: 1 день, D: 18 часов, интрадей: duration×3 (мин. 30 мин)
+  - Промежуточные gap'ы (mid_tolerance) оставлены с запасом на выходные/праздники
+
+**Замечание 7: Удаление и перезапуск в деталях сессии**
+- `components/trading/SessionDashboard.tsx`: для остановленных сессий показываются 2 кнопки:
+  - «Запустить заново» (IconRestore) — создаёт новую сессию с теми же параметрами и переходит на неё
+  - «Удалить» (IconTrash) — удаляет сессию и возвращает к списку
+- `api/types.ts`: расширен `TradingSession` — добавлены `strategy_version_id`, `broker_account_id`, `position_sizing_mode`, `position_sizing_value`, `max_concurrent_positions`, `cooldown_seconds`
+
+**Замечание 5: Autocomplete тикера в модалке запуска сессии + мин. 1 символ**
+- `components/trading/LaunchSessionModal.tsx`: `TextInput` → `Autocomplete` с поиском через `marketDataApi.searchInstruments()`, debounce 300мс
+- `components/backtest/BacktestLaunchModal.tsx`: `query.length < 2` → `< 1`
+- `components/layout/Header.tsx`: `query.length < 2` → `< 1`
+- Поиск инструментов теперь начинается с 1 символа во всех 3 компонентах
+
+---
+
 ## 2026-04-07
 
 ### Фаза 0: Отложенные задачи S4 Review
