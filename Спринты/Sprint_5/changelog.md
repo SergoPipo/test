@@ -47,6 +47,57 @@
 - `frontend/pages/ChartPage.tsx`: при загрузке графика подписывается на стрим, передаёт `wsChannel` в CandlestickChart
 - CandlestickChart уже поддерживал wsChannel и обновление свечей через `candle.update` — теперь подключён
 
+**Замечание 24: График в московском времени**
+- `components/charts/CandlestickChart.tsx`: `parseUtcTimestamp()` сдвигает unix timestamp на +3 часа (MSK)
+- Lightweight-charts не поддерживает опцию `timeZone` — оси всегда в UTC
+- Решение: смещение таймштампов на +3 часа перед передачей в график, теперь ось X показывает МСК
+- Соответствует отображению времени в футере (Europe/Moscow)
+
+**Замечание 23: Хвост T-Invest устарел → дозапрос MOEX ISS**
+- `backend/app/market_data/service.py`: новый метод `_tail_tolerance(timeframe)` — общая логика допустимого отставания хвоста
+- `_fetch_candles()`: если T-Invest вернул данные, но последняя свеча старше `tail_tolerance` от `to_dt` — дозапрашивается MOEX ISS для хвоста и объединяется
+- Источник в логе: `tinvest+iss` при объединении
+- Причина: для некоторых тикеров (LKOH, GAZP) T-Invest GetCandles может отставать на 1-3 часа, а MOEX ISS отдаёт актуальные данные через свой публичный API
+- Это решает пропуск свечей в середине дня для часового и других ТФ
+
+**Замечание 22: Пропуск предыдущей свечи на часовом ТФ**
+- `backend/app/market_data/service.py`:
+  - `_build_current_candle()` переработан: возвращает 1–2 свечи (предыдущую + текущую)
+  - Причина: T-Invest `GetCandles` запаздывает с публикацией только что закрытых свечей на 5–30 минут
+  - Решение: всегда перестраивать последние 2 свечи из 1m агрегации, заменяя значения в кеш-результате
+  - Новые вспомогательные методы: `_period_start()`, `_aggregate_candles()`
+
+**Замечание 21: Скрытие недоступных режимов запуска сессии**
+- `components/trading/LaunchSessionModal.tsx`: SegmentedControl теперь динамически формирует список режимов
+  - `Paper` — всегда доступен
+  - `Sandbox` — только если есть активный sandbox-аккаунт T-Invest
+  - `Real` — только если есть активный production-аккаунт с `has_trading_rights=true`
+- Автопереключение на `Paper` если выбранный ранее режим стал недоступным (например, аккаунт удалён)
+
+**Замечание 20: Выбор брокерского аккаунта + режим Sandbox**
+
+Backend:
+- `backend/app/broker/tinvest/adapter.py`: новый `detect_trading_rights()` — проверяет `unary_limits` токена через `get_user_tariff()`, определяет доступ к `OrdersService.PostOrder`
+- `backend/app/broker/models.py`: добавлено поле `has_trading_rights` в `BrokerAccount`
+- `backend/app/broker/schemas.py`: поле `has_trading_rights` в `BrokerAccountResponse`
+- `backend/app/broker/service.py`: `create_account()` автоматически определяет права торговли
+- `backend/app/trading/schemas.py`: режим `sandbox` добавлен в `VALID_MODES` и `Literal`
+- `backend/app/trading/service.py`: `start_session()` валидирует при real/sandbox:
+  - Брокерский аккаунт существует и принадлежит пользователю
+  - `mode=sandbox` → `is_sandbox=True`, `mode=real` → `is_sandbox=False`
+  - `has_trading_rights=True` обязательно
+- БД: колонка `has_trading_rights` добавлена, аккаунты заполнены (Сэндбокс=True, «Только для чтения»=False)
+
+Frontend:
+- `frontend/src/api/brokerApi.ts`: `has_trading_rights` в `BrokerAccountResponse`
+- `frontend/src/components/trading/LaunchSessionModal.tsx`:
+  - SegmentedControl теперь 3 варианта: Paper / Sandbox / Real
+  - Загрузка реальных брокерских аккаунтов через `brokerApi.getAccounts()` (было: хардкод фейковых)
+  - Фильтрация: sandbox → только sandbox, real → только production с правами торговли
+  - Сброс выбранного аккаунта при смене режима
+  - Отдельные Alert для каждого режима (paper/sandbox/real)
+  - Подсказка когда нет подходящих аккаунтов
+
 **Замечание 19: Убрано поле «Макс. одновременных позиций» из модалки запуска сессии**
 - `components/trading/LaunchSessionModal.tsx`: удалён `NumberInput` для `maxPositions`
 - Причина: Blockly-стратегии не поддерживают множественные позиции (обсуждено ранее)
@@ -418,3 +469,214 @@
 - `arch_review_s5.md`: статус PASS WITH NOTES
 - 2 critical (исправлены), 5 medium (документированы), 4 low (документированы)
 - Все модули проверены: Trading Engine, Circuit Breaker, Bond Service, Tax Export, Corporate Actions, Broker Adapter, Security, Frontend UI
+
+---
+
+### Замечание 25: Раздел «Счёт» — реальные брокерские счета T-Invest (backend)
+
+**Файлы:**
+- `Develop/backend/app/broker/schemas.py` — `BrokerAccountCreate` без `name`, добавлено `selected_account_ids: list[str]`; новая модель `BrokerBalance` (account_id, account_name, is_sandbox, total, available, blocked, currency).
+- `Develop/backend/app/broker/service.py` — `BrokerService.create_account` теперь возвращает `list[BrokerAccount]`: подключается к T-Invest через `BrokerFactory.create` + `adapter.get_accounts()`, фильтрует по `selected_account_ids` (если задан), создаёт отдельную запись на каждый счёт T-Invest с реальными `account_id`/`account_type`/`name`. Идемпотентность по `(user_id, broker_type, account_id)` — дубликаты пропускаются.
+- `Develop/backend/app/broker/router.py` — `POST /api/v1/broker-accounts` возвращает `list[BrokerAccountResponse]`. `GET /api/v1/broker/accounts/balances` переписан с нуля: расшифровывает ключ, создаёт адаптер, дёргает `adapter.get_balance(acc.account_id)` для каждого активного аккаунта с заполненным `account_id`; ошибки по одному счёту НЕ валят endpoint (логируются, возвращается `total=0/available=0`). Убрано обращение к мёртвому полю `BrokerAccount.balance`.
+- `Develop/backend/tests/unit/test_broker/test_broker_service.py` — **новый файл**, 3 unit-теста: создание на все счета, фильтрация по `selected_account_ids`, идемпотентность повторного вызова.
+- `Develop/backend/tests/unit/test_broker/test_broker_router.py` — обновлены фикстуры (mock `detect_trading_rights` + `BrokerFactory.create` с двумя счетами), обновлены все существующие тесты под новый формат ответа (массив). Добавлен класс `TestBalances`: проверка реальных данных из адаптера + graceful-fallback при падении `get_balance`.
+
+**Причина:**
+- Запись `BrokerAccount` соответствовала одному API-ключу, а не реальному счёту T-Invest. Поле `account_id` никогда не заполнялось, поэтому `/positions`, `/operations` и `/balances` не могли работать по конкретному счёту. У одного ключа может быть несколько счетов (брокерский, ИИС) — нужно различать их в БД.
+- Endpoint `/balances` читал несуществующее поле `BrokerAccount.balance` через `hasattr`, который всегда False → всегда возвращал 0 RUB.
+
+**Решение:**
+- Двухфазный флоу для фронта: (1) `POST /api/v1/broker-accounts/discover` → пользователь видит список счетов и выбирает; (2) `POST /api/v1/broker-accounts` с `selected_account_ids` → backend создаёт отдельную запись на каждый выбранный счёт. Бэкап: если `selected_account_ids` пуст — создаются записи на все найденные счета.
+- Балансы в реальном времени: backend расшифровывает ключ, подключает адаптер, вызывает `get_balance(account_id)`, формирует `BrokerBalance`. Sandbox работает через `client.sandbox.get_sandbox_portfolio` (уже в адаптере).
+
+**Тесты:**
+- Новые: 3 теста `test_broker_service.py` + 2 теста `TestBalances` + 3 обновлённых теста `TestCreateAccount` → всего 8 новых/переработанных.
+- Запуск: `pytest tests/unit/test_broker/ -x -v` → **35 passed, 0 failed** (все, включая существующие тесты mapper/factory/base_adapter/rate_limiter).
+- ruff: `ruff check app/broker/schemas.py app/broker/service.py app/broker/router.py` → All checks passed.
+- mypy: в изменённых файлах ошибок нет; существующие 16 ошибок в `config.py`/`middleware/auth.py`/`broker/tinvest/adapter.py`/`broker/factory.py` не связаны с изменениями.
+
+**Перенос в Sprint 6:**
+- Реальные `/positions` и `/operations` остались заглушками (`return []` и `return {"items": [], "total": 0}`) — перенесены в Sprint 6, файл `Спринты/Sprint_6/PENDING_S6_real_account_positions_operations.md`.
+
+**Контракт API для frontend-агента:**
+- `POST /api/v1/broker-accounts`: запрос `{ broker_type, api_key, api_secret?, selected_account_ids: string[] }`, ответ `BrokerAccountResponse[]` (по одной записи на каждый выбранный T-Invest счёт).
+- `GET /api/v1/broker/accounts/balances`: ответ `BrokerBalance[]` — поля `account_id` (id записи в БД), `account_name`, `is_sandbox`, `total`, `available`, `blocked`, `currency`.
+
+---
+
+## 2026-04-09 — Замечание 25: Раздел «Счёт» — реальные брокерские счета T-Invest (frontend)
+
+**Файлы:**
+- `Develop/frontend/src/api/types.ts` — в `BrokerBalance` добавлено поле `is_sandbox: boolean` (синхронизация с новым контрактом backend).
+- `Develop/frontend/src/api/brokerApi.ts` — `BrokerAccountCreate` переработан: убрано `name`, добавлено `selected_account_ids: string[]`; `createAccount` возвращает `BrokerAccountResponse[]` (массив).
+- `Develop/frontend/src/stores/settingsStore.ts` — `addAccount` принимает новую сигнатуру, обрабатывает массив ответа (добавляет все созданные записи в стор), пересчитывает `hasBrokerConnection`/`hasSandboxAccounts`, возвращает созданные записи наружу.
+- `Develop/frontend/src/components/settings/AddBrokerForm.tsx` — удалено поле «Название аккаунта»; кнопка «Сохранить» заблокирована, пока пользователь не нажал «Обнаружить счета» и не выбрал хотя бы один счёт; при сохранении отправляется `selected_account_ids`; toast-уведомление «Подключены счета: …» (имена из T-Invest через запятую).
+- `Develop/frontend/src/pages/AccountPage.tsx` — добавлен Mantine `Select` для выбора брокерского счёта (опции: `name [Sandbox]`); балансы фильтруются на фронте по `account_id` выбранного счёта; под заголовком подсказка «Сводка по реальным брокерским счетам. Paper-сессии отображаются в разделе „Торговля“.»; пустое состояние с иконкой, текстом «Реальные брокерские счета не подключены. Добавьте API-ключ T-Invest в Настройках → Брокеры.» и кнопкой «Перейти в настройки» (navigate `/settings`); выбранный счёт вычисляется через `useMemo` (эффективный id = ручной выбор пользователя или первый доступный), без `setState` в эффекте.
+- `Develop/frontend/src/components/settings/__tests__/AddBrokerForm.test.tsx` — удалён кейс с полем «Название аккаунта», добавлен кейс «save button is disabled until accounts are discovered».
+- `Develop/frontend/src/stores/__tests__/settingsStore.test.ts` — мок `createAccount` возвращает массив (`[BrokerAccountResponse]`) с новыми полями `is_sandbox`, `has_trading_rights`.
+- `Develop/frontend/src/components/account/__tests__/BalanceCards.test.tsx` — в mock `BrokerBalance` добавлено `is_sandbox: false`.
+- `Develop/frontend/src/pages/__tests__/AccountPage.test.tsx` — добавлены поля `is_sandbox`/`has_trading_rights` в моках; добавлены кейсы «shows account selector» и «shows empty state when no broker accounts connected»; error-тест поднимает brokerAccount, чтобы рендерился error-блок, а не empty state.
+
+**Причина:**
+Ранее форма добавления брокера сохраняла произвольное имя и не использовала результат discover — в БД создавалась одна запись с `account_id = NULL`, поэтому раздел «Счёт» и `LaunchSessionModal` показывали это произвольное имя вместо реальных T-Invest счетов (брокерский/ИИС/Sandbox).
+
+**Решение:**
+Frontend полностью перешёл на новый контракт API от backend-агента (`selected_account_ids` + массив в ответе). Имена счетов берутся напрямую из T-Invest при discover, а «Счёт» теперь показывает только реальные брокерские счета с селектором по каждому аккаунту. Пустое состояние уводит пользователя в настройки для подключения ключа.
+
+**Тесты:** passed
+- `npx tsc --noEmit` — 0 ошибок.
+- `npx eslint` по затронутым файлам — 0 ошибок (исправлена ошибка `react-hooks/set-state-in-effect` через `useMemo`-вычисление эффективного `selectedAccountId` вместо `setState` в effect).
+- `npx vitest run` по затронутым файлам: **26/26 passed** (AddBrokerForm 5, AccountPage 6, settingsStore 3, accountStore 5, BalanceCards 3, BrokerAccountList 4).
+- Полный прогон `vitest run` показывает 22 фейла в несвязанных файлах (LaunchSessionModal, AIChat, AISettingsPage, BacktestProgress, flatBlocksToWorkspace, authStore, aiChatStore, FavoritesPanel, StrategyEditPage, BacktestResultsPage) — все они **pre-existing** (не зависят от затронутых файлов, специфика их моков и тест-сетапов).
+
+**Инструкция для пользователя (что увидит после совместных правок с backend-агентом):**
+1. В разделе «Настройки → Брокеры» удалить старый аккаунт T-Invest (у которого `account_id = NULL`).
+2. Нажать «+ Добавить брокера», выбрать «T-Invest», ввести API-ключ, нажать «Обнаружить счета» — увидеть список реальных счетов (брокерский, ИИС, Sandbox) с галочками и бейджем `sandbox`.
+3. Снять/поставить галочки, нажать «Сохранить» (кнопка активна только после discover). Toast: «Подключены счета: Брокерский счёт, ИИС».
+4. В разделе «Счёт» сверху появится `Select` «Брокерский счёт» с опциями `Брокерский счёт`, `ИИС`, `Sandbox Account [Sandbox]`. При переключении — карточки «Всего/Доступно/Заблокировано» показывают баланс только выбранного счёта.
+5. Если нет ни одного реального счёта — на странице «Счёт» вместо таблиц показывается пустое состояние с кнопкой «Перейти в настройки».
+
+---
+
+## 2026-04-09 — Замечание 31: Логотипы T-Invest — переход на ISIN-схему
+
+**Файлы:**
+- `Develop/backend/app/market_data/service.py` — метод `get_or_fetch_logo_name` переименован в `get_or_fetch_logo_isin`. Внутренний `_fetch_logo_name_from_tinvest` → `_fetch_isin_from_tinvest`. Логика драматически упростилась: вместо `share_by/bond_by/etf_by` теперь только `find_instrument(query=ticker)` → берётся точное совпадение по тикеру → возвращается поле `isin`. Поле `Instrument.logo_name` в БД фактически хранит ISIN (схема не меняется).
+- `Develop/backend/app/market_data/router.py` — endpoint `/instruments/{ticker}/logo` теперь формирует URL как `https://invest-brands.cdn-tinkoff.ru/<ISIN>x160.png`.
+- `Develop/frontend/e2e/s5-ticker-logos.spec.ts` — новый E2E-тест: проверяет, что при раскрытии «Тестовая» приходят ответы `/logo` с реальным URL и CDN T-Invest отдаёт 200.
+
+**Причина:**
+В замечании 30 я перешёл на `find_instrument` + getter с FIGI. Это нашло инструмент, но `share_by` НЕ возвращает поле `brand` в текущей версии Python SDK T-Invest (`tinkoff-investments`) — отдельная попытка через `get_brand_by` тоже падает с `NOT_FOUND 50010`. Поле `instrument.brand.logo_name` в SDK недоступно.
+
+**Решение:**
+Логотипы T-Invest CDN на самом деле адресуются по **ISIN**, а не по `brand.logo_name`. Я экспериментально проверил три URL для SBER (ISIN `RU0009029540`):
+- `https://invest-brands.cdn-tinkoff.ru/RU0009029540x160.png` → **200 OK**
+- `https://static.tinkoff.ru/brands/traiding/RU0009029540x160.png` → 200 OK
+- `https://static.tinkoff.ru/brands/traiding/RU0009029540x640.png` → 200 OK
+
+ISIN T-Invest возвращает прямо в `find_instrument` (в объекте `InstrumentShort.isin`), без необходимости второго запроса `share_by`. Это **проще, быстрее и работает универсально** для всех инструментов (акции, облигации, ETF — у всех есть ISIN).
+
+**Проверка:**
+Запустил `MarketDataService.get_or_fetch_logo_isin("SBER"/"GAZP"/"LKOH")` напрямую через standalone Python:
+```
+SBER: ISIN='RU0009029540' URL=https://invest-brands.cdn-tinkoff.ru/RU0009029540x160.png  → 200
+GAZP: ISIN='RU0007661625' URL=https://invest-brands.cdn-tinkoff.ru/RU0007661625x160.png  → 200
+LKOH: ISIN='RU0009024277' URL=https://invest-brands.cdn-tinkoff.ru/RU0009024277x160.png  → 200
+```
+Все три ISIN'а закешированы в `instruments.logo_name`. Backend перезапущен, Application startup complete.
+
+**Тесты:**
+- Standalone smoke test через `MarketDataService.get_or_fetch_logo_isin` — passed для SBER/GAZP/LKOH.
+- CDN HEAD-проверка — все три URL возвращают `HTTP/2 200`.
+- Playwright E2E `s5-ticker-logos.spec.ts` создан, требует `E2E_PASSWORD` env-переменной для пользователя `sergopipo`.
+
+---
+
+## 2026-04-09 — Замечание 30: Логотипы T-Invest — поиск по FIGI вместо TICKER+TQBR
+
+**Файлы:**
+- `Develop/backend/app/market_data/service.py` — переписан `_fetch_logo_name_from_tinvest`. Теперь сначала вызывается `instruments.find_instrument(query=ticker)`, который возвращает список инструментов вместе с их `figi` и `instrument_type`. Затем по `instrument_type` (`share`/`bond`/`etf`/`currency`/`futures`) выбирается соответствующий getter (`share_by`/`bond_by`/`etf_by`/`currency_by`/`future_by`), который дёргается уже с `id_type=FIGI` (а не `TICKER`).
+
+**Причина:**
+В замечании 29 я использовал `share_by(id_type=TICKER, class_code="TQBR", id="SBER")`. По логам это не находило инструмент и возвращало `tinvest_logo_not_found`. Проблема: T-Invest требует точное совпадение `class_code` для поиска по тикеру, а у разных инструментов классы разные (`TQBR` для акций, `TQOB` для облигаций и т.п.). Перебор getters по очереди тоже не работал — каждый getter падал на «неподходящем» классе.
+
+**Решение:**
+`find_instrument(query=ticker)` ищет по всем типам и классам без знания этой специфики и возвращает FIGI (уникальный идентификатор инструмента) + тип. Поиск по FIGI работает универсально, без `class_code`. Берём первое точное совпадение по тикеру (если есть) — иначе первый результат.
+
+**Тесты:**
+- Backend перезапущен, Application startup complete.
+- Проверка на пользователе: для SBER/LKOH ожидается `tinvest_logo_found` в логах.
+
+---
+
+## 2026-04-09 — Замечание 29: Реальные логотипы инструментов через T-Invest CDN
+
+**Файлы:**
+- `Develop/backend/app/market_data/models.py` — в модель `Instrument` добавлено поле `logo_name: str | None`. SQLite-колонка добавлена через `ALTER TABLE` (миграции у нас руками).
+- `Develop/backend/app/market_data/service.py` — добавлены два метода:
+  - `get_or_fetch_logo_name(ticker)` — кеш + ленивая подгрузка из T-Invest, апсертит запись `Instrument` с заполненным `logo_name`.
+  - `_fetch_logo_name_from_tinvest(ticker)` — берёт первый активный production-токен T-Invest пользователя, перебирает `client.instruments.share_by/bond_by/etf_by/currency_by/future_by` (с `id_type=TICKER`, `class_code=TQBR`), достаёт `instrument.brand.logo_name`.
+- `Develop/backend/app/market_data/router.py` — новый endpoint `GET /api/v1/market-data/instruments/{ticker}/logo`, возвращает `{ ticker, logo_url }`. URL формируется как `https://invest-brands.cdn-tinkoff.ru/<base>x160.png` (где `<base>` — `logo_name` без расширения `.png`). Если логотип не найден — `logo_url: null`.
+- `Develop/frontend/src/api/marketDataApi.ts` — добавлен метод `getInstrumentLogo(ticker)`.
+- `Develop/frontend/src/components/common/TickerLogo.tsx` — новый компонент `<TickerLogo ticker="SBER" size={24} />`. Подгружает логотип лениво с модульным кешем (`Map<ticker, url|null>`) и in-flight дедупликацией. Если ответ `null` или `<img>` упал на загрузке — fallback на буквенную плашку (стабильный цвет по char-code из палитры). Один компонент на всё приложение, чтобы потом использовать и в форме запуска бэктеста, и в графике, и в селекторе брокерского счёта.
+- `Develop/frontend/src/pages/DashboardPage.tsx` — локальный `TickerIcon` удалён, тикеры в раскрывающихся строках теперь рендерятся через `<TickerLogo>`.
+
+**Причина:**
+В замечании 28 я сделал буквенный fallback, но пользователь попросил настоящие логотипы. Самый простой источник для российских инструментов — публичный T-Invest CDN, для которого нужно знать поле `instrument.brand.logo_name` из их `InstrumentsService` (бесплатный gRPC API).
+
+**Решение:**
+1. Backend лениво подтягивает `logo_name` через первый активный production-токен T-Invest пользователя и кеширует в нашей таблице `instruments` — повторные запросы уже не дёргают T-Invest. Sandbox-токены не используются (у них нет доступа к InstrumentsService по таким параметрам).
+2. Frontend — единый компонент `TickerLogo` с двойным кешированием (модульный + в БД на бэкенде), in-flight дедупликацией, graceful fallback на буквенную плашку.
+3. Для `<class_code>` используется `TQBR` (основной режим торгов акциями MOEX). Для облигаций T-Invest сам разрулит через `bond_by`.
+
+**Что не работает:**
+- Если у пользователя **нет ни одного активного production-токена T-Invest** — endpoint вернёт `logo_url: null`, везде будет fallback. Это нормально: у paper-only пользователя реальных логотипов не будет, но fallback выглядит аккуратно.
+- Если T-Invest по тикеру не нашёл инструмент (например, иностранный) — тоже fallback.
+
+**Тесты:**
+- `ruff check app/market_data/service.py app/market_data/router.py app/market_data/models.py` — без новых ошибок.
+- `npx tsc --noEmit` — 0 ошибок.
+- Backend перезапущен, Application startup complete.
+
+---
+
+## 2026-04-09 — Замечание 28: Дашборд «Стратегии» — фикс роутов тикеров, белый цвет, иконка инструмента
+
+**Файлы:**
+- `Develop/frontend/src/pages/DashboardPage.tsx` — клик по тикеру вёл на несуществующий `/charts?ticker=X` (правильный роут — `/chart/:ticker`), клик по позиции — на `/trading/:id` (правильный — `/trading/sessions/:id`). Оба роута исправлены, 404 больше не возникает. Цвет ссылки тикера изменён с `blue.4` на `white` + `fw={600}`. Заменён `Avatar` на компонент `TickerIcon` — круглая 24×24 цветная плашка с первой буквой тикера, цвет стабильно вычисляется по char-code из палитры (стиль из `AppHeader.getTickerIcon`).
+- БД: удалены все стратегии, кроме «Тестовая» (id=1), вместе с зависимыми `strategy_versions` и `backtests` (с каскадным удалением `backtest_trades`). Перед удалением сделан бэкап `data/terminal.db.backup_<ts>`.
+
+**Причина:**
+В замечании 27 я задал клики на несуществующие пути роутера — пользователь получал 404 при попытке перейти к графику или сессии. Также Avatar из Mantine давал низкоконтрастный цвет на тёмном фоне.
+
+**Решение:**
+Сверился с фактическими роутами в `App.tsx` (`chart/:ticker?`, `trading/sessions/:id`, `backtests/:id`) и поправил все навигации. Локальный компонент `TickerIcon` повторяет стиль из шапки приложения для единообразия.
+
+**Тесты:**
+- `npx tsc --noEmit` — 0 ошибок.
+
+---
+
+## 2026-04-09 — Замечание 27: Дашборд «Стратегии» — возврат к исходному дизайну с раскрывающимися строками
+
+**Файлы:**
+- `Develop/backend/app/strategy/schemas.py` — добавлены модели `InstrumentBacktest`, `InstrumentPosition`, `StrategyInstrumentSummary`. В `StrategyResponse` добавлены поля `instruments`, `total_position_rub`, `total_abs_pnl`, `total_pct_pnl`.
+- `Develop/backend/app/strategy/service.py` — `get_list` теперь сортирует по `created_at DESC` (раньше — по `updated_at`). Добавлен метод `get_instruments_summary(user_id, strategy_id)`: собирает уникальные тикеры из бэктестов и активных торговых сессий, для каждого вычисляет статус (paper/real/tested/draft), последний бэктест (PF, max DD), позицию из paper-портфеля (equity = balance + blocked, abs_pnl, pct_pnl). Тикеры сортируются лексикографически. Агрегаты по стратегии: `total_position_rub`, `total_abs_pnl`, `total_pct_pnl`.
+- `Develop/backend/app/strategy/router.py` — `GET /strategy` теперь обогащает каждую стратегию сводкой `instruments` через `get_instruments_summary`.
+- `Develop/backend/app/backtest/router.py` — в ответ списка бэктестов добавлены `profit_factor` и `max_drawdown_pct` (раньше возвращался только `net_profit_pct`).
+- `Develop/frontend/src/api/strategyApi.ts` — добавлены типы `InstrumentBacktest`, `InstrumentPosition`, `InstrumentStatus`, `StrategyInstrumentSummary`. В `Strategy` — необязательные поля `instruments`, `total_position_rub`, `total_abs_pnl`, `total_pct_pnl`.
+- `Develop/frontend/src/pages/DashboardPage.tsx` — таблица переписана по исходной спецификации Sprint 1 ([Sprint_1/ui_spec.md:93-178](../Sprint_1/ui_spec.md)). 5 колонок (Название/Инструмент, Статус, Бэктест, Позиция, P&L) вместо 4. Раскрывающиеся строки `▼/▶` показывают тикеры стратегии: иконка-аватар, кликабельный тикер → `/charts?ticker=X`, бэктест → `/backtests/:id`, позиция → `/trading/:session_id`. Цветовая кодировка P&L (green/red/dimmed). Контекстное меню расширено: «Запустить бэктест», «Запустить Paper» (жёлтая), «Запустить Real» (красная). Стратегии без тикеров — раскрытие отключено (точка вместо стрелки), в колонках бэктеста/позиции/P&L прочерки.
+
+**Причина:**
+Текущая реализация дашборда показывала только 4 базовые колонки (Название/Статус/Версия/Дата) и раскрывающуюся строку с текстом «Стратегия создана …». Это расходилось с дизайном, утверждённым в Sprint 1 и зафиксированным в UI-спецификации. После добавления реального CRUD стратегий в Sprint 3 расширенный вид с инструментами/бэктестами/позициями был утерян.
+
+**Решение:**
+Backend дополнен агрегатом по тикерам внутри каждой стратегии. Тикеры собираются как объединение `Backtest.ticker` всех версий стратегии и `TradingSession.ticker` активных сессий. По каждому тикеру вычисляются: статус, последний бэктест (PF, Max DD), позиция (equity текущего paper-портфеля минус initial_capital). Sandbox-сессии маппятся как paper для отображения. Real/sandbox-позиции по реальному T-Invest перенесены в Sprint 6 (вместе с реальными позициями счёта). Frontend полностью перерисован под исходный дизайн с раскрывающимися строками и кликабельными элементами.
+
+**Решения по согласованию с заказчиком:**
+1. «Инструмент стратегии» = объединение тикеров из её бэктестов и активных сессий.
+2. Если по тикеру нет активной сессии, но есть бэктест → колонки Позиция/P&L показывают `—`.
+3. В колонке «Бэктест» — самый последний бэктест по дате с кликом на `/backtests/:id`.
+4. Сортировка стратегий — по `created_at DESC` (дата добавления). Сортировка тикеров внутри стратегии — лексикографическая.
+
+**Тесты:**
+- `ruff check app/strategy/` — **All checks passed**.
+- Backend smoke import — ok.
+- `npx tsc --noEmit` — **0 ошибок**.
+- Backend перезапущен, Application startup complete.
+
+---
+
+## 2026-04-09 — Замечание 26: Раздел «Счёт» — единый календарь для фильтра операций
+
+**Файлы:**
+- `Develop/frontend/src/components/account/OperationsTable.tsx` — заменён `DatePickerInput` (из `@mantine/dates`) на пару `DateMaskInput` («С» / «По»), такой же, какой используется в модалке запуска бэктеста (`BacktestLaunchModal`). Добавлена кнопка «Сбросить» для очистки фильтра.
+
+**Причина:**
+В разделе «Счёт» при выборе периода открывался стандартный `DatePickerInput`, который визуально расходится с календарём из формы запуска бэктеста (`DateMaskInput` — кастомный popover с маской ввода `ДД.ММ.ГГГГ`). Пользователь попросил унифицировать.
+
+**Решение:**
+Перешли на тот же `DateMaskInput`, что и в `BacktestLaunchModal`. Два независимых поля «С» и «По» вместо range-пикера; колбэк `onDateRangeChange` вызывается, когда обе даты заданы или обе очищены. Кнопка «Сбросить» появляется, если хотя бы одно поле заполнено.
+
+**Тесты:**
+- `npx tsc --noEmit` — 0 ошибок.
