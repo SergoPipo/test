@@ -21,20 +21,20 @@
 | 12 | `ws.py:32` — `payload.get("sub", 0)` → возвращает None если "sub" отсутствует | Безопасность | High | S | ✅ |
 | 13 | Конфликт Playwright: `@playwright/test` обновлён до 1.59.1 | Баг | Medium | S | ✅ |
 | 14 | Brute-force: в dev-режиме (DEBUG=true) лимит 50 попыток / 1 мин вместо 5 / 15 мин | Улучшение | Medium | S | ✅ |
-| 15 | `block_parser.py` — float для финансовых параметров. Отложено — требует большого рефакторинга | Баг | Medium | M | ⬜ |
-| 16 | `code_generator.py` — параметры уже числовые (int/float из block_parser), низкий риск | Баг | Medium | S | ⚠️ |
+| 15 | `block_parser.py` — float→Decimal для финансовых параметров. Исправлено в S5 | Баг | Medium | M | ✅ |
+| 16 | `code_generator.py` — добавлена поддержка Decimal. Исправлено в S5 | Баг | Medium | S | ✅ |
 | 17 | `chat_router.py` — `_active_streams` обёрнут в `threading.Lock()` | Баг | Medium | S | ✅ |
 | 18 | `client.ts` — `isRefreshing` сбрасывается в `finally` блоке (не только при успехе) | Баг | Medium | S | ✅ |
 | 19 | `StrategyEditPage.tsx` — 935 строк, монолит. Отложено — L-задача, требует рефакторинга | Улучшение | Medium | L | ⬜ |
 | 20 | `MetricsGrid.tsx` — пороги корректны (>55 good, <40 bad), НЕ баг | — | — | — | ✅ |
 | 21 | `ast_analyzer.py` — уже блокирует dunder-атрибуты (.__class__, .__bases__), НЕ баг | — | — | — | ✅ |
 | 22 | `executor.py` — SIGALRM Unix-only. Отложено — проект на macOS, не Windows | Улучшение | Medium | S | ⬜ |
-| 23 | Поиск «USD» показывает облигации с USD в названии. Отложено — требует фильтрации по instrument_type на бэкенде | Улучшение | Low | S | ⬜ |
-| 24 | Иконки сортировки ▲/▼ не видны в таблице сделок бэктеста. Отложено — требует UI-доработки | Улучшение | Low | S | ⬜ |
+| 23 | Поиск — добавлен фильтр `instrument_type`. Исправлено в S5 | Улучшение | Low | S | ✅ |
+| 24 | Иконки сортировки — добавлен цвет blue-4. Исправлено в S5 | Улучшение | Low | S | ✅ |
 | 25 | `console.log` удалён из StrategyEditPage.tsx:517 | Улучшение | Low | S | ✅ |
 | 26 | `block_parser.py` — `blocks.index(block)` заменён на `enumerate` | Улучшение | Low | S | ✅ |
 | 27 | `engine.py` — silent `except: pass` заменён на `logger.warning()` в TradeRecorder и IMOEX loader | Улучшение | Low | S | ✅ |
-| 28 | `chat_router.py` — глобальные синглтоны. Отложено — рефакторинг на DI | Улучшение | Low | M | ⬜ |
+| 28 | `chat_router.py` — рефакторинг на DI (Depends). Исправлено в S5 | Улучшение | Low | M | ✅ |
 
 **Легенда:**
 - Тип: Баг / Безопасность / Улучшение
