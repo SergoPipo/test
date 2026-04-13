@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-04-13 — Bugfix: SL/TP рассчитывались от цены сигнала, а не от цены исполнения
+
+**Проблема**: Стратегия с SL=2% и TP=4% показывала в бэктесте сделки с убытком >2% и прибылью >4%. Три бага в `code_generator.py`:
+1. SL/TP выставлялись от `self.data.close[0]` (цена закрытия сигнальной свечи), а вход исполнялся на открытии следующей — SL/TP уровни не соответствовали реальному входу
+2. Нет OCO-логики: при срабатывании SL тейк-профит оставался активным, и наоборот
+3. Для short-позиций SL/TP использовали `self.sell()` вместо `self.buy()` (неправильное направление закрытия)
+
+**Решение**: Переделана генерация SL/TP в `code_generator.py`:
+- Добавлен метод `notify_order` — SL/TP выставляются после фактического заполнения входного ордера, от `order.executed.price`
+- OCO: при срабатывании одного ордера парный автоматически отменяется
+- Корректное направление для long/short: SL/TP для short используют `self.buy()`
+- В `next()` при exit signal — отмена висящих SL/TP перед `self.close()`
+
+**Файлы**:
+- `backend/app/strategy/code_generator.py`: `_gen_init` (трекинг-переменные), `_gen_notify_order` (новый метод), `_gen_next` (убраны прямые SL/TP, добавлен трекинг entry_order, отмена SL/TP при exit)
+- `backend/tests/unit/test_strategy/test_code_generator.py`: обновлены assertions (убран устаревший import-чек, адаптированы проверки под новую структуру next())
+
+**Тесты**: 12/12 passed
+
+**Дополнение 1**: SL/TP ордера не указывали `size` — Backtrader закрывал только 1 лот вместо всей позиции. Добавлен `size=pos_size` (`pos_size = abs(self.position.size)`) во все SL/TP ордера в `notify_order`.
+
+**Дополнение 2 (корневая причина)**: Backtrader **клонирует** объект ордера в `notify_order` — `order is self._entry_order` всегда `False` (разные id объектов при одинаковом `ref`). Заменено на сравнение по `order.ref == self._entry_order.ref`. Подтверждено прямым тестом с Backtrader: TP/SL теперь корректно срабатывают. Тесты: 12/12 passed.
+
+## 2026-04-13 — UI: подписи лотов на графике не масштабировались со стрелками
+
+**Проблема**: При зуме графика стрелки входа/выхода масштабировались (маркеры lightweight-charts), а текст с количеством лотов оставался фиксированным (16px) — наезжал на стрелки или терялся.
+
+**Решение**: Убрана ручная отрисовка текста на canvas overlay. Вместо этого количество лотов передаётся в свойство `text` маркера lightweight-charts (`SeriesMarker.text`). Библиотека сама рисует текст и масштабирует его вместе со стрелкой.
+
+**Файлы**: `frontend/src/components/backtest/InstrumentChart.tsx` — убрана ручная отрисовка в `drawBgZones()`, добавлено `text: m.text` в создание маркеров
+
+**Тесты**: E2E backtest-results 5/5 passed, TypeScript — без ошибок
+
+## 2026-04-13 — UI: показатель «Рост / Просадка» показывал только просадку
+
+**Проблема**: Серия «Рост / Просадка» вводила в заблуждение названием — показывала только просадку от пика (underwater equity curve, всегда ≤ 0), но называлась «Рост / Просадка».
+
+**Решение**: Переименована в «Просадка». Формула оставлена стандартная (underwater equity — падение от пика), как в TradingView Strategy Tester и MetaTrader.
+
+**Файлы**: `frontend/src/components/backtest/StrategyTesterPanel.tsx` — переименование label
+
+**Тесты**: E2E backtest-results 5/5 passed, TypeScript — без ошибок
+
+---
+
 ## 2026-04-08 — Замечания по ручному тестированию
 
 **Замечание 1: Скроллинг на странице торговли**
@@ -535,6 +580,196 @@ Frontend полностью перешёл на новый контракт API 
 3. Снять/поставить галочки, нажать «Сохранить» (кнопка активна только после discover). Toast: «Подключены счета: Брокерский счёт, ИИС».
 4. В разделе «Счёт» сверху появится `Select` «Брокерский счёт» с опциями `Брокерский счёт`, `ИИС`, `Sandbox Account [Sandbox]`. При переключении — карточки «Всего/Доступно/Заблокировано» показывают баланс только выбранного счёта.
 5. Если нет ни одного реального счёта — на странице «Счёт» вместо таблиц показывается пустое состояние с кнопкой «Перейти в настройки».
+
+---
+
+## 2026-04-10 — Замечание 41: «Применить на схеме» — entry/exit/management блоки не отображались (Decimal → строка → крах FieldNumber)
+
+**Файлы:**
+- `Develop/backend/app/strategy/block_parser.py` — все числовые значения, возвращаемые парсером шаблона, изменены с `Decimal` на `float` (для целых — `int`):
+  - `_parse_atomic_condition` → `THRESHOLD` сравнения с числом (`[I3] > 70` → `right=70.0`)
+  - `_parse_atomic_condition` → `condition_in_zone.low/high` (`в зоне 30–70` → `30.0/70.0`)
+  - `_parse_stop_loss`, `_parse_take_profit`, `_parse_position_sizing` → поля `params.percent`, `params.points`, `params.lots`
+- `Develop/frontend/src/utils/flatBlocksToWorkspace.ts` — добавлена утилита `toNum(value, fallback)` с явным приведением к числу через `Number()`. Применена ко всем числовым полям в `buildIndicatorBlock` (PERIOD, FAST, SLOW, SIGNAL, STD_DEV, K_PERIOD, D_PERIOD), `buildConditionBlock` (THRESHOLD, MIN/MAX), `buildManagementBlock` (VALUE), `buildFilterBlock` (START_HOUR/MIN, END_HOUR/MIN). Раньше эти значения подставлялись в Blockly state как-есть — для строки `"50"` это вызывало тихое падение `FieldNumber.fromJson` в Blockly при загрузке, и связанные с ним блоки просто не отображались на схеме (entry_signal / exit_signal содержали в иерархии condition_compare с битым THRESHOLD → вся подцепочка отбрасывалась).
+
+**Причина:**
+Заказчик нажимал «Применить на схеме» — на схеме появлялись только индикатор и position_size, а блоки сигналов входа и выхода не появлялись.
+
+Корень: `TemplateParser` в backend хранил все числовые поля как `Decimal` (точные финансовые числа). При сериализации Pydantic v2 в JSON `Decimal` всегда превращается в **строку** (`Decimal('50')` → `"50"`). На фронте `flatBlocksToWorkspace` подставлял эти строки прямо в Blockly state (`fields.THRESHOLD = "50"`, `fields.VALUE = "50"`). Blockly `FieldNumber` ожидает число — на строку реагирует тихим падением (`TypeError: undefined is not an object`, видно в консоли пользователя как `evaluating 'a'` из минифицированного билда). При падении на одном вложенном блоке Blockly отбрасывает весь его родительский блок — поэтому сигналы входа/выхода (содержавшие condition_compare с битым THRESHOLD) не попадали на схему.
+
+**Решение:**
+Двусторонний фикс:
+1. **Backend** — все числовые значения парсера теперь сразу `float`/`int`, а не `Decimal`. JSON-сериализация выдаёт настоящие числа.
+2. **Frontend** — `toNum(value, fallback)` принимает любое значение и возвращает число (`Number(value)` с фолбеком на дефолт). Это страховка на случай старых сохранённых блоков и любых будущих регрессий.
+
+**Тесты:**
+- Прямой запуск парсера на тестовом шаблоне: все числовые поля теперь `float` (`50.0` вместо `"50"`).
+- `npx tsc --noEmit` — 0 ошибок.
+- Backend перезапущен, Application startup complete.
+
+---
+
+## 2026-04-10 — Замечание 40: Перезапуск бэктеста — UI «зависал» на 100% Загрузка
+
+**Файлы:**
+- `Develop/frontend/src/stores/backtestStore.ts` — добавлен метод `rerunBacktest(oldId)`. Сбрасывает локальное состояние стора (`isRunning=true`, `progress=0`, `currentDate=''`, `currentBacktest=null`), вызывает `backtestApi.rerun(oldId)` и **обязательно** подписывается на прогресс нового бэктеста через `subscribeProgress(newId)`. Возвращает `newId`.
+- `Develop/frontend/src/pages/BacktestListPage.tsx` — `handleRerun` теперь использует `rerunBacktest` из стора вместо прямого `backtestApi.rerun`.
+- `Develop/frontend/src/pages/StrategyEditPage.tsx` — кнопка «Перезапустить» в таблице бэктестов стратегии теперь идёт через `useBacktestStore.getState().rerunBacktest`. Добавлен импорт `useBacktestStore`.
+- `Develop/frontend/src/pages/BacktestResultsPage.tsx` — добавлен «страховочный» `useEffect`: если страница показывает running-бэктест, но `isRunning === false` в сторе (например, открыли URL напрямую или после refresh) — создаётся подписка через `subscribeProgress(backtestId)`. Без этого UI «зависал» в состоянии 100% / Загрузка.
+
+**Причина:**
+В замечании 39 я сделал перезапуск через прямой `backtestApi.rerun` + `navigate('/backtests/NEW')`. Но никто не подписывался на WebSocket / polling нового бэктеста: `launchBacktest` (где есть `subscribeProgress`) при rerun не вызывался. В результате:
+1. Страница `/backtests/NEW` загружала бэктест → видела `status='running'` → показывала `BacktestProgress`.
+2. `BacktestProgress` рендерил `progress=0 && !currentDate` → визуально «100% — Загрузка рыночных данных…» (см. `BacktestProgress.tsx:79-89`).
+3. WebSocket/polling не подключены → обновления нет.
+4. Бэктест на бэкенде завершался, но фронтенд об этом не узнавал — UI зависал.
+5. В списке `/backtests` бэктест отображался как `completed`, потому что `BacktestListPage` делает свежий fetch. При клике пользователь снова попадал на «зависший» прогресс-экран — у того же `id`.
+
+**Решение:**
+1. Метод `rerunBacktest` в сторе делает всё то же, что `launchBacktest`: сбрасывает состояние, вызывает API, **подписывается на прогресс**.
+2. На странице результатов добавлен страховочный effect — если открыли running-бэктест без подписки, она создаётся автоматически.
+
+**Тесты:**
+- `npx tsc --noEmit` — 0 ошибок.
+
+---
+
+## 2026-04-10 — Замечание 39: Перезапуск бэктеста с текущей версией стратегии
+
+**Файлы:**
+- `Develop/backend/app/backtest/router.py` — добавлен endpoint `POST /api/v1/backtest/{id}/rerun`. Логика: загружает старый бэктест → находит стратегию → берёт её `current_version_id` → валидирует код этой версии → создаёт **новую запись `Backtest`** с теми же параметрами (ticker, timeframe, dates, capital, commission, slippage, params_json), но с актуальным `strategy_version_id` → запускает background task `_run_backtest_task`. Старый бэктест НЕ удаляется (остаётся в истории). Возвращает `{ backtest_id, status: 'running' }`.
+- `Develop/frontend/src/api/backtestApi.ts` — добавлен метод `backtestApi.rerun(id)`.
+- `Develop/frontend/src/pages/BacktestListPage.tsx` — рядом с кнопкой «Удалить» добавлена кнопка «Перезапустить» (`IconRefresh`, синяя, в `Tooltip`). По клику дёргает `rerun` и навигирует на новый бэктест (`/backtests/{new_id}`), чтобы пользователь сразу видел прогресс.
+- `Develop/frontend/src/pages/StrategyEditPage.tsx` — в таблице «Бэктесты стратегии» (вкладка «Содержание») — то же самое: кнопка «Перезапустить» рядом с «Удалить», импорт `IconRefresh` и `Tooltip`. Колонка действий расширена с `w={30}` до `w={60}`.
+
+**Причина:**
+Заказчик попросил кнопку перезапуска бэктеста с теми же настройками, но с учётом изменений в стратегии — чтобы можно было быстро прогнать ту же конфигурацию (тикер/период/капитал/комиссия) после правки блочной схемы.
+
+**Решение:**
+Перезапуск делается через **отдельный endpoint** на бэкенде, чтобы не тащить кучу полей с фронта и не дублировать логику валидации. Подмена `strategy_version_id` на `current_version_id` стратегии — ключевой момент: новый бэктест запускается на самой свежей версии, а не на той, на которой был исходный. Старый бэктест сохраняется в истории — это позволяет потом сравнить старую и новую версии.
+
+**Тесты:**
+- `npx tsc --noEmit` — 0 ошибок.
+- `ruff check app/backtest/router.py` — без новых ошибок (5 pre-existing неиспользуемых импортов в файле — не от моих правок).
+- Backend перезапущен, Application startup complete.
+
+---
+
+## 2026-04-10 — Замечание 38: Возврат из бэктеста в стратегию открывает вкладку «Содержание»
+
+**Файлы:**
+- `Develop/frontend/src/pages/StrategyEditPage.tsx` — `Tabs` стал управляемым (`value`/`onChange`). Активная вкладка читается из query-параметра `?tab=description` при первом рендере, если параметра нет — по умолчанию открывается «Редактор» (как было). После переключения вкладки query-параметр удаляется через `setSearchParams(..., {replace: true})`, чтобы навигация не залипала.
+- `Develop/frontend/src/pages/BacktestResultsPage.tsx` — обе навигации обратно к стратегии (кнопка «← К стратегии» и breadcrumb «{strategy_name}») теперь добавляют `?tab=description` к URL.
+
+**Причина:**
+Заказчик попросил, чтобы при возврате со страницы результатов бэктеста в стратегию открывалась вкладка «Содержание», а не «Редактор» (чтобы пользователь сразу видел описание стратегии и список её бэктестов, а не Blockly-холст).
+
+**Решение:**
+Параметр `?tab=description` в URL — простой и переиспользуемый механизм. По умолчанию страница стратегии по-прежнему открывается в «Редакторе» (например, при клике по названию стратегии в дашборде), но конкретные точки входа могут запросить «Содержание» через query-параметр.
+
+**Тесты:**
+- `npx tsc --noEmit` — 0 ошибок.
+
+---
+
+## 2026-04-10 — Замечание 37: На странице бэктеста — кнопка «К стратегии» и кликабельный breadcrumb
+
+**Файлы:**
+- `Develop/backend/app/backtest/router.py` — `_build_backtest_response` теперь возвращает `strategy_id` (раньше его не было в ответе, хотя в TS-типе `Backtest.strategy_id` был объявлен — фронт получал undefined). В SELECT-join добавлен `Strategy.id`.
+- `Develop/frontend/src/pages/BacktestResultsPage.tsx` — в шапку добавлена кнопка «← К стратегии» (`IconArrowLeft`, `variant="subtle"`), которая навигирует на `/strategies/{bt.strategy_id}`. Если по какой-то причине `strategy_id` пуст — fallback на `navigate(-1)`. Также breadcrumb «{strategy_name}» теперь кликабельный (`<Anchor>` → `/strategies/{id}`).
+
+**Причина:**
+Заказчик попросил предусмотреть команду «назад», чтобы со страницы результатов бэктеста можно было вернуться в окно стратегии, из которой бэктест был запущен.
+
+**Решение:**
+Кнопка «← К стратегии» — самый явный путь, всегда видна в шапке слева от заголовка. Дополнительно сделан кликабельным breadcrumb с именем стратегии. Backend-фикс был обязательным: ответ `/api/v1/backtest/{id}` не содержал `strategy_id`, хотя TS-тип его уже декларировал.
+
+**Тесты:**
+- `npx tsc --noEmit` — 0 ошибок.
+- Backend перезапущен, Application startup complete.
+
+---
+
+## 2026-04-10 — Замечание 36: BacktestLaunchModal — старая ошибка показывалась при повторном открытии
+
+**Файлы:**
+- `Develop/frontend/src/components/backtest/BacktestLaunchModal.tsx` — при открытии модалки вызываются `clearError()` из `useBacktestStore` и `setErrors({})` для локальных ошибок валидации.
+
+**Причина:**
+После замечания 35 я починил backend, но пользователь увидел старую ошибку `__import__ not found` сразу при открытии модалки запуска бэктеста — даже до нажатия кнопки. Корень: `useBacktestStore` хранит поле `error` после неудачной попытки запуска (Zustand persist между навигациями), и `BacktestLaunchModal` рендерит этот `error` в `Alert`. При закрытии и повторном открытии модалки `error` оставался — и пользователю казалось, что ошибка возникает заново.
+
+**Решение:**
+В `useEffect`, который срабатывает при открытии модалки (`opened === true`), теперь дополнительно вызываются `clearError()` (чистит `error` в store) и `setErrors({})` (чистит локальные ошибки валидации). Это гарантирует, что модалка всегда открывается в чистом состоянии.
+
+**Тесты:**
+- `npx tsc --noEmit` — 0 ошибок.
+
+---
+
+## 2026-04-10 — Замечание 35: Бэктест продолжал падать на старых версиях стратегий — добавлен safe `__import__`
+
+**Файлы:**
+- `Develop/backend/app/backtest/engine.py` — в `_compile_strategy` добавлен whitelist-`__import__`. Разрешает `import backtrader`, `import datetime`, `import math`, `import decimal` — все эти модули уже подгружены в процесс backend, поэтому импорт просто возвращает существующий объект, а не делает реальный disk I/O. Любой другой импорт по-прежнему падает с `ImportError`.
+
+**Причина:**
+В замечании 33 я убрал `import` из генерируемого кода, но **сохранённые в БД старые версии стратегий** (включая текущую версию «Тестовая», в которой 78 версий) продолжают содержать `import backtrader as bt` в поле `generated_code`. Чтобы их перегенерировать, пользователь должен открыть стратегию в редакторе и нажать «Сгенерировать код» — это сложный путь для каждой версии. Перегенерация со стороны backend невозможна, потому что blocks_json в БД хранится в формате Blockly serialization, а конвертация в плоский формат для CodeGenerator делается на фронтенде через `jsonGenerator.blockToCode`.
+
+**Решение:**
+Добавить в namespace стратегии безопасный `__import__`, разрешающий только белый список модулей. Это даёт обратную совместимость со старыми версиями (их `import backtrader as bt` теперь работает) и сохраняет безопасность (любой `import os` / `import subprocess` / etc. продолжает падать с ImportError).
+
+Whitelist:
+- `backtrader` → объект `bt`, уже импортированный в backend
+- `datetime`, `math`, `decimal` → стандартные модули, уже в namespace
+
+Это паттерн из `app/sandbox/executor.py` (`_safe_import`), просто перенесён в backtest engine.
+
+**Тесты:**
+- Backend перезапущен, Application startup complete.
+
+---
+
+## 2026-04-10 — Замечание 34: История последних инструментов в формах запуска бэктеста и торговой сессии
+
+**Файлы:**
+- `Develop/frontend/src/utils/recentInstruments.ts` — новый общий модуль с функциями `getRecentInstruments()` / `addRecentInstrument(ticker)`. Хранит до 5 последних тикеров в `localStorage` под единым ключом `recentInstruments`. Один список на всё приложение, с дедупликацией и нормализацией к верхнему регистру.
+- `Develop/frontend/src/components/layout/Header.tsx` — локальные функции `getRecentInstruments` / `addRecentInstrument` удалены, импортируются из общего модуля. Логика глобального поиска не меняется.
+- `Develop/frontend/src/components/backtest/BacktestLaunchModal.tsx` — при открытии модалки и при пустом вводе `Autocomplete` показывает недавние инструменты как подсказки. После успешного запуска бэктеста выбранный тикер записывается в историю через `addRecentInstrument`.
+- `Develop/frontend/src/components/trading/LaunchSessionModal.tsx` — аналогичная логика: подсказки при открытии и пустом вводе, запись в историю после успешного запуска торговой сессии.
+
+**Причина:**
+Заказчик попросил подтянуть в форму запуска бэктеста ту же историю последних 5 инструментов, что используется в глобальном поиске в шапке. Сделал заодно и для модалки запуска торговой сессии — там тот же UX.
+
+**Решение:**
+История уже существовала в `Header.tsx` (хранилась в `localStorage` под ключом `recentInstruments`), но утилиты были private. Вынес их в `utils/recentInstruments.ts` как единый источник истины. Глобальный список — все три места (поиск в шапке, модалка бэктеста, модалка торговой сессии) делят одну историю: запустил бэктест на SBER → сразу видишь SBER в подсказках при следующем поиске или запуске сессии.
+
+**Тесты:**
+- `npx tsc --noEmit` — 0 ошибок.
+
+---
+
+## 2026-04-10 — Замечание 33: Бэктест падает с `__import__ not found`
+
+**Файлы:**
+- `Develop/backend/app/strategy/code_generator.py` — из сгенерированного кода удалены строки `import backtrader as bt` и `import datetime` (включая `_empty_strategy()`).
+- `Develop/backend/app/backtest/engine.py` — в namespace `_compile_strategy` добавлен `'datetime': datetime`.
+
+**Причина:**
+При запуске бэктеста стратегии «Тестовая» (SBER, 1h, 6 месяцев) в UI приходила ошибка `__import__ not found`. Корень: `_compile_strategy` в [backtest/engine.py:432-447](Develop/backend/app/backtest/engine.py#L432-L447) специально вырезает `__import__` из safe_builtins (в целях безопасности — sandbox), а сгенерированный CodeGenerator код начинался с `import backtrader as bt`. Любой `import` в Python вызывает `__builtins__.__import__`, которого в namespace нет → ImportError.
+
+**Решение:**
+Импорты в сгенерированный код больше не добавляются. `bt`, `math`, `Decimal`, `datetime` подставляются напрямую в namespace в `_compile_strategy` — генерируемый код использует их как глобальные имена без `import`. Это согласуется с архитектурой sandbox: код исполняется в подготовленном namespace, а не в обычном Python-окружении.
+
+**Что нужно сделать пользователю:**
+Старые версии стратегий (включая текущую версию «Тестовая» в БД) содержат `import backtrader as bt` в сохранённом `generated_code` и **продолжат падать**. Чтобы их починить, нужно открыть стратегию в редакторе и нажать «Сгенерировать код» (или «Сохранить», если кнопка перегенерирует автоматически) — фронтенд отправит блоки в `/generate-code`, и в БД сохранится новый код без `import`.
+
+**Тесты:**
+- Backend перезапущен, Application startup complete.
+- TS-сборка не затронута.
+
+**Известные побочные проблемы (на скриншоте), не входят в это замечание:**
+- `<button> cannot contain a nested <button>` в `FavoritesPanel` после добавления `TickerLogo` — нужно отдельно поправить (заменить наружний UnstyledButton на div + onClick).
+- 403 на `https://invest-brands.cdn-tinkoff.ru/<ISIN>x160.png` для нескольких ISIN — у некоторых тикеров CDN T-Invest действительно отсутствует, нужен fallback.
+- `BlocklyWorkspace Load error: TypeError: undefined is not an object (evaluating 'a')` — нужно отдельно отлаживать.
 
 ---
 
