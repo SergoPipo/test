@@ -3,7 +3,7 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-04-10
+> Последнее обновление: 2026-04-13
 
 ---
 
@@ -53,6 +53,7 @@ _Накапливается по мере продвижения, берётся
 | 1 | S1 | Footer со статическими данными | Low | S2 (DEV-5) |
 | 2 | S4 | 30+ E2E тестов S4 падают (AI Chat, Backtest, Blockly) | Medium | S6 или раньше |
 | 3 | S5 | Реальные позиции и операции брокерского счёта T-Invest | Medium | S6 (см. Sprint_6/PENDING_S6_real_account_positions_operations.md) |
+| 4 | S5 | **Live Runtime Loop не замкнут:** `SignalProcessor.process_candle()` реализован, но нигде не вызывается. Стрим свечей и торговые сессии существуют независимо, у `TradingSession` нет поля `timeframe`, `scheduler/service.py` пуст. ARCH-ревью S5 формально принял класс SignalProcessor, но интеграцию не проверил. Архитектура в ТЗ описана ([technical_specification.md:1396-1417](../Документация%20по%20проекту/technical_specification.md)), но не реализована. | **High** | S6 (см. Sprint_6/PENDING_S6_live_runtime_loop.md) |
 
 ## Перенесённые задачи
 
