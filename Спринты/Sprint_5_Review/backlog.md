@@ -1,19 +1,22 @@
 # Sprint_5_Review — Backlog
 
-> 6 задач, критически важные для запуска Sprint 6.
-> Статус ревью: 🔄 в процессе — планирование (этап A завершён).
-> Детальные планы задач — в отдельных `PENDING_S5R_*.md` файлах в этой папке.
+> 9 задач: 6 изначальных + 3 closeout после ARCH-ревью.
+> Статус ревью: **завершено 2026-04-14, PASS WITH NOTES** (кроме closeout-фазы).
+> Детальные планы задач 1-4 — в отдельных `PENDING_S5R_*.md` файлах в этой папке.
 
 ## Сводная таблица
 
 | # | Задача | Тип | Приоритет | Блокирует | Статус | Документ |
 |---|--------|-----|-----------|-----------|--------|----------|
-| 1 | CI cleanup (backend ruff + frontend eslint) | Fix | 🔴 Блокер | 2, 3, 4 | ⬜ TODO | `PENDING_S5R_ci_cleanup.md` |
-| 2 | Live Runtime Loop (SessionRuntime + timeframe в сессии) | Feature + Arch | 🔴 Блокер | S6 целиком | ⬜ TODO | `PENDING_S5R_live_runtime_loop.md` |
-| 3 | Реальные позиции и операции T-Invest | Feature | 🟡 Важно | — | ⬜ TODO | `PENDING_S5R_real_account_positions_operations.md` |
-| 4 | E2E S4 fix (30+ падающих тестов) | Fix | 🔴 Блокер | 2 (интеграционная валидация) | ⬜ TODO | `PENDING_S5R_e2e_s4_fix.md` |
-| 5 | Обкатка нового процесса работы DEV-субагентов | Process | 🔴 Критично | S6 | Встраивается в 1-4 | этот файл, секция ниже |
-| 6 | Актуализация ФТ/ТЗ за S5 + S5R | Docs | 🟡 Обязательно | — | ⬜ TODO | в `arch_review_s5r.md` |
+| 1 | CI cleanup (backend ruff + frontend eslint) | Fix | 🔴 Блокер | 2, 3, 4 | ✅ Готово (DEV-1 волна 1+1b) | `PENDING_S5R_ci_cleanup.md` |
+| 2 | Live Runtime Loop (SessionRuntime + timeframe в сессии) | Feature + Arch | 🔴 Блокер | S6 целиком | ✅ Готово (DEV-2) | `PENDING_S5R_live_runtime_loop.md` |
+| 3 | Реальные позиции и операции T-Invest | Feature | 🟡 Важно | — | ✅ Готово с замечанием (DEV-3, source-правило отличается) | `PENDING_S5R_real_account_positions_operations.md` |
+| 4 | E2E S4 fix (30+ падающих тестов) | Fix | 🔴 Блокер | 2 (интеграционная валидация) | ✅ Готово (DEV-1 волна 2, 101 passed / 8 skipped) | `PENDING_S5R_e2e_s4_fix.md` |
+| 5 | Обкатка нового процесса работы DEV-субагентов | Process | 🔴 Критично | S6 | ✅ Проведена, findings в `arch_review_s5r.md` секция 4 | этот файл + arch_review_s5r.md |
+| 6 | Актуализация ФТ/ТЗ за S5 + S5R | Docs | 🟡 Обязательно | — | ✅ Готово (ФТ/ТЗ/план + новый `ui_checklist_s5r.md`) | `arch_review_s5r.md` секция 6 |
+| 7 | **FAVORITES input — поиск внутри списка избранного** | Fix | 🟢 Closeout | 4 E2E skip | ⬜ TODO | секция Closeout ниже |
+| 8 | **E2E PAPER-REAL-MODE fixture** | Fix | 🟢 Closeout | 1 E2E skip | ⬜ TODO | секция Closeout ниже |
+| 9 | **MODEL-FIGI: FIGI в LiveTrade + source-правило через FIGI** | Feature | 🟢 Closeout | Замечание C8 | ⬜ TODO | секция Closeout ниже |
 
 **Условные обозначения:**
 - ⬜ TODO / 🔄 в работе / ✅ готово / ⚠️ готово с замечаниями
@@ -260,3 +263,121 @@ return {"items": [], "total": 0}  # GET /broker/accounts/{id}/operations
 - Задача 6 — выполняется ARCH в финальном ревью
 
 Это предварительное деление, может измениться на этапе B при детальном планировании.
+
+---
+
+## Closeout-задачи (добавлены 2026-04-14 после ARCH-ревью)
+
+> Три задачи, которые ARCH изначально рекомендовал перенести в Sprint 6 backlog, но заказчик решил закрыть их в рамках S5R, чтобы Sprint 6 стартовал максимально чистым.
+>
+> Исполнитель: один DEV-агент (DEV-1 closeout), одна ветка `s5r/closeout`, три подзадачи **последовательно**.
+> Запуск: 2026-04-14, после финального ARCH-ревью.
+
+### Задача 7 — FAVORITES input: поиск внутри списка избранного
+
+**Тип:** Fix (UX + E2E)
+**Приоритет:** 🟢 Closeout
+**Исполнитель:** DEV-1 closeout
+
+#### Продуктовое решение (заказчик 2026-04-14)
+
+> «Поиск надо оставить только для поиска в избранном. То есть надо вернуть поле для поиска в рамках списка избранного, но не для добавления нового элемента в избранное. Соответственно надо переписать UX тесты в соответствии с этим.»
+
+Добавление новых элементов в избранное остаётся через кнопку `+` в шапке графика (текущее поведение), **НЕ** через текстовое поле ввода. Текстовое поле — **только для фильтрации уже существующих элементов списка** (filter-as-you-type).
+
+#### Что делать
+
+**Frontend:**
+- `src/components/charts/FavoritesPanel.tsx` — вернуть `<TextInput placeholder="Поиск по избранному" />` **над** списком избранных тикеров. При вводе — фильтровать `filteredFavorites = favorites.filter(f => f.ticker.includes(query))`.
+- **Не** вводить логику `addFavoriteByQuery` / `onSubmit` / обработчик `Enter` — поле **только** для фильтрации.
+- Сохранить кнопку `+ Добавить из графика` (текущее поведение добавления через `currentTicker`).
+- `data-testid="favorites-filter-input"` на поле поиска (чтобы e2e мог его найти).
+
+**E2E:**
+- Переписать 4 теста в `frontend/e2e/s5-favorites.spec.ts` (те что сейчас `test.skip("S5R-FAVORITES-INPUT")`):
+  1. Ввод в filter-input фильтрует список (видно отфильтрованное, скрыто остальное)
+  2. Очистка filter-input возвращает полный список
+  3. Filter-input **не добавляет** новый тикер при нажатии Enter (проверка что behaviour НЕ такой как раньше)
+  4. Добавление нового тикера идёт через кнопку `+` в шапке графика (текущий flow через `currentTicker`)
+- Снять `test.skip` со всех 4 тестов.
+
+#### Критерии готовности
+
+- [ ] `FavoritesPanel.tsx` содержит `TextInput` с фильтрацией (без логики добавления)
+- [ ] 4 e2e теста `s5-favorites.spec.ts` переписаны и зелёные
+- [ ] `grep -rn "S5R-FAVORITES-INPUT" frontend/e2e/` → пусто (skip-ов не осталось)
+- [ ] `pnpm test` + `pnpm lint` + `pnpm tsc --noEmit` + `npx playwright test` → все зелёные
+- [ ] Ручная проверка UX в браузере: печать в filter-input даёт live-фильтр, кнопка `+` добавляет из currentTicker
+
+### Задача 8 — E2E PAPER-REAL-MODE fixture
+
+**Тип:** Fix (E2E fixture)
+**Приоритет:** 🟢 Closeout
+**Исполнитель:** DEV-1 closeout
+
+#### Суть
+
+Тест `s5-paper-trading.spec.ts` «confirm dialog for Real mode» был пропущен (`test.skip("S5R-PAPER-REAL-MODE")`) потому что кнопка переключения в Real mode в `LaunchSessionModal` рендерится conditionally — только если у пользователя есть active non-sandbox broker account. Тест не мокал такой аккаунт, кнопка не появлялась.
+
+#### Что делать
+
+- В `frontend/e2e/fixtures/` (или где хранятся моки `brokerApi.getAccounts`) добавить фикстуру `hasRealAccount: true` с non-sandbox `BrokerAccount`.
+- В `s5-paper-trading.spec.ts` `beforeEach` теста использовать эту фикстуру: `await page.route('**/broker/accounts*', ...)` с response `[{is_sandbox: false, ...}, ...]`.
+- Снять `test.skip("S5R-PAPER-REAL-MODE")`.
+- Проверить, что confirm-dialog появляется и кликается; after-confirm проверка перехода в Real mode.
+
+#### Критерии готовности
+
+- [ ] Фикстура с non-sandbox аккаунтом добавлена в `e2e/fixtures/` или inline в тесте
+- [ ] Тест «confirm dialog for Real mode» зелёный (проходит Polk-тест с диалогом)
+- [ ] `grep -rn "S5R-PAPER-REAL-MODE" frontend/e2e/` → пусто
+- [ ] `npx playwright test` → 0 failures
+
+### Задача 9 — MODEL-FIGI: FIGI в LiveTrade + source-правило через FIGI
+
+**Тип:** Feature (backend + миграция)
+**Приоритет:** 🟢 Closeout
+**Исполнитель:** DEV-1 closeout
+
+#### Контекст
+
+DEV-3 в S5R.3 реализовал определение `source: strategy | external` через match `ticker + TradingSession.broker_account_id` (через `LiveTrade.session_id → TradingSession.ticker`) — потому что в модели нет поля FIGI. Это семантически эквивалентно в 95% случаев, но есть коллизия: при одновременной ручной покупке того же тикера на том же счёте, где работает стратегия, ручная позиция ошибочно помечается как `strategy`.
+
+Контракт C8 в `execution_order.md` описывал правило через FIGI (это более строгая семантика).
+
+#### Что делать
+
+**Backend:**
+- `backend/app/trading/models.py` — добавить поле `LiveTrade.figi: Mapped[str | None] = mapped_column(String(12), nullable=True)` (nullable, т.к. старые записи не имеют).
+- Миграция Alembic `add_figi_to_live_trades.py` — `ADD COLUMN figi VARCHAR(12)`, nullable без default. Round-trip `upgrade → downgrade → upgrade` должен быть чистым.
+- `backend/app/trading/engine.py` — `OrderManager.process_signal` / создание `LiveTrade` — заполнять `figi` из `place_order` response или `BrokerAdapter.get_instrument_by_ticker`.
+- `backend/app/broker/service.py::get_positions` — переписать определение `source`: собирать `figi_strategy_set = {lt.figi for lt in LiveTrade where session.user_id == user.id and lt.figi is not None}`, затем `position.source = "strategy" if position.figi in figi_strategy_set else "external"`. Для обратной совместимости при `figi is None` в старых `LiveTrade` — fallback на текущий ticker-based match.
+- Unit-тесты: `tests/unit/test_broker/test_broker_service.py::test_get_positions_source_by_figi` — два сценария (совпадает FIGI → strategy, не совпадает → external).
+
+**Не менять** frontend — response формат тот же (`source: str`), только правило определения изменилось.
+
+#### Критерии готовности
+
+- [ ] `LiveTrade.figi` — новое поле в модели + миграция
+- [ ] Миграция round-trip чистая (`upgrade → downgrade → upgrade`)
+- [ ] `OrderManager.process_signal` заполняет `LiveTrade.figi` при создании trade'а
+- [ ] `broker.service.get_positions` определяет `source` через `figi`, с fallback на `ticker` для `figi IS NULL`
+- [ ] Новые unit-тесты покрывают оба case'а
+- [ ] `ruff` / `mypy` / `pytest` — все зелёные
+- [ ] **Integration verification grep'ы** (обязательно в отчёте):
+  ```bash
+  grep -n "figi" backend/app/trading/models.py          # new Mapped
+  grep -rn "lt\.figi\|live_trade\.figi" backend/app/    # заполнение + чтение
+  grep -rn "figi_strategy_set\|figi in " backend/app/broker/  # новое правило
+  ```
+
+### Ветка и порядок работы
+
+**Ветка:** `s5r/closeout` от `develop` (актуальное состояние после 4 мержей S5R).
+
+**Порядок выполнения DEV-1 closeout:**
+1. Задача 8 (PAPER-REAL-MODE fixture) — самая маленькая, разогрев. Коммит отдельный.
+2. Задача 7 (FAVORITES filter-input) — frontend + 4 e2e теста. Коммит отдельный.
+3. Задача 9 (MODEL-FIGI) — backend + миграция + unit-тесты. Коммит отдельный.
+
+После всех 3 коммитов — push, CI должен быть зелёный, мерж `s5r/closeout → develop` через `--no-ff`.
