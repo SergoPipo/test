@@ -1,11 +1,12 @@
 # Sprint 5: Состояние
 
-> **Статус:** ⚠️ завершён с замечаниями → открыто внеплановое **Sprint_5_Review**
+> **Статус:** ⚠️ завершён с замечаниями → **Sprint_5_Review ✅ закрыт 2026-04-14** (вердикт ARCH: PASS WITH NOTES, блокеров нет)
 > **Ветка:** s5/trading (закрыта, смерджена в main 2026-04-13)
 > **Начало:** 2026-04-07
 > **Формальное завершение:** 2026-04-13
-> **Ретроспектива:** 2026-04-14 — обнаружен блокирующий долг (см. ниже), открыто **Sprint_5_Review**
-> **Milestone:** M3 — Paper Trading (базовая часть — PASS; полный scope с работающим Live Runtime Loop — ожидает закрытия Sprint_5_Review)
+> **Ретроспектива:** 2026-04-14 — обнаружен блокирующий долг, открыто Sprint_5_Review
+> **Закрытие S5R:** 2026-04-14 — 4 ветки смержены в `develop` (76e527b / 0f55dcc / 8cd5227 / a9b69ea), весь High-долг устранён, CI зелёный, 10 Stack Gotchas в `Develop/CLAUDE.md`
+> **Milestone:** M3 — Paper Trading **PASS (полный scope)** — Live Runtime Loop замкнут в S5R.2, реальные позиции T-Invest в S5R.3. Отчёт: [Sprint_5_Review/arch_review_s5r.md](../Sprint_5_Review/arch_review_s5r.md)
 
 ---
 
