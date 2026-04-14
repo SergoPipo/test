@@ -355,11 +355,11 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 
 ### SPRINT 5 REVIEW: Внеплановое промежуточное ревью (стабилизация перед S6)
 
-**Когда:** между S5 и S6, открыто 2026-04-14.
+**Когда:** между S5 и S6, открыто 2026-04-14, **закрыто 2026-04-14** (в тот же день).
 **Цель:** устранить накопленный технический и процессный долг, который блокирует корректный запуск Sprint 6.
 **Причина созыва:** ретроспектива S5 выявила 5 слабостей промптов DEV-субагентов (привели к 41 замечанию ручного тестирования и двум техдолгам), плюс Gmail MCP обнаружил, что CI красный 11+ дней и никто не смотрел на failed-уведомления.
-**Статус:** 🔄 в процессе (этап A: планирование)
-**Файлы:** `Спринты/Sprint_5_Review/` — `README.md`, `backlog.md`, `execution_order.md` (с Cross-DEV contracts), 4× `PENDING_S5R_*.md`
+**Статус:** ✅ **завершён** — все 6 задач сданы, финальный вердикт ARCH: **PASS WITH NOTES**. Техдолг High закрыт (4 → 0). Ветки: `s5r/ci-cleanup`, `s5r/e2e-s4-fix`, `s5r/live-runtime-loop`, `s5r/real-positions` — готовы к мержу в `develop`.
+**Файлы:** `Спринты/Sprint_5_Review/` — `README.md`, `backlog.md`, `execution_order.md` (с Cross-DEV contracts C1-C11), 4× `PENDING_S5R_*.md`, `arch_review_s5r.md`, `changelog.md`, `preflight_checklist.md`, 4× `prompt_*.md`.
 
 | # | Задача | Исполнитель | Ревьюер | Зависит от | Блокирует |
 |---|---|---|---|---|---|
@@ -373,7 +373,14 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 
 **Критерий завершения S5R:** CI зелёный (включая `pytest`, `vitest`, опционально `playwright`). Live Runtime Loop замкнут и подтверждён E2E-тестом «fake-стрим → ордер в БД». Реальные позиции T-Invest работают в разделе «Счёт». E2E S4 зелёные. ФТ/ТЗ актуальны. `Develop/CLAUDE.md` секция Stack Gotchas дополнена новыми ловушками. `prompt_template.md` доработан по итогам обкатки (если нужно). `arch_review_s5r.md` создан.
 
-**После S5R:** Sprint 6 стартует с зелёным CI, замкнутым runtime, реальными позициями, работающими E2E-тестами и обкатанным процессом работы DEV-субагентов.
+**После S5R (факт):** Sprint 6 стартует с зелёным CI, замкнутым runtime (`SessionRuntime.process_candle` вызывается из `runtime.py:374`, создаётся в `main.py:61`), реальными позициями T-Invest в разделе «Счёт», Playwright baseline 101 passed / 8 skipped и обкатанным процессом работы DEV-субагентов (10 Stack Gotchas, Cross-DEV contracts C1-C11 подтверждены).
+
+**Новые задачи в backlog Sprint 6 по итогам S5R (создать при открытии S6):**
+- `S6-MODEL-FIGI` — расширить `LiveTrade` полем `figi`, перевести source-правило позиций на match по FIGI (вместо ticker+account).
+- `S6-PLAYWRIGHT-NIGHTLY` — отдельный workflow `playwright-nightly.yml` с cron в рабочие часы MSK, только стабильные specs.
+- `S6-E2E-FAVORITES-INPUT` — вернуть text-input поиска в FavoritesPanel, снять 4 E2E skip-тикетов `S5R-FAVORITES-INPUT`.
+- `S6-E2E-PAPER-REAL-MODE` — non-sandbox fixture для Real-mode switcher теста, снять skip `S5R-PAPER-REAL-MODE`.
+- `S6-E2E-CHART-MOCK-ISS` — моки ISS для нерабочих часов (Gotcha 10), снять 3 skip-тикета `S5R-CHART-FRESHNESS`.
 
 ---
 

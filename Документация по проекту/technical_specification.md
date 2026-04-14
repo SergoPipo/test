@@ -1387,44 +1387,58 @@ class OHLCVValidator:
 
 **5.4.1 Компоненты:**
 
-- `TradingSessionManager` — управление жизненным циклом сессий (start, pause, stop, resume).
-- `SignalProcessor` — получает свечи от `MarketDataService`, прогоняет через стратегию, генерирует сигналы.
+- `TradingSessionManager` — управление жизненным циклом сессий (start, pause, stop, resume). Делегирует `SessionRuntime.start/stop` для live-части.
+- `SessionRuntime` *(введён в S5R.2, `app/trading/runtime.py`)* — **единственная production-точка вызова** `SignalProcessor.process_candle()`. Держит per-session listener'ы на каналах EventBus `market:{ticker}:{timeframe}`, загружает скользящее окно истории свечей при старте, реагирует на closed-свечи, публикует события в канал `trades:{session_id}`. Создаётся один раз в `main.py lifespan`, вызывает `restore_all(active_sessions)` при старте backend, `shutdown()` при остановке.
+- `SignalProcessor` — получает от runtime скользящее окно свечей (`candles: list[dict]`, по умолчанию N=200), прогоняет через стратегию в sandbox, генерирует сигналы. Сохранены алиасы `candle_open/candle_high/candle_low/candle_close/candle_volume` для обратной совместимости со старыми сгенерированными стратегиями.
 - `OrderManager` — конвертирует сигналы в ордера, проверяет circuit breaker, отправляет в брокер.
 - `PositionTracker` — отслеживает открытые позиции, P&L, slippage.
 - `PaperTradingEngine` — эмуляция исполнения ордеров для paper trading.
 
-**5.4.2 Поток обработки сигнала (Real):**
+**5.4.2 Поток обработки сигнала (Real, после S5R):**
 
 ```
-MarketDataService → новая свеча
+StreamManager (T-Invest gRPC) / MOEX publisher
+    ↓ publish в EventBus канал market:{ticker}:{timeframe}
+SessionRuntime._SessionListener  (подписан один на сессию)
+    ↓ candle close detected, обновляет скользящее окно
     ↓
-SignalProcessor.process_candle(session, candle)
-    ↓ (загрузка стратегии в sandbox, расчёт индикаторов, генерация сигнала)
-    ↓
+SignalProcessor.process_candle(session, candles=history + [candle])
+    ↓ (стратегия в sandbox, расчёт индикаторов, генерация сигнала)
 signal: BUY / SELL / HOLD
     ↓ (если BUY или SELL)
-CircuitBreaker.check(session, signal)
-    ↓ (OK)
+CircuitBreakerEngine.check_before_order(session, signal)
+    ↓ (под per-user asyncio.Lock — см. Gotcha 5 в Develop/CLAUDE.md)
 OrderManager.place_order(session, signal)
     ↓
 BrokerAdapter.place_order(order)
-    ↓ (ордер отправлен)
+    ↓
 PositionTracker.register_order(order)
     ↓
-EventBus.publish("order.placed", ...)
+EventBus.publish(f"trades:{session.id}", {"type": "order.placed", "latency_ms": ...})
 ```
 
-**Требование по latency:** Весь путь от получения свечи до `BrokerAdapter.place_order()` < 500ms. Для этого: стратегия предзагружена в RAM, индикаторы обновляются инкрементально.
+Канал `trades:{session_id}` публикует 6 типов событий: `session.started`, `session.stopped`, `order.placed` (с `latency_ms`), `trade.filled`, `trade.closed`, `cb.triggered`. Все Decimal-поля в payload'ах сериализуются строкой (Gotcha 1).
+
+**Требование по latency:** Весь путь от получения свечи до `BrokerAdapter.place_order()` < 500ms. Для этого: стратегия предзагружена в RAM, индикаторы обновляются инкрементально, история свечей хранится в памяти runtime, listener не тянет её каждый раз заново.
 
 **5.4.3 Восстановление при перезапуске:**
 
-При старте `TradingSessionManager`:
-1. `SELECT * FROM trading_sessions WHERE status IN ('active', 'suspended')`
-2. Для каждой сессии:
-   - Если mode = 'real': запросить позиции у брокера, сравнить с `live_trades WHERE status = 'filled' AND closed_at IS NULL`.
-   - При расхождении: пауза + уведомление.
-   - При совпадении: восстановить подписку на котировки, возобновить обработку сигналов.
-3. Уведомление пользователю через все каналы.
+При старте `main.py lifespan`:
+1. Создаётся единственный экземпляр `SessionRuntime(AsyncSessionLocal)`.
+2. `SELECT * FROM trading_sessions WHERE status IN ('active', 'paused')`.
+3. `await runtime.restore_all(sessions)`:
+   - Для каждой сессии — если `timeframe` задан, создаётся listener на `market:{ticker}:{timeframe}`, предзагружается история. Legacy-сессии без `timeframe` пропускаются с warning.
+   - **Paper-часть** реализована в S5R.2: подписка на EventBus, возобновление мониторинга.
+   - **Real-часть** (сверка позиций с брокером для `mode=real` + подписка `StreamManager.subscribe`) — задача Sprint 6 **6.4 Recovery**.
+4. При расхождении позиций с брокером — пауза + уведомление (6.4).
+5. При остановке backend — `await runtime.shutdown()` отписывает все listener'ы и отменяет background-tasks (задел для 6.5 Graceful Shutdown).
+
+**5.4.5 StreamManager (Market Data gRPC):**
+
+- `app/market_data/stream_manager.py` поддерживает **одно** persistent gRPC `MarketDataStream` к T-Invest.
+- Мультиплексирует подписки по ключу `(ticker, timeframe)`. Map `_TIMEFRAME_TO_INTERVAL` транслирует таймфреймы системы в T-Invest enum.
+- Auto-reconnect с exponential backoff при разрыве.
+- Rate limiting через `TokenBucketRateLimiter` (см. Gotcha 4 в `Develop/CLAUDE.md`).
 
 **5.4.4 Paper Trading Engine:**
 
@@ -2045,23 +2059,24 @@ class CorporateActionHandler:
 **Маршрут:** `/trading`
 
 **Компоненты:**
-- `ActiveSessionsList` — карточки всех активных сессий. Каждая карточка: тикер, стратегия, режим (PAPER желтый / REAL красный), unrealized P&L, sparkline, кнопки (Пауза, Стоп, График).
+- `ActiveSessionsList` — карточки всех активных сессий. Каждая карточка: тикер, стратегия, **badge таймфрейма** (`1m`/`5m`/.../`D`/`W`/`M`, прочерк для legacy), режим (PAPER жёлтый / REAL красный), unrealized P&L, sparkline, кнопки (Пауза, Стоп, График).
 - `SessionDashboard` (`/trading/sessions/:id`) — детальный дашборд сессии:
   - Открытые позиции (таблица): тикер, направление, цена входа, текущая цена, unrealized P&L, время удержания, кнопки (Закрыть, График).
   - Закрытые сделки (таблица).
   - Статистика: дневной P&L, суммарный P&L, Win Rate, количество сделок.
   - Equity curve сессии.
-- `LaunchSessionForm` — модалка: выбор стратегии (dropdown), брокерский аккаунт (dropdown), счёт (dropdown), инструмент (search), режим (Paper/Real toggle), sizing settings. Для Real — confirm-диалог с предупреждением.
+- `LaunchSessionModal` — модалка: выбор стратегии (dropdown), брокерский аккаунт (dropdown), счёт (dropdown), инструмент (search), **селектор таймфрейма** (`<Select data-testid="session-timeframe-select">`, 8 значений, `D` по умолчанию, required), режим (Paper/Real toggle), sizing settings. Для Real — confirm-диалог с предупреждением.
 
 ### 6.7 Account / Settings
 
 **Маршрут:** `/account` и `/settings`
 
-**Account:**
-- Баланс по каждому брокерскому счёту (таблица).
-- Позиции у брокера (включая внесистемные).
-- История операций с фильтром по дате.
-- Кнопка "Налоговый отчёт" (экспорт).
+**Account (раздел «Счёт»):**
+- `BalanceCards` — баланс по каждому брокерскому счёту + валюте (таблица). Мульти-валютность: `RUB`/`USD`/`EUR`/`HKD`/`CNY` без автоконвертации в рубли.
+- `PositionsTable` — позиции у брокера (включая внесистемные), колонки: тикер, название, instrument_type, quantity, avg_price, current_price, unrealized_pnl, currency, **badge `source`** (`Стратегия` / `Внешняя`), blocked.
+  - Все Decimal-поля приходят с backend как строки (см. Gotcha 1 в `Develop/CLAUDE.md`) и парсятся на фронте через `toNum()`.
+- `OperationsTable` — история операций с фильтром по дате (`from`/`to`) и пагинацией (`offset`/`limit` ≤ 500). Типы: `BUY`/`SELL`/`DIVIDEND`/`COUPON`/`COMMISSION`/`TAX`/`OTHER`, состояния: `EXECUTED`/`CANCELED`/`PROGRESS`. Иконки для типов.
+- Кнопка «Налоговый отчёт» (экспорт).
 
 **Settings:**
 - **Профиль:** смена пароля, email.
