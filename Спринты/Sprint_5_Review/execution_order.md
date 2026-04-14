@@ -79,19 +79,234 @@
 
 ### Контракты Sprint_5_Review
 
-| # | Поставщик | Потребитель | Контракт | Формат/сигнатура |
-|---|-----------|-------------|----------|-------------------|
-| C1 | DEV-1 (CI cleanup) | DEV-1, DEV-2, DEV-3 | Зелёный `ruff check .` в `backend/` | `pyproject.toml` секция `[tool.ruff.lint.per-file-ignores]` содержит `"alembic/env.py" = ["F401"]` |
-| C2 | DEV-1 (CI cleanup) | DEV-1, DEV-2, DEV-3 | Зелёный `pnpm lint` в `frontend/` | `eslint.config.js` — либо `react-hooks/*` → `warn`, либо конкретные 6 мест исправлены |
-| C3 | DEV-1 (CI cleanup) | DEV-2, DEV-3 | Зелёный `pnpm tsc --noEmit`, `pytest tests/unit/`, `vitest`, `playwright` | Каждый job в `.github/workflows/ci.yml` доходит до выполнения своей команды и возвращает exit 0 |
-| C4 | DEV-2 (Live Runtime) | DEV-2 frontend-часть, DEV-3 (косвенно — для доработок trading panel в S6) | Поле `TradingSession.timeframe: str` в модели и API | SQLAlchemy `Mapped[str]` nullable, Pydantic `SessionResponse.timeframe: str \| None`, TS `TradingSession.timeframe?: string` |
-| C5 | DEV-2 (Live Runtime backend) | DEV-2 frontend-часть | `SessionStartRequest.timeframe` обязательное поле | `Literal["1m","5m","15m","1h","4h","D","W","M"]` |
-| C6 | DEV-2 (Live Runtime) | S6 задача 6.4 (Recovery) | Сигнатура `SessionRuntime.start(session: TradingSession) -> None` и `SessionRuntime.stop(session_id: int) -> None` | Вызывается из `TradingSessionManager.start_session` после commit в БД; из `stop_session` / `pause_session` перед commit; из `restore_sessions` при старте backend |
-| C7 | DEV-2 (Live Runtime) | S6 задача 6.3 (In-app notifications) | EventBus events из runtime | Каналы: `trades:{session_id}` с events `order.placed`, `trade.filled`, `trade.closed`, `session.started`, `session.stopped`, `cb.triggered` — data формат из `trading/engine.py:SignalProcessor` |
-| C8 | DEV-3 (Real positions) | S5R finalisation, S6 | `GET /api/v1/broker/accounts/{id}/positions` реальная имплементация | Response: `list[BrokerPosition]` с полями `ticker, name, quantity, average_price, current_price, unrealized_pnl, source: 'strategy'\|'external', currency` |
-| C9 | DEV-3 (Real positions) | S5R finalisation, S6 | `GET /api/v1/broker/accounts/{id}/operations` реальная имплементация | Response: `{items: list[BrokerOperation], total: int}` с пагинацией `offset`/`limit`, фильтр `from`/`to` |
-| C10 | DEV-1 (E2E S4 fix) | DEV-2 (тест Live Runtime) | Работающий baseline Playwright | `npx playwright test` запускается, существующие s4-* тесты зелёные или явно skipped с аннотацией |
-| C11 | ARCH (финальное ревью) | Оркестратор | `arch_review_s5r.md` с PASS / PASS WITH NOTES / FAIL | Формат как в `Sprint_5/arch_review_s5.md`: сводка, детали по модулям, найденные проблемы, рекомендации для S6. Обязательная секция «Оценка эффективности нового процесса работы DEV-субагентов» |
+> **Таблица заполнена детально 2026-04-14 в рамках этапа B.** Каждый контракт содержит точный файл/сигнатуру/команду верификации.
+
+#### C1 — ruff green (DEV-1 → все)
+
+- **Файл:** `Develop/backend/pyproject.toml`
+- **Реализация:** секция `[tool.ruff.lint.per-file-ignores]` содержит `"alembic/env.py" = ["F401"]`
+- **Верификация поставщика:** `cd Develop/backend && ruff check .` → exit 0
+- **Верификация потребителя:** DEV-2/3 запускают `ruff check .` перед коммитом — 0 errors
+- **Потребители:** DEV-1 (задача S5R.4), DEV-2, DEV-3
+
+#### C2 — eslint green (DEV-1 → все)
+
+- **Файл:** `Develop/frontend/eslint.config.js` + 6 конкретных файлов исходников
+- **Реализация:** 6 React 19 проблем исправлены **адресно** (не через глобальное понижение правил):
+  - `src/components/backtest/InstrumentChart.tsx:39-41` — `ref.current =` вынесено в `useEffect`
+  - `src/components/common/TickerLogo.tsx:58` — `setImgError` через `key={ticker}` или prev-ref паттерн
+  - `src/components/backtest/BacktestLaunchModal.tsx:109` — lazy initializer `useState(() => getRecentInstruments())`
+  - `src/components/account/PositionsTable.tsx:74` — `// eslint-disable-next-line react-hooks/incompatible-library` (TanStack Table known issue)
+  - `src/components/backtest/BacktestTrades.tsx:195` — то же
+  - `src/components/layout/Sidebar.tsx:56` — константы вынесены в новый `src/components/layout/sidebarItems.ts`
+- **Верификация:** `cd Develop/frontend && pnpm lint` → exit 0 (warnings допустимы, errors — нет)
+- **Потребители:** DEV-1 (S5R.4), DEV-2, DEV-3
+
+#### C3 — все CI jobs доходят до команды (DEV-1 → DEV-2, DEV-3)
+
+- **Файл:** `Develop/.github/workflows/ci.yml`
+- **Реализация:** после фиксов C1 и C2 все 6 шагов проходят:
+  - backend: `ruff check .` → `mypy app/ --ignore-missing-imports` → `pytest tests/unit/`
+  - frontend: `pnpm lint` → `pnpm tsc --noEmit` → `pnpm test`
+- **Верификация:** `gh run list --workflow ci.yml --branch s5r/ci-cleanup --limit 1` → `completed success`
+- **Потребители:** DEV-2, DEV-3 (без зелёного CI их Integration Verification будет пустой декларацией)
+
+#### C4 — TradingSession.timeframe (DEV-2 → DEV-2 frontend + S6)
+
+- **Backend модель:** `Develop/backend/app/trading/models.py`
+  ```python
+  timeframe: Mapped[str | None] = mapped_column(String(10), nullable=True)
+  ```
+- **Миграция:** `Develop/backend/alembic/versions/XXXX_add_timeframe_to_trading_sessions.py` — ADD COLUMN, nullable, без default
+- **Pydantic:** `Develop/backend/app/trading/schemas.py`
+  ```python
+  class SessionResponse(BaseModel):
+      timeframe: str | None = None
+  ```
+- **TypeScript:** `Develop/frontend/src/api/types.ts`
+  ```ts
+  export interface TradingSession {
+    timeframe: string | null;
+  }
+  ```
+- **Верификация:**
+  ```bash
+  grep -n "timeframe" Develop/backend/app/trading/models.py
+  grep -n "timeframe" Develop/backend/app/trading/schemas.py
+  grep -n "timeframe" Develop/frontend/src/api/types.ts
+  alembic upgrade head && alembic downgrade -1 && alembic upgrade head
+  ```
+- **Потребители:** DEV-2 (frontend-часть той же задачи), DEV-3 (косвенно — для доработок trading panel в S6)
+
+#### C5 — SessionStartRequest.timeframe обязательное (DEV-2 backend → DEV-2 frontend)
+
+- **Backend схема:** `Develop/backend/app/trading/schemas.py`
+  ```python
+  from typing import Literal
+  SupportedTimeframe = Literal["1m", "5m", "15m", "1h", "4h", "D", "W", "M"]
+
+  class SessionStartRequest(BaseModel):
+      timeframe: SupportedTimeframe  # обязательное
+  ```
+- **Frontend:** `LaunchSessionModal.tsx` — `<Select data-testid="session-timeframe-select" required>` с теми же 8 значениями
+- **Верификация:**
+  ```bash
+  pytest tests/test_trading/ -k "test_start_session_requires_timeframe" -v
+  # POST /trading/sessions/start без timeframe → 422
+  ```
+- **Потребители:** DEV-2 frontend, Sprint 6 задача 6.8 (доработки Trading Panel)
+
+#### C6 — SessionRuntime API (DEV-2 → Sprint 6 задача 6.4 Recovery)
+
+- **Файл:** `Develop/backend/app/trading/runtime.py` (**новый**)
+- **Сигнатура:**
+  ```python
+  class SessionRuntime:
+      async def start(self, session: TradingSession) -> None: ...
+      async def stop(self, session_id: int) -> None: ...
+      async def restore_all(self, sessions: list[TradingSession]) -> None: ...
+  ```
+- **Вызовы из production:**
+  - `TradingSessionManager.start_session` → `await self.runtime.start(session)` **после** `db.commit()`
+  - `TradingSessionManager.stop_session` → `await self.runtime.stop(session_id)` **до** `db.commit()`
+  - `TradingSessionManager.pause_session` → `await self.runtime.stop(session_id)` **до** `db.commit()`
+  - `main.py` lifespan → `await runtime.restore_all(active_sessions)` **при старте** backend
+- **Верификация:**
+  ```bash
+  grep -rn "SessionRuntime(" app/        # инстанциирование где-то кроме runtime.py
+  grep -rn "runtime\.start\(\|runtime\.stop\(" app/
+  grep -rn "restore_all" app/
+  ```
+- **Потребители:** Sprint 6 задача 6.4 (Recovery with real-side sync), 6.5 (Graceful Shutdown)
+
+#### C7 — EventBus events из runtime (DEV-2 → Sprint 6 задача 6.3 In-app)
+
+- **Файл:** `Develop/backend/app/trading/runtime.py`
+- **Канал:** `trades:{session_id}` (строка, не список)
+- **События:** каждое — dict с ключом `type`:
+  ```python
+  {"type": "session.started", "session_id": int, "timeframe": str}
+  {"type": "session.stopped", "session_id": int}
+  {"type": "order.placed", "session_id": int, "order_id": int, "latency_ms": float}
+  {"type": "trade.filled", "session_id": int, "trade_id": int, "ticker": str, "action": str, "price": str}
+  {"type": "trade.closed", "session_id": int, "trade_id": int, "pnl": str}
+  {"type": "cb.triggered", "session_id": int, "signal": str, "reason": str}
+  ```
+- **Верификация:**
+  ```bash
+  grep -rn 'f"trades:{' Develop/backend/app/trading/runtime.py
+  # Должно найти publish() вызовы со всеми 6 типами событий
+  ```
+- **Потребители:** Sprint 6 задача 6.3 (In-app notifications WebSocket), задача 6.4 (Recovery слушает `session.started` для пересборки состояния UI)
+
+#### C8 — GET /broker/accounts/{id}/positions (DEV-3 → S5R finalisation, S6)
+
+- **Файл:** `Develop/backend/app/broker/router.py`
+- **Endpoint:**
+  ```python
+  @router.get("/accounts/{account_id}/positions", response_model=list[BrokerPositionResponse])
+  async def get_account_positions(
+      account_id: int,
+      user: User = Depends(get_current_user),
+      service: BrokerService = Depends(get_broker_service),
+  ) -> list[BrokerPositionResponse]: ...
+  ```
+- **Response (`BrokerPositionResponse`):**
+  ```json
+  [
+    {
+      "figi": "BBG004730N88",
+      "ticker": "SBER",
+      "name": "Сбербанк",
+      "instrument_type": "share",
+      "quantity": "100",
+      "average_price": "250.50",
+      "current_price": "265.30",
+      "unrealized_pnl": "1480.00",
+      "currency": "RUB",
+      "source": "strategy",
+      "blocked": "0"
+    }
+  ]
+  ```
+  **Все Decimal-поля сериализуются как `str`** (Gotcha 1).
+- **Source правило:** `"strategy"` если FIGI позиции есть в таблице `orders` для данного `account_id` + `user_id`, иначе `"external"`.
+- **Верификация:**
+  ```bash
+  grep -n "return \[\]" Develop/backend/app/broker/router.py   # должно быть 0 в positions endpoint
+  pytest tests/broker/test_broker_router_positions.py -v
+  ```
+- **Потребители:** frontend `PositionsTable`, ARCH финальная приёмка S5R
+
+#### C9 — GET /broker/accounts/{id}/operations (DEV-3 → S5R finalisation, S6)
+
+- **Файл:** `Develop/backend/app/broker/router.py`
+- **Endpoint:**
+  ```python
+  @router.get("/accounts/{account_id}/operations", response_model=BrokerOperationListResponse)
+  async def get_account_operations(
+      account_id: int,
+      from_: datetime = Query(..., alias="from"),
+      to: datetime = Query(...),
+      offset: int = Query(0, ge=0),
+      limit: int = Query(100, ge=1, le=500),
+      user: User = Depends(get_current_user),
+      service: BrokerService = Depends(get_broker_service),
+  ) -> BrokerOperationListResponse: ...
+  ```
+- **Response:**
+  ```json
+  {
+    "items": [
+      {
+        "id": "...",
+        "parent_operation_id": null,
+        "figi": "BBG004730N88",
+        "ticker": "SBER",
+        "name": "Сбербанк",
+        "type": "BUY",
+        "state": "EXECUTED",
+        "date": "2026-04-14T10:15:00Z",
+        "quantity": "100",
+        "price": "250.50",
+        "payment": "-25050.00",
+        "currency": "RUB"
+      }
+    ],
+    "total": 128
+  }
+  ```
+- **Типы:** `BUY | SELL | DIVIDEND | COUPON | COMMISSION | TAX | OTHER`
+- **Верификация:** `pytest tests/broker/test_broker_router_operations.py -v`
+- **Потребители:** frontend `OperationsTable`, ARCH финальная приёмка
+
+#### C10 — Playwright baseline (DEV-1 E2E S4 fix → DEV-2 тест Live Runtime)
+
+- **Реализация:** `cd Develop/frontend && npx playwright test` → 0 failures
+- **Допустимо:** `test.skip(reason, { tag: '@s4-legacy' })` с TODO-комментом и тикетом
+- **Объём отчёта:** в отчёте DEV-1 указано **конкретное число** «X тестов, Y passing, Z skipped»
+- **Не-spec файлы:** `e2e/test-backtest-*.ts`, `test-lkoh-*.ts` перемещены в `e2e/helpers/` или удалены
+- **Верификация:**
+  ```bash
+  cd Develop/frontend && npx playwright test --reporter=list
+  ls Develop/frontend/e2e/test-backtest-*.ts 2>/dev/null   # должно быть пусто
+  ```
+- **Потребители:** DEV-2 (новый `s5r-live-runtime.spec.ts` встраивается в общий зелёный прогон)
+
+#### C11 — arch_review_s5r.md (ARCH → Оркестратор)
+
+- **Файл:** `Спринты/Sprint_5_Review/arch_review_s5r.md`
+- **Обязательные разделы:**
+  1. Baseline «до/после» — таблица CI/тестов/техдолга
+  2. Верификация по задачам S5R.1-4 с вердиктами
+  3. Cross-DEV contracts — сводная таблица (все C1-C11 подтверждены)
+  4. **Оценка эффективности нового процесса работы DEV-субагентов (S5R.5)** — обязательная секция, до 500 слов
+  5. Обновления ФТ/ТЗ (S5R.6) — перечень изменённых разделов
+  6. Новые Stack Gotchas (если обнаружены)
+  7. Рекомендации для Sprint 6
+  8. Финальный вердикт: **PASS / PASS WITH NOTES / FAIL**
+- **Верификация:** файл создан, все 8 разделов заполнены, вердикт выставлен
+- **Потребитель:** Оркестратор (для принятия решения о старте S6)
 
 ### Подтверждения контрактов (заполняется DEV-агентами в отчётах)
 
@@ -125,11 +340,12 @@
 - [x] `Спринты/Sprint_5/sprint_state.md` + `changelog.md` — финальная пометка про внеплановое S5R
 - [ ] Коммит+push в репо `test` (этап A — единый коммит)
 
-## Чек-лист этапа B (следующая сессия)
+## Чек-лист этапа B (завершён 2026-04-14)
 
-- [ ] `Sprint_5_Review/preflight_checklist.md` — создать (проверки среды, состояние репо, тесты baseline)
-- [ ] `Sprint_5_Review/prompt_DEV-1.md` — по `prompt_template.md`, задачи 1 + 4
-- [ ] `Sprint_5_Review/prompt_DEV-2.md` — по `prompt_template.md`, задача 2
-- [ ] `Sprint_5_Review/prompt_DEV-3.md` — по `prompt_template.md`, задача 3
-- [ ] `Sprint_5_Review/prompt_ARCH_review.md` — финальное ревью
-- [ ] Заполнить детали всех Cross-DEV contracts (точные endpoint / типы / сигнатуры)
+- [x] `Sprint_5_Review/preflight_checklist.md` — создан (системные требования, состояние репо, baseline тестов, блокирующие правила)
+- [x] `Sprint_5_Review/prompt_DEV-1.md` — по `prompt_template.md`, задачи S5R.1 + S5R.4
+- [x] `Sprint_5_Review/prompt_DEV-2.md` — по `prompt_template.md`, задача S5R.2 (Live Runtime Loop)
+- [x] `Sprint_5_Review/prompt_DEV-3.md` — по `prompt_template.md`, задача S5R.3 (Real Positions T-Invest)
+- [x] `Sprint_5_Review/prompt_ARCH_review.md` — финальное ревью + S5R.5 (оценка процесса) + S5R.6 (ФТ/ТЗ)
+- [x] Cross-DEV contracts C1-C11 — детализированы (точные файлы, сигнатуры, endpoint'ы, команды верификации)
+- [ ] Коммит+push в репо `test` (этап B — единый коммит)
