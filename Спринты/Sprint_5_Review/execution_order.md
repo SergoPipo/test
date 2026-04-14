@@ -4,9 +4,9 @@
 
 ## Статус
 
-- **Ревью:** 🔄 в процессе — этап A (планирование)
-- **Активная фаза:** документация + backlog
-- **Следующая фаза:** этап B — создание `prompt_DEV-*.md` по `Спринты/prompt_template.md`, потом запуск DEV-агентов
+- **Ревью:** 🔄 в процессе — этап A завершён 2026-04-14, переход к этапу B
+- **Активная фаза:** этап B — создание `preflight_checklist.md` + `prompt_DEV-*.md` по `Спринты/prompt_template.md`
+- **Следующая фаза:** этап C — запуск DEV-агентов по порядку (CI cleanup → E2E S4 + Live Runtime Loop + Real Positions параллельно)
 
 ## Последовательность выполнения
 
@@ -111,19 +111,19 @@
 
 ---
 
-## Чек-лист этапа A (текущий)
+## Чек-лист этапа A (завершён 2026-04-14)
 
 - [x] `Sprint_5_Review/README.md` — создан
 - [x] `Sprint_5_Review/backlog.md` — создан с 6 задачами
 - [x] `Sprint_5_Review/execution_order.md` — этот файл, с Cross-DEV contracts (скелет)
-- [ ] `Sprint_5_Review/PENDING_S5R_live_runtime_loop.md` — перемещён из `Sprint_6/`
-- [ ] `Sprint_5_Review/PENDING_S5R_real_account_positions_operations.md` — перемещён из `Sprint_6/`
-- [ ] `Sprint_5_Review/PENDING_S5R_ci_cleanup.md` — новый
-- [ ] `Sprint_5_Review/PENDING_S5R_e2e_s4_fix.md` — новый
-- [ ] `Спринты/project_state.md` — обновлён (S5R в разделе ревью, техдолг S6 → S5R)
-- [ ] `Документация по проекту/development_plan.md` — обновлён (откат 6.0 и 6.9 из S6, новый раздел S5R)
-- [ ] `Спринты/Sprint_5/sprint_state.md` + `changelog.md` — финальная пометка про внеплановое S5R
-- [ ] Коммит+push в репо `test`
+- [x] `Sprint_5_Review/PENDING_S5R_live_runtime_loop.md` — перемещён из `Sprint_6/`
+- [x] `Sprint_5_Review/PENDING_S5R_real_account_positions_operations.md` — перемещён из `Sprint_6/`
+- [x] `Sprint_5_Review/PENDING_S5R_ci_cleanup.md` — новый
+- [x] `Sprint_5_Review/PENDING_S5R_e2e_s4_fix.md` — новый
+- [x] `Спринты/project_state.md` — обновлён (S5R в разделе ревью, техдолг S6 → S5R)
+- [x] `Документация по проекту/development_plan.md` — обновлён (откат 6.0 и 6.9 из S6, новый раздел S5R с задачами S5R.1-6)
+- [x] `Спринты/Sprint_5/sprint_state.md` + `changelog.md` — финальная пометка про внеплановое S5R
+- [ ] Коммит+push в репо `test` (этап A — единый коммит)
 
 ## Чек-лист этапа B (следующая сессия)
 

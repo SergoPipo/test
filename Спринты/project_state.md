@@ -7,7 +7,7 @@
 
 ---
 
-## Текущий спринт: S5 завершён → **Sprint_5_Review (внеплановое, 🔄 в процессе)** → S6
+## Текущий спринт: S5 завершён → **Sprint_5_Review (внеплановое, 🔄 этап A завершён, этап B)** → S6
 
 ## Прогресс по спринтам
 
@@ -18,7 +18,7 @@
 | S3 | Стратегии + редактор | ✅ завершён | Blockly, Sandbox, CSRF, 320 тестов | Sprint_3/sprint_report.md |
 | S4 | AI + бэктестинг | ✅ завершён | AI chat, Backtest Engine, 577 тестов | Sprint_4/sprint_report.md |
 | S5 | Торговля | ⚠️ завершён с замечаниями | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E. **Выявлен High-долг:** CI красный, Live Runtime Loop не замкнут, реальные позиции T-Invest — заглушки. Устраняется в Sprint_5_Review. | Sprint_5/arch_review_s5.md |
-| **S5 Review** | **Внеплановое ревью: стабилизация перед S6** | **🔄 в процессе (этап A: планирование)** | **CI cleanup + Live Runtime Loop + реальные позиции T-Invest + E2E S4 fix + обкатка prompt_template + актуализация ФТ/ТЗ. Первое практическое применение принятых 2026-04-14 правил работы DEV-субагентов.** | **Sprint_5_Review/README.md** |
+| **S5 Review** | **Внеплановое ревью: стабилизация перед S6** | **🔄 этап A завершён → этап B (промпты DEV)** | **CI cleanup + Live Runtime Loop + реальные позиции T-Invest + E2E S4 fix + обкатка prompt_template + актуализация ФТ/ТЗ. Первое практическое применение принятых 2026-04-14 правил работы DEV-субагентов.** | **Sprint_5_Review/README.md** |
 | S6 | Уведомления | ⬜ не начат | Telegram, Email, In-app, Recovery, Graceful Shutdown | Sprint_6/sprint_report.md |
 | S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
@@ -29,8 +29,8 @@
 
 ```
 ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint_5_Review — внеплановое промежуточное ревью
-  → Этап A (СЕЙЧАС): планирование, backlog, PENDING файлы, правки project_state и development_plan
-  → Этап B (СЛЕДУЮЩАЯ СЕССИЯ): preflight_checklist.md + prompt_DEV-*.md по prompt_template.md
+  → Этап A (ЗАВЕРШЁН 2026-04-14): планирование, backlog, PENDING файлы, правки project_state и development_plan
+  → Этап B (СЕЙЧАС): preflight_checklist.md + prompt_DEV-*.md по prompt_template.md + детализация Cross-DEV contracts
   → Этап C: выполнение 6 задач DEV/ARCH агентами
   → Этап D: финальное arch_review_s5r.md, закрытие S5R
 
@@ -81,7 +81,7 @@ _Задачи, не выполненные в спринте и перенесё
 |-------|---------------|-----------|--------|--------|
 | Sprint_2_Review | S1 + S2 | M1: Каркас | ✅ завершён | Sprint_2_Review/backlog.md |
 | Sprint_4_Review | S3 + S4 | M2: Бэктест | ✅ завершён | Sprint_4_Review/backlog.md |
-| **Sprint_5_Review** | S5 (внеплановое) | — (стабилизация перед M3 full scope) | **🔄 в процессе (этап A)** | **Sprint_5_Review/backlog.md** |
+| **Sprint_5_Review** | S5 (внеплановое) | — (стабилизация перед M3 full scope) | **🔄 этап A завершён, этап B** | **Sprint_5_Review/backlog.md** |
 | Sprint_6_Review | S5 + S6 | M3: Торговля | ⬜ не начат | Sprint_6_Review/backlog.md |
 | Sprint_8_Review | S7 + S8 | M4: Production | ⬜ не начат | Sprint_8_Review/backlog.md |
 
