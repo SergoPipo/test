@@ -315,14 +315,14 @@
 | C1 | ruff green | DEV-1 | ✅ | `pyproject.toml` per-file-ignores + автофикс 158 errors. CI run #24406811582. |
 | C2 | eslint green | DEV-1 | ✅ | 9 React 19 hooks мест адресно + расчистка unused-vars. 0 errors (7 warn). |
 | C3 | all CI jobs reach command | DEV-1 | ✅ | Все 6 шагов exit 0. mypy 77→0 (overrides удалены), vitest 22→0 (excluded удалены). Run #24406811582. |
-| C4 | TradingSession.timeframe | DEV-2 | ⬜ | — |
-| C5 | SessionStartRequest.timeframe | DEV-2 | ⬜ | — |
-| C6 | SessionRuntime API | DEV-2 | ⬜ | — |
-| C7 | EventBus events | DEV-2 | ⬜ | — |
-| C8 | positions endpoint | DEV-3 | ⬜ | — |
-| C9 | operations endpoint | DEV-3 | ⬜ | — |
-| C10 | Playwright baseline | DEV-1 | ⬜ | — (волна 2) |
-| C11 | arch_review_s5r.md | ARCH | ⬜ | — |
+| C4 | TradingSession.timeframe | DEV-2 | ✅ | `models.py:34` Mapped[str\|None], миграция d7a1f4c5b201 round-trip. Run #24414375201. |
+| C5 | SessionStartRequest.timeframe | DEV-2 | ✅ | `schemas.py:32` Literal 8 значений, POST без timeframe → 422. |
+| C6 | SessionRuntime API | DEV-2 | ✅ | `runtime.py:181/260/285`, вызовы из `engine.py:157/186/223/251` + `main.py:61/73/81`. |
+| C7 | EventBus events | DEV-2 | ✅ | 6 событий на `trades:{session_id}` в runtime.py:244/279/402/446/465/484. |
+| C8 | positions endpoint | DEV-3 | ✅⚠️ | `router.py:189-236`, все Decimal→str через field_serializer. **ARCH:** source правило отличается от брифа (ticker+broker_account_id вместо FIGI в orders — модель Order отсутствует). Run #24414336848. |
+| C9 | operations endpoint | DEV-3 | ✅ | `router.py:239-297`, 7 типов операций, пагинация. |
+| C10 | Playwright baseline | DEV-1 | ✅ | 101 passed / 0 failed / 8 skipped с TODO-тикетами. Run #24416805061. **Playwright job в CI не добавлен** — решение DEV-1 (flaky MOEX data). |
+| C11 | arch_review_s5r.md | ARCH | ⬜ | — следующий шаг |
 
 ---
 

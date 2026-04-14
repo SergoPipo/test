@@ -190,3 +190,81 @@
 **Техдолг:** пуст. Никаких `ignore_errors`, никаких `test.exclude` pre-S5R, никаких переносов в S6.
 
 Контракты C1/C2/C3 подтверждены окончательно. C10 — в волне 2 (E2E S4 fix).
+
+---
+
+## 2026-04-14 — S5R фаза 2: параллельный запуск DEV-1 волна 2 + DEV-2 + DEV-3
+
+Три git worktree в `Claude_Code/Develop-wt-{dev1-e2e,dev2-runtime,dev3-positions}`, каждый на своей ветке от `s5r/ci-cleanup`. Первый запуск прерван лимитом токенов модели (19:00 Europe/Amsterdam); после reset запущены новые субагенты с инструкцией «в твоём worktree есть uncommitted changes — изучи, доделай, закоммитть». Все три завершили работу, все три CI зелёные, все 4 контракта в сумме подтверждены.
+
+### DEV-1 волна 2 — S5R.4 E2E S4 fix
+
+**Ветка:** `s5r/e2e-s4-fix`, **CI run #24416805061** ✅ (backend 1m6s / frontend 2m20s)
+
+- Playwright baseline: **101 passed / 0 failed / 8 skipped** с TODO-тикетами (`S5R-FAVORITES-INPUT` ×4 — UI FavoritesPanel переписан, убран text-input; `S5R-PAPER-REAL-MODE` ×1 — Real mode зависит от non-sandbox broker account; `S5R-CHART-FRESHNESS` ×3 — тесты актуальности свечей MOEX flaky вне торговой сессии).
+- Удалены 11 не-spec файлов: `e2e/{check-*,screenshot*,test-backtest-*,test-description-*,test-lkoh-full}.ts`.
+- `.gitignore` уточнён: `e2e/screenshots/`, `playwright-report/`, `test-results/` игнорятся, `.env.local` под `*.local`.
+- Исправлены `dashboard.spec.ts`, `strategy.spec.ts`, `s5-favorites.spec.ts`, `s5-paper-trading.spec.ts`, `s5-chart-timeframes.spec.ts` (strict-mode violations на дублирующихся empty-state кнопках, flaky MOEX-data).
+- **Playwright job в CI не добавлен** (задача 2.4 была опциональной) — решение DEV-1: реальные данные MOEX делают прогон flaky в PR runner'ах, рано.
+- **Контракт C10** ✅ поставлен.
+
+### DEV-2 — S5R.2 Live Runtime Loop
+
+**Ветка:** `s5r/live-runtime-loop`, **CI run #24414375201** ✅ (backend 1m7s / frontend 1m11s, итого 2m15s)
+
+- Новый `backend/app/trading/runtime.py` (`SessionRuntime.start/stop/restore_all/shutdown`) — единственная production-точка вызова `SignalProcessor.process_candle()`. Цикл «закрытие бара → signal → CB → OrderManager» замкнут.
+- `main.py:lifespan` — `SessionRuntime(...)` создаётся при старте, `restore_all(active_sessions)` восстанавливает состояние, при shutdown — `runtime.shutdown()`.
+- `TradingSessionManager.{start,pause,resume,stop}_session` — вызовы `runtime.start/stop` (после `db.commit()` для start, до — для stop).
+- `TradingSession.timeframe: Mapped[str | None]` — миграция `d7a1f4c5b201_add_timeframe_to_trading_sessions.py`, round-trip `upgrade → downgrade → upgrade` чистый.
+- `SessionStartRequest.timeframe: Literal["1m","5m","15m","1h","4h","D","W","M"]` — обязательное, POST без timeframe → 422 (тест `test_start_session_requires_timeframe`).
+- **EventBus канал `trades:{session_id}`** — 6 событий (`session.started`, `session.stopped`, `order.placed` c `latency_ms`, `trade.filled`, `trade.closed`, `cb.triggered`). Все Decimal → str (Gotcha 1).
+- `SignalProcessor.process_candle` принимает `list[CandleData]` (история, не одна свеча); алиасы `candle_open/...` сохранены для обратной совместимости.
+- Frontend: `LaunchSessionModal` — Select `session-timeframe-select` (8 значений, default `D`, required); `SessionCard` — badge таймфрейма; `api/types.ts` — `Timeframe`, `TradingSession.timeframe`, `SessionStartRequest.timeframe`.
+- Новые тесты: `tests/test_trading/test_runtime.py` (11 тестов). Всего backend `tests/test_trading/` — 76/76 passed, `tests/unit/` — 464/464, `tests/test_circuit_breaker/` — 112/112.
+- **Контракты C4, C5, C6, C7** ✅ поставлены (grep-верификация проведена, NO NOT-CONNECTED).
+
+**TODO (принимается ARCH как scope S6):**
+- Реальная подписка `StreamManager.subscribe` из `runtime.start` не сделана — runtime слушает только EventBus канал `market:{ticker}:{timeframe}`. Для paper-сессий достаточно, для real-сессий — задача S6 6.4 Recovery.
+- `trade.closed` публикуется только если OrderManager вернул сразу закрытый trade (reversal) — полный closed-поток в S6.
+- E2E `s5r-live-runtime.spec.ts` не создан — зависит от baseline Playwright, может быть добавлен после мержа в develop.
+
+### DEV-3 — S5R.3 Real Positions/Operations T-Invest
+
+**Ветка:** `s5r/real-positions`, **CI run #24414336848** ✅
+
+- `GET /broker/accounts/{id}/positions` — `response_model=list[BrokerPositionResponse]`. Все Decimal (`quantity`, `average_price`, `current_price`, `unrealized_pnl`, `blocked`) сериализуются как **строки** через `@field_serializer` (Pydantic v2, Gotcha 1). Router: `backend/app/broker/router.py:189-236`.
+- `GET /broker/accounts/{id}/operations` — query `from`/`to`/`offset`/`limit`, response `BrokerOperationListResponse{items, total}`. Типы: `BUY | SELL | DIVIDEND | COUPON | COMMISSION | TAX | OTHER`, состояния `EXECUTED | CANCELED | PROGRESS`. Пагинация в Python. Router: `backend/app/broker/router.py:239-297`.
+- Маппер `broker/tinvest/mapper.py`: `portfolio_position_to_broker_position`, `operation_to_broker_operation`, карты `OPERATION_TYPE_NAME_MAP`, `OPERATION_STATE_NAME_MAP`.
+- Adapter `broker/tinvest/adapter.py`: `get_real_positions`, `get_real_operations`, `_fetch_instrument_info_by_figi` (префетч ticker/name/kind через `GetInstrumentBy`, rate-limited).
+- Dataclasses `BrokerPosition`, `BrokerOperation` в `broker/base.py`.
+- 24 новых unit-теста в `tests/unit/test_broker/test_mapper.py`.
+- Frontend: `types.ts` — `BrokerPosition`/`BrokerOperation` с string-полями; `PositionsTable.tsx`, `OperationsTable.tsx` парсят через локальный `toNum()`; тесты в `__tests__/` обновлены под строковые фикстуры.
+- Путь `AccountPage → store → accountApi → /broker/accounts/{id}/{positions|operations}` подтверждён grep'ом — NO NOT-CONNECTED.
+- **Контракты C8, C9** ✅ поставлены.
+
+**Отклонение от брифа (флаг для ARCH):**
+- В контракте C8 описано правило `source = "strategy" если FIGI позиции есть в таблице orders`. В текущем репо модель `Order` отсутствует (есть `TradingSession` и `LiveTrade`). DEV-3 реализовал через match `ticker` + `TradingSession.broker_account_id`. Семантически эквивалентно, но **ARCH должен принять или потребовать добавить поле FIGI в `Order`/`LiveTrade` в S6**.
+
+### Контракты после фазы 2
+
+- **C1/C2/C3** (DEV-1 волна 1) — ✅ не регрессировали в 3 параллельных ветках.
+- **C4/C5/C6/C7** (DEV-2) — ✅ поставлены.
+- **C8/C9** (DEV-3) — ✅ поставлены (с флагом отклонения от source-правила).
+- **C10** (DEV-1 волна 2) — ✅ поставлен.
+- **C11** (ARCH arch_review_s5r.md) — ⬜ следующий шаг.
+
+### Новые Stack Gotchas (кандидаты от фазы 2)
+
+- **Gotcha 8** (DEV-2): `AsyncSession.get_bind()` возвращает sync `Engine`, несовместимый с `async_sessionmaker`. В тестах `SessionRuntime` — отдельный `create_async_engine` с `StaticPool`, не reuse `db_session.get_bind()`. Добавлено в `Develop/CLAUDE.md`.
+- **Gotcha 9** (DEV-1): Playwright strict mode — дублирующиеся кнопки empty-state (хедер + body) ломают `getByRole({name: 'X'})`. Правило: `.first()` или уникальные `data-testid`. Добавлено в `Develop/CLAUDE.md`.
+- **Gotcha 10** (DEV-1): E2E с живыми данными MOEX flaky вне торговой сессии. Правило: тесты сами skip-аются по UTC-проверке дня/часа, либо используют моки ISS, а не живой API. Добавлено в `Develop/CLAUDE.md`.
+
+**Уточнение Gotcha 1** (DEV-3): «Если контракт явно требует строку для Decimal-поля — следовать контракту, даже для UI-полей, которые виджеты показывают числом. Фронт парсит строку через `Number()` или локальный `toNum()`». Это не новая Gotcha, а расширение формулировки существующей.
+
+### Открытые вопросы для ARCH финального ревью
+
+1. **DEV-3 source правило** — принять отклонение (match по ticker) или требовать FIGI в модели Order в S6?
+2. **Playwright в CI** — принять отсутствие job'а или добавить с опцией пропуска вне торговой сессии?
+3. **DEV-2 `StreamManager.subscribe` в runtime.start** — принять как scope S6 (6.4 Recovery) или требовать сейчас?
+4. **8 E2E skip с TODO** — создать явные задачи S6 (`S5R-FAVORITES-INPUT`, `S5R-PAPER-REAL-MODE`, `S5R-CHART-FRESHNESS`) или принять как техдолг?
+5. **Уточнение Gotcha 1** — принять формулировку «контракт важнее альтернативы float/int» в Develop/CLAUDE.md?
