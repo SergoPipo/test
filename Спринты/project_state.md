@@ -7,7 +7,7 @@
 
 ---
 
-## Текущий спринт: S5 завершён → следующий S6 (Уведомления)
+## Текущий спринт: S5 завершён → **Sprint_5_Review (внеплановое, 🔄 в процессе)** → S6
 
 ## Прогресс по спринтам
 
@@ -17,8 +17,9 @@
 | S2 | Данные и графики | ✅ завершён | Брокер, графики, шифрование, 175 тестов | Sprint_2/sprint_report.md |
 | S3 | Стратегии + редактор | ✅ завершён | Blockly, Sandbox, CSRF, 320 тестов | Sprint_3/sprint_report.md |
 | S4 | AI + бэктестинг | ✅ завершён | AI chat, Backtest Engine, 577 тестов | Sprint_4/sprint_report.md |
-| S5 | Торговля | ✅ завершён | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E | Sprint_5/arch_review_s5.md |
-| S6 | Уведомления | ⬜ не начат | Telegram, Email, Recovery | Sprint_6/sprint_report.md |
+| S5 | Торговля | ⚠️ завершён с замечаниями | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E. **Выявлен High-долг:** CI красный, Live Runtime Loop не замкнут, реальные позиции T-Invest — заглушки. Устраняется в Sprint_5_Review. | Sprint_5/arch_review_s5.md |
+| **S5 Review** | **Внеплановое ревью: стабилизация перед S6** | **🔄 в процессе (этап A: планирование)** | **CI cleanup + Live Runtime Loop + реальные позиции T-Invest + E2E S4 fix + обкатка prompt_template + актуализация ФТ/ТЗ. Первое практическое применение принятых 2026-04-14 правил работы DEV-субагентов.** | **Sprint_5_Review/README.md** |
+| S6 | Уведомления | ⬜ не начат | Telegram, Email, In-app, Recovery, Graceful Shutdown | Sprint_6/sprint_report.md |
 | S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
 
@@ -27,9 +28,16 @@
 ## Что делать дальше
 
 ```
-СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Sprint 6 — Уведомления (Telegram, Email, In-App, Recovery)
+ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint_5_Review — внеплановое промежуточное ревью
+  → Этап A (СЕЙЧАС): планирование, backlog, PENDING файлы, правки project_state и development_plan
+  → Этап B (СЛЕДУЮЩАЯ СЕССИЯ): preflight_checklist.md + prompt_DEV-*.md по prompt_template.md
+  → Этап C: выполнение 6 задач DEV/ARCH агентами
+  → Этап D: финальное arch_review_s5r.md, закрытие S5R
+
+ПОСЛЕ S5R: Sprint 6 — Уведомления (Telegram, Email, In-App, Recovery) в изначальном объёме
 ПРЕДВАРИТЕЛЬНО: Sprint_6_Review после S5+S6 (обновить ФТ/ТЗ)
-ФАЙЛ СОСТОЯНИЯ: Sprint_5/sprint_state.md (завершён)
+
+ФАЙЛ СОСТОЯНИЯ: Sprint_5_Review/README.md (текущее ревью)
 ```
 
 ## Ключевые решения (кросс-спринтовые)
@@ -50,10 +58,11 @@ _Накапливается по мере продвижения, берётся
 
 | # | Спринт | Описание | Приоритет | Когда исправить |
 |---|--------|----------|-----------|-----------------|
-| 1 | S1 | Footer со статическими данными | Low | S2 (DEV-5) |
-| 2 | S4 | 30+ E2E тестов S4 падают (AI Chat, Backtest, Blockly) | Medium | S6 или раньше |
-| 3 | S5 | Реальные позиции и операции брокерского счёта T-Invest | Medium | S6 (см. Sprint_6/PENDING_S6_real_account_positions_operations.md) |
-| 4 | S5 | **Live Runtime Loop не замкнут:** `SignalProcessor.process_candle()` реализован, но нигде не вызывается. Стрим свечей и торговые сессии существуют независимо, у `TradingSession` нет поля `timeframe`, `scheduler/service.py` пуст. ARCH-ревью S5 формально принял класс SignalProcessor, но интеграцию не проверил. Архитектура в ТЗ описана ([technical_specification.md:1396-1417](../Документация%20по%20проекту/technical_specification.md)), но не реализована. | **High** | S6 (см. Sprint_6/PENDING_S6_live_runtime_loop.md) |
+| 1 | S1 | Footer со статическими данными | Low | Отложено (не критично) |
+| 2 | S4 | 30+ E2E тестов S4 падают (AI Chat, Backtest, Blockly) | **High** (переоценено — блокер) | **Sprint_5_Review** (см. Sprint_5_Review/PENDING_S5R_e2e_s4_fix.md) |
+| 3 | S5 | Реальные позиции и операции брокерского счёта T-Invest | Medium | **Sprint_5_Review** (см. Sprint_5_Review/PENDING_S5R_real_account_positions_operations.md) |
+| 4 | S5 | **Live Runtime Loop не замкнут:** `SignalProcessor.process_candle()` реализован, но нигде не вызывается. Стрим свечей и торговые сессии существуют независимо, у `TradingSession` нет поля `timeframe`, `scheduler/service.py` пуст. ARCH-ревью S5 формально принял класс SignalProcessor, но интеграцию не проверил. Архитектура в ТЗ описана ([technical_specification.md:1396-1417](../Документация%20по%20проекту/technical_specification.md)), но не реализована. | **High** | **Sprint_5_Review** (см. Sprint_5_Review/PENDING_S5R_live_runtime_loop.md) |
+| 5 | S1-S5 (накопленный) | **CI красный 11+ дней.** Backend `ruff check .` падает на `F401 imported but unused` в `alembic/env.py` (ложные срабатывания — нужен `per-file-ignores`). Frontend `pnpm lint` падает на новых правилах React 19 (`react-hooks/refs`, `react-hooks/set-state-in-effect`, `react-hooks/incompatible-library`) + legacy `no-unused-vars`/`no-explicit-any` в e2e. Из-за `bash -e` в actions `mypy`/`pytest`/`tsc`/`vitest` ни разу не запускались после 2026-04-03. Обнаружено через Gmail MCP 2026-04-14. | **High** | **Sprint_5_Review** (см. Sprint_5_Review/PENDING_S5R_ci_cleanup.md) |
 
 ## Перенесённые задачи
 
@@ -61,7 +70,10 @@ _Задачи, не выполненные в спринте и перенесё
 
 | # | Из спринта | Задача | Перенесена в | Причина |
 |---|------------|--------|-------------|---------|
-| — | — | — | — | — |
+| 1 | S4 (техдолг #2) | E2E S4 fix (30+ падающих тестов) | Sprint_5_Review | Блокирует Integration Verification в Sprint_5_Review и S6 |
+| 2 | S5 (техдолг #3) | Реальные позиции/операции T-Invest | Sprint_5_Review | Первоначально запланировано в S6 как 6.9, перенесено выше из-за накопления долга перед S6 |
+| 3 | S5 (техдолг #4) | Live Runtime Loop | Sprint_5_Review | Первоначально запланировано в S6 как 6.0, перенесено выше — блокер для всех остальных задач S6 |
+| 4 | — (новый, 14.04) | CI cleanup | Sprint_5_Review | Блокер для Integration Verification Checklist из `prompt_template.md` |
 
 ## Промежуточные ревью
 
@@ -69,6 +81,7 @@ _Задачи, не выполненные в спринте и перенесё
 |-------|---------------|-----------|--------|--------|
 | Sprint_2_Review | S1 + S2 | M1: Каркас | ✅ завершён | Sprint_2_Review/backlog.md |
 | Sprint_4_Review | S3 + S4 | M2: Бэктест | ✅ завершён | Sprint_4_Review/backlog.md |
+| **Sprint_5_Review** | S5 (внеплановое) | — (стабилизация перед M3 full scope) | **🔄 в процессе (этап A)** | **Sprint_5_Review/backlog.md** |
 | Sprint_6_Review | S5 + S6 | M3: Торговля | ⬜ не начат | Sprint_6_Review/backlog.md |
 | Sprint_8_Review | S7 + S8 | M4: Production | ⬜ не начат | Sprint_8_Review/backlog.md |
 

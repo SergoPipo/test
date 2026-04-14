@@ -353,42 +353,64 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 
 ---
 
-### СПРИНТ 6: Уведомления + live-runtime + восстановление (недели 11–12)
+### SPRINT 5 REVIEW: Внеплановое промежуточное ревью (стабилизация перед S6)
 
-**Цель:** замкнуть runtime-цикл live-торговли (обнаруженный разрыв после S5), система уведомлений, восстановление после перезапуска.
+**Когда:** между S5 и S6, открыто 2026-04-14.
+**Цель:** устранить накопленный технический и процессный долг, который блокирует корректный запуск Sprint 6.
+**Причина созыва:** ретроспектива S5 выявила 5 слабостей промптов DEV-субагентов (привели к 41 замечанию ручного тестирования и двум техдолгам), плюс Gmail MCP обнаружил, что CI красный 11+ дней и никто не смотрел на failed-уведомления.
+**Статус:** 🔄 в процессе (этап A: планирование)
+**Файлы:** `Спринты/Sprint_5_Review/` — `README.md`, `backlog.md`, `execution_order.md` (с Cross-DEV contracts), 4× `PENDING_S5R_*.md`
+
+| # | Задача | Исполнитель | Ревьюер | Зависит от | Блокирует |
+|---|---|---|---|---|---|
+| **S5R.1** | **CI cleanup** (backend ruff per-file-ignores для alembic/env.py; frontend адаптация React 19 правил `react-hooks/refs`, `set-state-in-effect`, `incompatible-library`; массовый фикс `no-unused-vars`/`no-explicit-any`) — зелёный baseline CI | DEV-1 | ARCH | — | S5R.2, S5R.3, S5R.4 |
+| **S5R.2** | **Live Runtime Loop** (`SessionRuntime` в `app/trading/runtime.py`, поле `TradingSession.timeframe` + миграция, новый sandbox-контракт с `candles: list[dict]`, UI-селектор TF, вывод TF в списке сессий) — **блокер всего S6** | DEV-2 (senior) | ARCH | S5R.1 | S6 полностью |
+| **S5R.3** | **Реальные позиции и операции T-Invest** (`broker/router.py` заглушки → реальный `OperationsService.GetPortfolio`/`GetOperations`, маппер `portfolio_position_to_broker_position`, multi-currency) | DEV-3 | ARCH | S5R.1 | — |
+| **S5R.4** | **E2E S4 fix** (30+ падающих тестов AI Chat / Backtest / Blockly: обновление селекторов, URL с `?tab=description`, моков API, flaky → waitFor, не-spec файлы → helpers/) | DEV-1 | ARCH | S5R.1 | S5R.2 (валидация) |
+| **S5R.5** | **Обкатка нового процесса работы DEV-субагентов** — процессная задача, применяется в S5R.1-4. Каждый prompt по `prompt_template.md`, Stack Gotchas из `Develop/CLAUDE.md`, Integration Verification, отчёт до 400 слов, Cross-DEV contracts в `execution_order.md`. Первое практическое применение. | Оркестратор + все DEV + ARCH | ARCH | S5R.1-4 | S6 (с validated process) |
+| **S5R.6** | **Актуализация ФТ/ТЗ** за S5 + S5R (разделы 5.4 Trading Engine, 6.6-6.7 UI, 7.3 Счёт, 12.4 Circuit Breaker) + обновление `development_plan.md` | ARCH | — | S5R.1-5 | — |
+| **S5R.R** | **Финальное ARCH-ревью S5R** — сводка по 6 задачам, полный тестовый прогон (pytest + vitest + Playwright), проверка integration verification для Live Runtime Loop, **обязательная оценка эффективности нового процесса работы DEV-субагентов** (что сработало, что доработать в `prompt_template.md` / Stack Gotchas перед S6) | ARCH + QA | — | всё | Запуск S6 |
+
+**Критерий завершения S5R:** CI зелёный (включая `pytest`, `vitest`, опционально `playwright`). Live Runtime Loop замкнут и подтверждён E2E-тестом «fake-стрим → ордер в БД». Реальные позиции T-Invest работают в разделе «Счёт». E2E S4 зелёные. ФТ/ТЗ актуальны. `Develop/CLAUDE.md` секция Stack Gotchas дополнена новыми ловушками. `prompt_template.md` доработан по итогам обкатки (если нужно). `arch_review_s5r.md` создан.
+
+**После S5R:** Sprint 6 стартует с зелёным CI, замкнутым runtime, реальными позициями, работающими E2E-тестами и обкатанным процессом работы DEV-субагентов.
+
+---
+
+### СПРИНТ 6: Уведомления + восстановление (недели 11–12)
+
+**Цель:** система уведомлений (Telegram + Email + In-app), восстановление после перезапуска backend, graceful shutdown.
+
+**⚠️ Предусловие:** Sprint_5_Review полностью завершён. Задачи 6.0 (Live Runtime Loop) и 6.9 (реальные позиции T-Invest) из предыдущей версии плана **перенесены в Sprint_5_Review** и **удалены из S6**.
 
 | # | Задача | Исполнитель | Ревьюер | Зависит от | || |
 |---|---|---|---|---|---|
-| **6.0** | **Live Runtime Loop:** `SessionRuntime` (listener `market:{ticker}:{tf}` → `SignalProcessor` с историей свечей → `OrderManager`), поле `TradingSession.timeframe` + миграция, обновление контракта sandbox (candles[] вместо одной свечи), UI-выбор таймфрейма, вывод TF в списке сессий. **Техдолг S5 #4, приоритет High.** Детальный план: `Спринты/Sprint_6/PENDING_S6_live_runtime_loop.md` | BACK1 + FRONT1 | ARCH | S5 (5.1, 5.2, 5.3) | 6.3, 6.4 |
-| 6.1 | Telegram-бот: привязка, уведомления, команды (/positions, /status, /help) | BACK2 | ARCH, SEC | S5 | 6.2 |
-| 6.2 | Email-уведомления (SMTP через aiosmtplib) | BACK2 | ARCH | S5 | 6.1, 6.3 |
-| 6.3 | In-app уведомления (WebSocket) + Event Bus: интеграция всех событий, pending_events | BACK1 | ARCH | S5, **6.0** | 6.1, 6.4 |
-| 6.4 | Восстановление после перезапуска (сверка позиций, возобновление сессий + поднятие `SessionRuntime`) | BACK1 | ARCH, SEC | S5 (5.1), **6.0** | 6.5 |
-| 6.5 | Graceful Shutdown (сохранение состояния, уведомление, остановка listener'ов `SessionRuntime`) | OPS + BACK1 | ARCH | 6.0, 6.4 | — |
-| 6.6 | UX: дизайн Notification Center + Telegram-сообщений + селектор таймфрейма в форме запуска сессии | UX | FRONT2 | S5 | 6.7 |
+| 6.1 | Telegram-бот: привязка, уведомления, команды (/positions, /status, /help) | BACK2 | ARCH, SEC | S5R | 6.2 |
+| 6.2 | Email-уведомления (SMTP через aiosmtplib) | BACK2 | ARCH | S5R | 6.1, 6.3 |
+| 6.3 | In-app уведомления (WebSocket) + Event Bus: интеграция всех событий из `SessionRuntime` (реализован в S5R), pending_events | BACK1 | ARCH | S5R (Live Runtime Loop) | 6.1, 6.4 |
+| 6.4 | Восстановление после перезапуска: сверка позиций с брокером (для real-сессий) + вызов `SessionRuntime.start()` (метод реализован в S5R) для всех active/paused сессий при старте backend | BACK1 | ARCH, SEC | S5R (Live Runtime Loop) | 6.5 |
+| 6.5 | Graceful Shutdown (сохранение состояния, уведомление, `SessionRuntime.stop()` для всех сессий) | OPS + BACK1 | ARCH | 6.4 | — |
+| 6.6 | UX: дизайн Notification Center + Telegram-сообщений | UX | FRONT2 | S5R | 6.7 |
 | 6.7 | Frontend: Notification Center (колокольчик, панель, критические баннеры, по дизайну 6.6) | FRONT2 | UX, ARCH | 6.3, 6.6 | — |
-| 6.8 | Frontend: доработки Trading Panel по результатам QA S5 + селектор TF в LaunchSessionModal + отображение TF в SessionCard (часть задачи 6.0) | FRONT1 | UX | S5 (5.R), **6.0** | 6.7 |
-| 6.9 | Реальные позиции и операции брокерского счёта T-Invest (техдолг S5 #3, см. `Sprint_6/PENDING_S6_real_account_positions_operations.md`) | BACK2 + FRONT2 | ARCH | S5 | 6.10 |
-| 6.10 | E2E-тесты S6: уведомления, Telegram (mock), восстановление, **live-runtime (fake-стрим → сессия → ордер)**, реальные позиции | QA | ARCH | 6.0, 6.1, 6.7, 6.9 | — |
-| 6.11 | Security-тестирование: CSRF, rate limiting, sandbox escape, auth brute-force | QA + SEC | ARCH | S3 (3.7, 3.8) | 6.10 |
-| **6.R** | **Архитектурное ревью S6 + QA-приёмка:** live-runtime (проверка что `SignalProcessor.process_candle` реально вызывается!), Telegram, event bus, recovery, security tests | **ARCH + QA** | — | всё | — |
+| 6.8 | Frontend: доработки Trading Panel по результатам QA S5R (если остались) | FRONT1 | UX | S5R | 6.7 |
+| 6.9 | E2E-тесты S6: уведомления, Telegram (mock), восстановление, graceful shutdown | QA | ARCH | 6.1, 6.4, 6.5, 6.7 | — |
+| 6.10 | Security-тестирование: CSRF, rate limiting, sandbox escape, auth brute-force | QA + SEC | ARCH | S3 (3.7, 3.8) | 6.9 |
+| **6.R** | **Архитектурное ревью S6 + QA-приёмка:** Telegram, event bus, recovery, graceful shutdown, security tests | **ARCH + QA** | — | всё | — |
 
-**Критерий завершения:** Live-runtime работает (стрим → стратегия → ордер) и подтверждён E2E-тестом. Уведомления работают (Telegram + email + in-app). Восстановление после рестарта подтверждено (сессии поднимают свои listener'ы заново). Реальные позиции и операции T-Invest отображаются в разделе «Счёт». Security-тесты пройдены. QA подтвердил E2E.
+**Критерий завершения:** Уведомления работают (Telegram + email + in-app). Восстановление после рестарта подтверждено (сессии поднимают свои listener'ы заново через `SessionRuntime.start()`). Graceful shutdown корректно останавливает все runtime. Security-тесты пройдены. QA подтвердил E2E.
 
 **Параллельность:**
 ```
-  UX ───── 6.6 (дизайн уведомлений + TF-селектор) ── [начало дизайна S7] ─▶
-  BACK1 ── 6.0 (live runtime) ── 6.3 (in-app + event bus) ── 6.4 (recovery) ─▶
-  BACK2 ── 6.1 (Telegram) ── 6.2 (email) ── 6.9 (реальные позиции T-Invest) ─▶
-  FRONT1 ─ 6.8 (TF в форме/карточке + доработки Trading Panel) ──────────────▶
-  FRONT2 ─ 6.7 (Notification Center) ── 6.9 (frontend реальных позиций) ────▶
-  SEC ──── 6.11 (security-тестирование, совм. с QA) ─────────────────────────▶
-  OPS ──── 6.5 (graceful shutdown) ──────────────────────────────────────────▶
-  QA ───── 6.10 (E2E) ── 6.11 (security tests) ──────────────────────────────▶
-  ARCH ─── ревью 6.0 → ревью → 6.R ──────────────────────────────────────────▶
+  UX ───── 6.6 (дизайн уведомлений) ── [начало дизайна S7] ─▶
+  BACK1 ── 6.3 (in-app + event bus) ── 6.4 (recovery) ─────▶
+  BACK2 ── 6.1 (Telegram) ── 6.2 (email) ───────────────────▶
+  FRONT1 ─ 6.8 (доработки Trading Panel) ───────────────────▶
+  FRONT2 ─ 6.7 (Notification Center) ───────────────────────▶
+  SEC ──── 6.10 (security-тестирование, совм. с QA) ────────▶
+  OPS ──── 6.5 (graceful shutdown) ──────────────────────────▶
+  QA ───── 6.9 (E2E) ── 6.10 (security tests) ──────────────▶
+  ARCH ─── ревью → 6.R ──────────────────────────────────────▶
 ```
-
-**Важно:** задача 6.0 (Live Runtime Loop) — **блокирующая** для 6.3, 6.4, 6.5, 6.8, 6.10. Её надо начинать первой, иначе остальные задачи будут строиться поверх незамкнутого цикла. Это компенсация за то, что S5 получил PASS на арх-ревью, но цикл `candle → SignalProcessor → OrderManager` в runtime не был замкнут (формальная приёмка класса `SignalProcessor.process_candle` без проверки интеграции). См. `Спринты/project_state.md` техдолг #4 и `Sprint_6/PENDING_S6_live_runtime_loop.md`.
 
 ---
 

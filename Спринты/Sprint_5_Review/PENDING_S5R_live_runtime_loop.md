@@ -1,6 +1,10 @@
-# [Sprint 6] Live Runtime Loop: замкнуть цикл «стрим свечей → стратегия → ордер»
+# [Sprint_5_Review] Live Runtime Loop: замкнуть цикл «стрим свечей → стратегия → ордер»
 
-> Задача перенесена из Sprint 5 (обнаружено при ревью ТЗ vs фактическая реализация). В Sprint 5 реализованы все компоненты Trading Engine (`TradingSessionManager`, `SignalProcessor`, `OrderManager`, `PaperBrokerAdapter`, `CircuitBreaker`), но **runtime-цикл live-торговли не замкнут**: `SignalProcessor.process_candle()` нигде в production-коде не вызывается. Архитектура в ТЗ описана ([technical_specification.md:1396-1417](../../Документация%20по%20проекту/technical_specification.md)), но не реализована. Приоритет: **High** — без этого live-торговля физически не работает, несмотря на прохождение арх-ревью S5 (PASS).
+> Задача перенесена из Sprint 6 → Sprint_5_Review при открытии внепланового ревью 2026-04-14.
+> **Исходно:** техдолг #4 High из S5, обнаружено при ретроспективе S5 (несоответствие ТЗ vs фактическая реализация).
+> **Приоритет:** 🔴 Блокер для S6.
+
+В Sprint 5 реализованы все компоненты Trading Engine (`TradingSessionManager`, `SignalProcessor`, `OrderManager`, `PaperBrokerAdapter`, `CircuitBreaker`), но **runtime-цикл live-торговли не замкнут**: `SignalProcessor.process_candle()` нигде в production-коде не вызывается. Архитектура в ТЗ описана ([technical_specification.md:1396-1417](../../Документация%20по%20проекту/technical_specification.md)), но не реализована.
 
 ## Контекст
 
@@ -25,7 +29,7 @@
 
 **Симптом, с которого обнаружилось:** заказчик попросил «вывести таймфрейм в списке торговых сессий», и оказалось, что поля нет нигде по стеку.
 
-**Почему ARCH-ревью S5 этого не поймал:** в [arch_review_s5.md:37](arch_review_s5.md#L37) отмечено `| SignalProcessor.process_candle | ✅ | Sandbox execution, кеш стратегий, < 500ms (sandbox timeout=5s) |` — это проверка класса как такового, но не интеграции в runtime. Grep по `process_candle(` в production-коде даёт только определение метода.
+**Почему ARCH-ревью S5 этого не поймал:** в [arch_review_s5.md:37](../Sprint_5/arch_review_s5.md) отмечено `| SignalProcessor.process_candle | ✅ | Sandbox execution, кеш стратегий, < 500ms (sandbox timeout=5s) |` — это проверка класса как такового, но не интеграции в runtime. Grep по `process_candle(` в production-коде даёт только определение метода. Это корневая причина, из-за которой в `prompt_template.md` появился обязательный раздел «Integration Verification Checklist» — см. `Спринты/prompt_template.md`.
 
 ## Архитектура из ТЗ (что должно быть)
 
@@ -73,7 +77,7 @@ BrokerAdapter.place_order(order)
      3. Если получен `Signal`, передаёт в `OrderManager.process_signal(session, signal, user_id)`.
      4. Проверяет latency < 500ms, логирует превышения.
 7. **`SessionRuntime.stop(session_id)`** — вызывается из `stop_session` / `pause_session`: отменяет listener, отписывается от стрима (если других сессий на том же `(ticker, tf)` нет).
-8. **Восстановление** — интегрировать с задачей 6.4 «Восстановление после перезапуска»: при старте backend вызвать `restore_sessions()` из [trading/engine.py](../../Develop/backend/app/trading/engine.py), для каждой `active/paused` сессии поднять `SessionRuntime` заново.
+8. **Восстановление** — интегрировать с задачей 6.4 Sprint 6 «Восстановление после перезапуска»: при старте backend вызвать `restore_sessions()` из [trading/engine.py](../../Develop/backend/app/trading/engine.py), для каждой `active/paused` сессии поднять `SessionRuntime` заново. **Примечание:** в S5R реализуется интеграционная точка (метод `restore_sessions` уже есть в S5), в S6 задача 6.4 добавляет сверку с брокером для real-сессий.
 
 ### 3. Backend: переделать `SignalProcessor._execute_strategy`
 
@@ -85,41 +89,46 @@ BrokerAdapter.place_order(order)
     - `position: dict | None` — текущая открытая позиция, если есть
 11. Пересмотреть формат контракта стратегии: переменная `signal` должна содержать `"buy"/"sell"/"hold"` (остаётся как есть), но теперь код стратегии может использовать `candles` для расчёта индикаторов.
 12. Совместимость: если старый код стратегии использует `candle_close`/`candle_open` — оставить их как алиасы на поля `candle` для обратной совместимости.
+13. **Внимание — Stack Gotcha 2:** не писать `import` в сгенерированном коде стратегии (см. `Develop/CLAUDE.md` секция Stack Gotchas). Nеобходимые модули (`bt`, `datetime`, `math`, `Decimal`) — в namespace через `_compile_strategy`.
 
 ### 4. Frontend: выбор таймфрейма в форме запуска
 
-13. **`LaunchSessionModal`** ([frontend/.../LaunchSessionModal.tsx](../../Develop/frontend/src/components/trading/LaunchSessionModal.tsx)) — добавить `<Select>` «Таймфрейм» с опциями `1m, 5m, 15m, 1h, 4h, D, W` (как в форме запуска бэктеста — см. [BacktestLaunchModal.tsx](../../Develop/frontend/src/components/backtest/BacktestLaunchModal.tsx)). Обязательное поле, дефолт `1h` или `D` (согласовать с заказчиком).
-14. **TypeScript тип** `SessionStartRequest.timeframe` и `TradingSession.timeframe` в [api/types.ts](../../Develop/frontend/src/api/types.ts).
+14. **`LaunchSessionModal`** ([frontend/.../LaunchSessionModal.tsx](../../Develop/frontend/src/components/trading/LaunchSessionModal.tsx)) — добавить `<Select>` «Таймфрейм» с опциями `1m, 5m, 15m, 1h, 4h, D, W` (как в форме запуска бэктеста — см. [BacktestLaunchModal.tsx](../../Develop/frontend/src/components/backtest/BacktestLaunchModal.tsx)). Обязательное поле, дефолт `1h` или `D` (согласовать с заказчиком).
+15. **TypeScript тип** `SessionStartRequest.timeframe` и `TradingSession.timeframe` в [api/types.ts](../../Develop/frontend/src/api/types.ts).
 
 ### 5. Frontend: вывод таймфрейма в списке сессий
 
-15. **`SessionCard`** ([frontend/.../SessionCard.tsx](../../Develop/frontend/src/components/trading/SessionCard.tsx)) — добавить отображение `timeframe` рядом с тикером / mode-badge. Для старых сессий (`timeframe === null`) показывать `—`.
-16. **`SessionList`** — учесть новое поле в заголовке/фильтрах, если уместно.
-17. **Фильтр по TF в списке сессий** (опционально) — добавить SegmentedControl для быстрой фильтрации активных сессий по TF.
+16. **`SessionCard`** ([frontend/.../SessionCard.tsx](../../Develop/frontend/src/components/trading/SessionCard.tsx)) — добавить отображение `timeframe` рядом с тикером / mode-badge. Для старых сессий (`timeframe === null`) показывать `—`.
+17. **`SessionList`** — учесть новое поле в заголовке/фильтрах, если уместно.
+18. **Фильтр по TF в списке сессий** (опционально) — добавить SegmentedControl для быстрой фильтрации активных сессий по TF.
 
 ### 6. Обработка ошибок стрима и деградации
 
-18. Разрыв стрима: listener должен автоматически пере-подписаться (логика есть в `stream_manager`, нужно убедиться что `SessionRuntime` не теряет подписку при reconnect).
-19. Отсутствие истории в OHLCV-кеше: если `history.length < required_lookback`, стратегия не вызывается, в логи пишется `insufficient_history` и в `DailyStat` фиксируется счётчик пропущенных свечей.
-20. Таймаут выполнения стратегии (> 500ms) — логируется как warning, не блокирует следующую свечу.
+19. Разрыв стрима: listener должен автоматически пере-подписаться (логика есть в `stream_manager`, нужно убедиться что `SessionRuntime` не теряет подписку при reconnect).
+20. Отсутствие истории в OHLCV-кеше: если `history.length < required_lookback`, стратегия не вызывается, в логи пишется `insufficient_history` и в `DailyStat` фиксируется счётчик пропущенных свечей.
+21. Таймаут выполнения стратегии (> 500ms) — логируется как warning, не блокирует следующую свечу.
 
 ### 7. Тесты
 
-21. **Unit** на `SessionRuntime`:
+22. **Unit** на `SessionRuntime`:
     - `start` → подписка на правильный канал
     - `stop` → отписка и удаление listener
     - получение свечи → вызов `SignalProcessor` → вызов `OrderManager`
     - разрыв стрима → переподписка
-22. **Unit** на обновлённый `SignalProcessor._execute_strategy` — стратегия видит `candles` и вычисляет индикатор.
-23. **Integration** «end-to-end от fake-стрима до ордера»: фейк MarketDataService эмитит последовательность свечей → поднимается сессия → проверяем появление `LiveTrade` в БД.
-24. **E2E**: запустить paper-сессию на `SBER` + `1h` → симулировать публикацию свечей в event_bus → проверить, что сессия реагирует и появляется сделка в списке.
-25. Обновить существующие тесты `test_order_manager.py`, `test_circuit_breaker/test_integration.py` — они используют ручное создание `Signal`, проверить, что это всё ещё работает.
+23. **Unit** на обновлённый `SignalProcessor._execute_strategy` — стратегия видит `candles` и вычисляет индикатор.
+24. **Integration** «end-to-end от fake-стрима до ордера»: фейк MarketDataService эмитит последовательность свечей → поднимается сессия → проверяем появление `LiveTrade` в БД.
+25. **E2E**: запустить paper-сессию на `SBER` + `1h` → симулировать публикацию свечей в event_bus → проверить, что сессия реагирует и появляется сделка в списке.
+26. Обновить существующие тесты `test_order_manager.py`, `test_circuit_breaker/test_integration.py` — они используют ручное создание `Signal`, проверить, что это всё ещё работает.
+27. **Integration Verification (из `prompt_template.md`):**
+    - `grep -rn "process_candle(" app/` → результат показывает **не только** `engine.py:253` и тесты, но и `runtime.py` (production вызов)
+    - `grep -rn "SessionRuntime(" app/` → `service.py` или `trading/__init__.py` (инстанциирование)
+    - `grep -rn "event_bus.subscribe" app/trading/` → `runtime.py` с каналом `market:{ticker}:{tf}`
 
 ### 8. Документация
 
-26. **ФТ** ([functional_requirements.md:362+](../../Документация%20по%20проекту/functional_requirements.md)) — уточнить, что сессия запускается на конкретном таймфрейме и что стратегия реагирует на закрытие баров этого TF.
-27. **ТЗ** ([technical_specification.md:1396+](../../Документация%20по%20проекту/technical_specification.md)) — дополнить архитектурной схемой `SessionRuntime`, правилами ведения истории и обработки разрывов стрима.
-28. **План развития** — снять задачу из техдолга `project_state.md#4` после готовности.
+28. **ФТ** ([functional_requirements.md:362+](../../Документация%20по%20проекту/functional_requirements.md)) — уточнить, что сессия запускается на конкретном таймфрейме и что стратегия реагирует на закрытие баров этого TF.
+29. **ТЗ** ([technical_specification.md:1396+](../../Документация%20по%20проекту/technical_specification.md)) — дополнить архитектурной схемой `SessionRuntime`, правилами ведения истории и обработки разрывов стрима.
+30. **План развития** — снять задачу из техдолга `project_state.md#4` после готовности.
 
 ## Файлы, которые затронет задача
 
@@ -138,16 +147,26 @@ BrokerAdapter.place_order(order)
 | `Develop/frontend/src/components/trading/LaunchSessionModal.tsx` | Селект «Таймфрейм» |
 | `Develop/frontend/src/components/trading/SessionCard.tsx` | Вывод TF на карточке |
 | `Develop/frontend/src/components/trading/SessionList.tsx` | Возможный фильтр по TF |
-| `Develop/frontend/e2e/s6-live-runtime.spec.ts` | Новый E2E |
+| `Develop/frontend/e2e/s5r-live-runtime.spec.ts` | Новый E2E |
 
-## Связь с другими задачами S6
+## Связь с другими задачами
+
+### Внутри Sprint_5_Review
 
 | Задача | Связь |
 |--------|-------|
-| **6.3** In-app уведомления + Event Bus | Напрямую — `SessionRuntime` подписывается на event_bus, события из runtime (`trade_opened`, `trade_closed`, `cb_triggered`) должны идти в Notification Center |
-| **6.4** Восстановление после перезапуска | **Тесно** — логика «при рестарте backend поднять все active/paused сессии» по сути и есть `SessionRuntime.start` для каждой. Задачи надо синхронизировать по времени выполнения. |
-| **6.5** Graceful Shutdown | Напрямую — при shutdown `SessionRuntime` должен корректно остановить listener'ы и сохранить last_signal_at |
-| **PENDING_S6_real_account_positions_operations** | Не напрямую, но после готовности обеих задач — реальная live-торговля наконец-то работает |
+| **Задача 1** CI cleanup | Предусловие — без зелёного CI integration verification работает только частично |
+| **Задача 4** E2E S4 fix | Предусловие — без работающего Playwright baseline новый E2E «fake-стрим → сделка» утонет в общем хаосе |
+| **Задача 3** Реальные позиции T-Invest | Независима по файлам, можно параллелить |
+| **Задача 6** Актуализация ФТ/ТЗ | Финальная — после реализации |
+
+### С Sprint 6
+
+| Задача S6 | Связь |
+|-----------|-------|
+| **6.3** In-app уведомления + Event Bus | `SessionRuntime` публикует события в event_bus — уведомления их получают |
+| **6.4** Восстановление после перезапуска | Вызывает `SessionRuntime.start()` для каждой active/paused сессии после рестарта + добавляет сверку с брокером |
+| **6.5** Graceful Shutdown | При shutdown вызывает `SessionRuntime.stop()` для всех активных сессий |
 
 ## Критерии готовности
 
@@ -158,19 +177,21 @@ BrokerAdapter.place_order(order)
 - [ ] При публикации свечи закрытия в event_bus стратегия вызывается со **списком** последних N свечей и может корректно вычислять индикаторы.
 - [ ] Сигнал `BUY`/`SELL` корректно проходит через `CircuitBreaker` → `OrderManager` → `LiveTrade` в БД.
 - [ ] При `stop_session()` / `pause_session()` listener отписывается.
-- [ ] При рестарте backend все active/paused сессии восстанавливают подписки (интеграция с 6.4).
+- [ ] При рестарте backend все active/paused сессии восстанавливают подписки (через `restore_sessions`).
+- [ ] **Integration Verification (из `prompt_template.md`):** `grep -rn "process_candle(" app/` показывает вызов из `runtime.py`, а не только тесты. Cross-DEV contracts C4-C7 (из `execution_order.md`) подтверждены в отчёте.
 - [ ] Интеграционный тест end-to-end: fake-стрим → сессия → ордер → запись в БД.
 - [ ] E2E тест: запуск сессии, симуляция свечей, появление сделки в UI.
 - [ ] Latency < 500ms от свечи до `place_order()` — залогировано и проверено.
-- [ ] ФТ/ТЗ обновлены.
+- [ ] ФТ/ТЗ обновлены (в рамках задачи 6 S5R).
 - [ ] Техдолг #4 в `project_state.md` снят.
 
 ## Риски
 
-1. **Scope creep** — задача большая (runtime + история + sandbox-контракт). Риск, что она перевесит остальной S6. **Митигация**: делать без задачи 6.5 (Graceful Shutdown) и 6.3 (in-app) если не успеваем, но **обязательно** с 6.4 (Recovery) — они логически неделимы.
+1. **Scope creep** — задача большая (runtime + история + sandbox-контракт). **Митигация:** чётко разделить с задачей 6.4 S6 (Recovery): в S5R делаем `SessionRuntime` и вызов `start/stop` из lifecycle-методов; в S6.4 добавляется сверка с брокером для real-сессий.
 2. **Sandbox-контракт меняется** — старые сохранённые версии стратегий, которые используют `candle_close` и т.п., должны продолжать работать. **Митигация**: оставить алиасы `candle_open/high/low/close/volume` → поля `candle` для обратной совместимости.
 3. **История в OHLCV-кеше** может быть неполной сразу после подписки на новый инструмент. **Митигация**: при `SessionRuntime.start` предварительно догрузить `N` последних свечей через `market_data_service.get_candles` (синхронно, до запуска listener'а).
 4. **Производительность** при параллельных сессиях на одном тикере: listener'ов много, а подписка одна. **Митигация**: `MarketDataStreamManager` уже мультиплексирует подписки по `(ticker, tf)` — listener'ы подписываются на один event_bus канал.
+5. **React 19 + новые правила eslint** могут сломать сборку frontend при добавлении Select-компонента, если он использует устаревшие паттерны. **Митигация:** задача 1 (CI cleanup) выполняется первой, включая адаптацию React 19 правил.
 
 ## Ссылки
 
@@ -178,4 +199,6 @@ BrokerAdapter.place_order(order)
 - ФТ, раздел Live Trading: `Документация по проекту/functional_requirements.md` (строки 362-363)
 - ARCH-ревью S5: `Спринты/Sprint_5/arch_review_s5.md` (строка 37 — формальная приёмка SignalProcessor)
 - Техдолг: `Спринты/project_state.md` пункт #4
-- Смежная задача: `Sprint_6/PENDING_S6_real_account_positions_operations.md`
+- Смежная задача S5R: `Sprint_5_Review/PENDING_S5R_real_account_positions_operations.md`
+- Stack Gotchas: `Develop/CLAUDE.md` раздел «⚠️ Stack Gotchas» — особенно Gotcha 2 (CodeSandbox __import__), Gotcha 4 (T-Invest gRPC streaming)
+- Процессные правила: корневой `CLAUDE.md` раздел «Работа с DEV-субагентами в спринтах», `Спринты/prompt_template.md`
