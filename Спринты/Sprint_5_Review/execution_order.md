@@ -312,16 +312,16 @@
 
 | # | Контракт | Поставщик | Статус | Комментарий |
 |---|----------|-----------|--------|-------------|
-| C1 | ruff green | DEV-1 | ⬜ | — |
-| C2 | eslint green | DEV-1 | ⬜ | — |
-| C3 | all CI jobs reach command | DEV-1 | ⬜ | — |
+| C1 | ruff green | DEV-1 | ✅ | `pyproject.toml` per-file-ignores + автофикс 158 errors. CI run #24406811582. |
+| C2 | eslint green | DEV-1 | ✅ | 9 React 19 hooks мест адресно + расчистка unused-vars. 0 errors (7 warn). |
+| C3 | all CI jobs reach command | DEV-1 | ✅ | Все 6 шагов exit 0. mypy 77→0 (overrides удалены), vitest 22→0 (excluded удалены). Run #24406811582. |
 | C4 | TradingSession.timeframe | DEV-2 | ⬜ | — |
 | C5 | SessionStartRequest.timeframe | DEV-2 | ⬜ | — |
 | C6 | SessionRuntime API | DEV-2 | ⬜ | — |
 | C7 | EventBus events | DEV-2 | ⬜ | — |
 | C8 | positions endpoint | DEV-3 | ⬜ | — |
 | C9 | operations endpoint | DEV-3 | ⬜ | — |
-| C10 | Playwright baseline | DEV-1 | ⬜ | — |
+| C10 | Playwright baseline | DEV-1 | ⬜ | — (волна 2) |
 | C11 | arch_review_s5r.md | ARCH | ⬜ | — |
 
 ---
