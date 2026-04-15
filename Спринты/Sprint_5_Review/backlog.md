@@ -17,8 +17,11 @@
 | 7 | **FAVORITES input — поиск внутри списка избранного** | Fix | 🟢 Closeout | 4 E2E skip | ✅ Готово (DEV-1 closeout wave 1) | секция Closeout ниже |
 | 8 | **E2E PAPER-REAL-MODE fixture** | Fix | 🟢 Closeout | 1 E2E skip | ✅ Готово (DEV-1 closeout wave 1) | секция Closeout ниже |
 | 9 | **MODEL-FIGI: FIGI в LiveTrade + source-правило через FIGI** | Feature | 🟢 Closeout | Замечание C8 | ✅ Готово (DEV-1 closeout wave 1) | секция Closeout ниже |
-| 10 | **E2E: 2 pre-existing failing через моки API** | Fix | 🟢 Closeout wave 2 | Неожиданность из wave 1 | ⬜ TODO | секция Closeout ниже |
-| 11 | **Alembic drift санитайзер-миграция** | Fix (БД) | 🟢 Closeout wave 2 | Неожиданность из wave 1 | ⬜ TODO | секция Closeout ниже |
+| 10 | **E2E: 2 pre-existing failing через моки API** | Fix | 🟢 Closeout wave 2 | Неожиданность из wave 1 | ✅ Готово (DEV-1 closeout wave 2) | секция Closeout ниже |
+| 11 | **Alembic drift санитайзер-миграция** | Fix (БД) | 🟢 Closeout wave 2 | Неожиданность из wave 1 | ✅ Готово (DEV-1 closeout wave 2) | секция Closeout ниже |
+| 12 | **BacktestResultsPage: `Запустить торговлю` без обработчика** | Fix (Frontend) | 🟢 Closeout wave 3 | Обнаружен при ручном тесте 2026-04-15 | ⬜ TODO | секция Closeout wave 3 ниже |
+| 13 | **Bug: tinvest_stream `.candles` AttributeError (бесконечный reconnect)** | Bug (Backend) | 🟢 Closeout wave 3 | Обнаружен в логах 2026-04-15 | ⬜ TODO | секция Closeout wave 3 ниже |
+| 14 | **Bug: iss_tail_fetch `offset-naive vs offset-aware datetimes`** | Bug (Backend) | 🟢 Closeout wave 3 | Обнаружен в логах 2026-04-15 | ⬜ TODO | секция Closeout wave 3 ниже |
 
 **Условные обозначения:**
 - ⬜ TODO / 🔄 в работе / ✅ готово / ⚠️ готово с замечаниями
@@ -514,3 +517,220 @@ DEV-1 closeout wave 1 при финальном `npx playwright test` локал
 > **Правило:** всегда визуально ревьюить `upgrade()`/`downgrade()` после autogenerate. Неожиданный drift **вычищать** из миграции с текущей задачей и выносить в отдельную санитайзер-миграцию. Никогда не коммитить миграцию, которая смешивает ожидаемую логику задачи с неожиданным drift.
 
 Это добавит в `Develop/CLAUDE.md` **коммитом оркестратора** перед запуском DEV-1 wave 2, чтобы субагент уже видел правило.
+
+---
+
+### Closeout wave 3 — обнаружены при ручном тестировании 2026-04-15 (задачи 12-14)
+
+После закрытия wave 2 заказчик залогинился в UI и попытался запустить торговую сессию из результата бэктеста. Три проблемы:
+
+1. **Frontend-регрессия/заглушка:** кнопка `Запустить торговлю` на `BacktestResultsPage` (строка 175-177) **не имеет `onClick`** — чистая заглушка из Sprint 3/4, никогда не была подключена. Клик не делает ничего. E2E тесты не покрывали этот flow (всё тестировалось через `TradingPage + LaunchSessionModal`). Это **продолжение паттерна «класс есть, но не подключён к UI»**, только на слое frontend.
+2. **Backend bug в логах** — `tinvest_stream_reconnecting error="'MarketDataStreamService' object has no attribute 'candles'"` в бесконечном цикле для каждой подписки. Код в `broker/tinvest/adapter.py:725` использует устаревший API tinvest SDK (`client.market_data_stream.candles(...)` — такого метода нет).
+3. **Backend warning в логах** — `iss_tail_fetch_failed error="can't compare offset-naive and offset-aware datetimes"` при попытке backend дозапросить хвост свечей через MOEX ISS. Не блокирует, но каждая попытка тонет в warning'ах.
+
+Заказчик 2026-04-15 решил закрыть все три в S5R closeout wave 3 (та же логика: Sprint 6 должен стартовать с минимальным шумом в логах и полностью работающим UI).
+
+Про кнопки `CSV`/`PDF` рядом с `Запустить торговлю`: они тоже заглушки, но **по плану Sprint 7 задача 7.3** (см. `development_plan.md:434` — `Экспорт CSV/PDF бэктеста (WeasyPrint + openpyxl)`). Оставляем заглушки, но помечаем `disabled` с tooltip «Будет реализовано в Sprint 7».
+
+### Задача 12 — BacktestResultsPage: `Запустить торговлю` → `LaunchSessionModal`
+
+**Тип:** Fix (Frontend + E2E)
+**Приоритет:** 🟢 Closeout wave 3
+**Исполнитель:** DEV-1 closeout wave 3
+**Размер:** S–M (~1 час)
+
+#### Контекст
+
+Файл `frontend/src/pages/BacktestResultsPage.tsx` строки 150-178 содержит toolbar с тремя кнопками: `CSV`, `PDF`, `Запустить торговлю`. Все три **без `onClick`**. Данные бэктеста доступны в локальной переменной `bt` (тип `BacktestResult` из api/types), в том числе `bt.ticker`, `bt.timeframe`, `bt.strategy_id`, `bt.strategy_name`, `bt.strategy_version_id`.
+
+Компонент `LaunchSessionModal` существует в `frontend/src/components/trading/LaunchSessionModal.tsx`. После S5R.2 он принимает обязательный `timeframe` из `Literal["1m","5m","15m","1h","4h","D","W","M"]`. Нужно проверить, какие props он уже принимает и какие требуется добавить для предзаполнения.
+
+#### Что делать
+
+1. **Проверить текущие props `LaunchSessionModal`.** Прочитай его целиком, определи:
+   - Какие props для предзаполнения уже есть (`initialTicker`? `initialTimeframe`? `initialStrategyId`?)
+   - Как модалка открывается сейчас из `TradingPage`
+2. **Если props для предзаполнения нет** — добавить:
+   ```tsx
+   interface LaunchSessionModalProps {
+     opened: boolean;
+     onClose: () => void;
+     initialTicker?: string;
+     initialTimeframe?: Timeframe;
+     initialStrategyId?: number;
+     initialStrategyVersionId?: number;
+   }
+   ```
+   И в `useState` модалки инициализировать значения из `initialX` props. При смене props или `opened=true` — синхронизировать форму. **Внимание Gotcha 9** (Playwright strict mode) — если добавляешь новый `data-testid`, убедись что он уникален.
+3. **В `BacktestResultsPage`:**
+   - Импортировать `LaunchSessionModal` из `@/components/trading/LaunchSessionModal` (или `@/components/trading`).
+   - Добавить `const [launchOpen, setLaunchOpen] = useState(false);`
+   - Кнопка `Запустить торговлю` — добавить `onClick={() => setLaunchOpen(true)}` + `data-testid="launch-trading-from-backtest-btn"`.
+   - Кнопки `CSV` и `PDF` — пометить `disabled` + обернуть в `<Tooltip label="Будет реализовано в Sprint 7 (задача 7.3 — экспорт CSV/PDF через WeasyPrint + openpyxl)">...</Tooltip>`. Также добавить `data-testid="export-csv-disabled-btn"` и `"export-pdf-disabled-btn"` для будущих тестов.
+   - После `<Tabs>`/остального содержимого рендерить:
+     ```tsx
+     <LaunchSessionModal
+       opened={launchOpen}
+       onClose={() => setLaunchOpen(false)}
+       initialTicker={bt.ticker}
+       initialTimeframe={bt.timeframe}
+       initialStrategyId={bt.strategy_id}
+       initialStrategyVersionId={bt.strategy_version_id}
+     />
+     ```
+4. **Новый E2E тест** `frontend/e2e/s5r-backtest-launch-trading.spec.ts`:
+   - Использовать фикстуру `api_mocks.ts` (из wave 2) — `injectFakeAuth`, `mockBrokerAccounts` с non-sandbox, `mockStrategies`.
+   - Мокнуть `GET /api/v1/backtest/{id}` через `page.route('**/api/v1/backtest/*', ...)` с response типа `BacktestResult` (минимальные поля + `strategy_id`, `ticker="SBER"`, `timeframe="1h"`).
+   - Мокнуть `POST /api/v1/trading/sessions/start` с response 200 + id новой сессии.
+   - Шаги:
+     1. Открыть `/backtests/1` (или каким путь страницы)
+     2. Проверить, что кнопка `launch-trading-from-backtest-btn` видна
+     3. Клик → проверить открытие `LaunchSessionModal` (через `data-testid="session-timeframe-select"` из S5R.2)
+     4. Проверить предзаполнение: `session-timeframe-select` содержит `"1h"`, поле тикера — `"SBER"`
+     5. Клик на Submit модалки → проверить POST к `/api/v1/trading/sessions/start` (через `page.waitForRequest`)
+     6. Проверить закрытие модалки
+   - Отдельный тест «CSV/PDF disabled with tooltip»: hover на кнопку → появляется tooltip с текстом «Sprint 7».
+
+#### Критерии готовности
+
+- [ ] Кнопка `Запустить торговлю` имеет `onClick`, открывает `LaunchSessionModal` с предзаполненными данными бэктеста
+- [ ] `LaunchSessionModal` поддерживает props `initialTicker/initialTimeframe/initialStrategyId/initialStrategyVersionId`
+- [ ] Кнопки `CSV`/`PDF` — `disabled` + Tooltip с отсылкой на Sprint 7
+- [ ] Новый E2E тест `s5r-backtest-launch-trading.spec.ts` — зелёный через моки
+- [ ] Полный локальный `npx playwright test` — **0 failures** (могут быть те же 8 skipped)
+- [ ] `pnpm lint && pnpm tsc --noEmit && pnpm test` — зелёные
+
+#### Коммит
+
+`fix(backtest): подключить LaunchSessionModal к кнопке "Запустить торговлю" + disabled CSV/PDF (S5R closeout #12)`
+
+### Задача 13 — Backend bug: tinvest_stream `.candles` AttributeError
+
+**Тип:** Bug (Backend)
+**Приоритет:** 🟢 Closeout wave 3
+**Исполнитель:** DEV-1 closeout wave 3
+**Размер:** M (~2 часа)
+
+#### Симптом
+
+В логах backend (при работающем backend после логина):
+```
+tinvest_stream_reconnecting  error="'MarketDataStreamService' object has no attribute 'candles'"
+  subscription_id=...  ticker=SBER
+```
+Повторяется **каждые 5 секунд** в бесконечном цикле для каждой активной подписки на свечи. Перезагрузка backend не помогает.
+
+#### Корень проблемы
+
+`backend/app/broker/tinvest/adapter.py:725`:
+```python
+async for candle in client.market_data_stream.candles(
+    instruments=[CandleInstrument(figi=figi, interval=sub_interval)],
+):
+```
+
+**У `MarketDataStreamService` нет метода `.candles`.** Проверено оркестратором через `dir(MarketDataStreamService)` — есть только `market_data_stream` и `market_data_server_side_stream`. Код написан под несуществующий API — вероятно, это был autocomplete-галлюцинация или остаток от старой версии SDK.
+
+#### Правильный API tinkoff-investments (актуальная версия в venv)
+
+```python
+from tinkoff.invest import (
+    MarketDataRequest,
+    SubscribeCandlesRequest,
+    SubscriptionAction,
+    CandleInstrument,
+    SubscriptionInterval,
+)
+
+async def _subscribe():
+    async def request_iterator():
+        # Подписаться при первом yield
+        yield MarketDataRequest(
+            subscribe_candles_request=SubscribeCandlesRequest(
+                subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,
+                instruments=[
+                    CandleInstrument(figi=figi, interval=sub_interval),
+                ],
+            )
+        )
+        # Держать соединение открытым — await forever
+        while True:
+            await asyncio.sleep(3600)
+
+    async with self._create_client() as client:
+        async for response in client.market_data_stream.market_data_stream(request_iterator()):
+            if response.candle:
+                candle_data = TInvestMapper.candle_to_candle_data(response.candle)
+                await callback(candle_data)
+            # subscribe_candles_response — подтверждение, не надо ничего делать
+```
+
+**Проверь в SDK** через `python -c "from tinkoff.invest import MarketDataRequest; help(MarketDataRequest)"`, какие именно поля в `MarketDataRequest` — возможно `subscribe_candles_request` vs `subscribe_candles_request` отличается по имени.
+
+#### Что делать
+
+1. **Проверить точный API** в текущей версии tinkoff-investments SDK через `inspect.signature` / `help()` / чтение `site-packages/tinkoff/invest/...`.
+2. **Переписать `subscribe_candles`** в `adapter.py:688-748` (или где там метод целиком) под правильный API через `market_data_stream()` с async request iterator.
+3. **Сохранить паттерн Gotcha 4** (T-Invest gRPC persistent connection) — **одно** соединение на все подписки, мультиплексирование через `StreamManager`. НЕ создавать отдельный stream для каждой подписки.
+4. **Тест:** unit-тест с моком `client.market_data_stream.market_data_stream` (async generator), проверка что `callback` вызывается с правильным `CandleData`.
+5. **Живая проверка:** после фикса перезапустить backend (убить PID backend, запустить заново) и убедиться, что в логах **нет** `tinvest_stream_reconnecting ... .candles` ошибок в течение 30 секунд.
+
+Если столкнёшься с более глубокими проблемами SDK (например, gRPC auth фейлится) — зафиксируй в отчёте как «найденный подбаг» и реши, можно ли обойти (например, через mock для paper-сессий), не выходя за scope.
+
+#### Критерии готовности
+
+- [ ] Код `adapter.subscribe_candles` использует правильный API `market_data_stream.market_data_stream()` с async request iterator
+- [ ] Паттерн persistent connection сохранён (Gotcha 4)
+- [ ] Unit-тест с моком SDK — зелёный
+- [ ] Локальный перезапуск backend → `grep "tinvest_stream_reconnecting.*candles" logs` → 0 матчей за 30 секунд после старта
+- [ ] `ruff` + `mypy` + `pytest tests/unit/` — зелёные
+
+#### Коммит
+
+`fix(tinvest): исправить API market_data_stream — устранить .candles AttributeError (S5R closeout #13)`
+
+### Задача 14 — Backend warning: iss_tail_fetch timezone compare
+
+**Тип:** Bug (Backend, warning-level)
+**Приоритет:** 🟢 Closeout wave 3
+**Исполнитель:** DEV-1 closeout wave 3
+**Размер:** XS (~15-30 минут)
+
+#### Симптом
+
+```
+iss_tail_fetch_failed  error="can't compare offset-naive and offset-aware datetimes"  ticker=SBER
+```
+
+Встречается часто при работе `MarketDataService._fetch_candles` — когда backend решает дозапросить хвост свечей у MOEX ISS (по условию `to_dt - last_ts > tail_gap_threshold`). Сама проверка условия уже корректна (через нормализацию `to_naive`, `last_naive` в `service.py:353-354`). **Warning** исходит от исключения внутри `_fetch_via_iss`, которое ловится на строке 379.
+
+#### Что делать
+
+1. **Найти `_fetch_via_iss`** в `backend/app/market_data/service.py` или соседних модулях.
+2. **Включить детальное логирование** (на время диагностики) — где именно внутри функции бросается `TypeError: can't compare offset-naive and offset-aware datetimes`. Варианты:
+   - Сравнение timestamp свечей ISS с `last_naive` / `to_naive`
+   - Сравнение в `_validate_candles` или `_normalize_candles`
+   - Сравнение в фильтре `c.timestamp > last_naive` (строка 369)
+3. **Привести все datetime к консистентному формату.** Правильный подход: **хранить и сравнивать всегда naive UTC** (проект уже использует `.replace(tzinfo=None)`). Если ISS возвращает tz-aware — нормализовать сразу при парсинге в `broker/moex_iss/parser.py` (или где там маппинг).
+4. **Unit-тест** с фикстурой, где ISS возвращает tz-aware свечи и `last_ts` — naive. Без фикса тест падает, с фиксом — зелёный.
+
+#### Критерии готовности
+
+- [ ] `grep "iss_tail_fetch_failed.*offset-naive" logs` → 0 за 60 секунд работы backend
+- [ ] Новый unit-тест для tz-консистентности свечей ISS
+- [ ] `ruff` + `mypy` + `pytest` — зелёные
+
+#### Коммит
+
+`fix(market-data): привести timestamps ISS к naive UTC — устранить tz compare warning (S5R closeout #14)`
+
+### Ветка wave 3 — `s5r/closeout-wave3`
+
+- Создаётся **новая** ветка от актуального `develop` (после wave 2 мержа, commit `a79432f`). **Не** переиспользовать `s5r/closeout` (она удалена).
+- 3 коммита (по одному на задачу).
+- После push и зелёного CI — мерж в develop через `--no-ff`.
+- Затем удалить ветку локально, обновить итоговый changelog + arch_review + project_state.
+
+### Итоговый план закрытия S5R
+
+После wave 3 Sprint_5_Review считается **полностью закрытым без хвостов**. Техдолг = 0. Все known issues устранены. Sprint 6 стартует с чистого листа.
