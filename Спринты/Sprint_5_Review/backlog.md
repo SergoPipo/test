@@ -19,9 +19,9 @@
 | 9 | **MODEL-FIGI: FIGI в LiveTrade + source-правило через FIGI** | Feature | 🟢 Closeout | Замечание C8 | ✅ Готово (DEV-1 closeout wave 1) | секция Closeout ниже |
 | 10 | **E2E: 2 pre-existing failing через моки API** | Fix | 🟢 Closeout wave 2 | Неожиданность из wave 1 | ✅ Готово (DEV-1 closeout wave 2) | секция Closeout ниже |
 | 11 | **Alembic drift санитайзер-миграция** | Fix (БД) | 🟢 Closeout wave 2 | Неожиданность из wave 1 | ✅ Готово (DEV-1 closeout wave 2) | секция Closeout ниже |
-| 12 | **BacktestResultsPage: `Запустить торговлю` без обработчика** | Fix (Frontend) | 🟢 Closeout wave 3 | Обнаружен при ручном тесте 2026-04-15 | ⬜ TODO | секция Closeout wave 3 ниже |
-| 13 | **Bug: tinvest_stream `.candles` AttributeError (бесконечный reconnect)** | Bug (Backend) | 🟢 Closeout wave 3 | Обнаружен в логах 2026-04-15 | ⬜ TODO | секция Closeout wave 3 ниже |
-| 14 | **Bug: iss_tail_fetch `offset-naive vs offset-aware datetimes`** | Bug (Backend) | 🟢 Closeout wave 3 | Обнаружен в логах 2026-04-15 | ⬜ TODO | секция Closeout wave 3 ниже |
+| 12 | **BacktestResultsPage: `Запустить торговлю` без обработчика** | Fix (Frontend) | 🟢 Closeout wave 3 | Обнаружен при ручном тесте 2026-04-15 | ✅ Готово (DEV-1 closeout wave 3) | секция Closeout wave 3 ниже |
+| 13 | **Bug: tinvest_stream `.candles` AttributeError (бесконечный reconnect)** | Bug (Backend) | 🟢 Closeout wave 3 | Обнаружен в логах 2026-04-15 | ✅ Готово (DEV-1 closeout wave 3 + CI stub fix) | секция Closeout wave 3 ниже |
+| 14 | **Bug: iss_tail_fetch `offset-naive vs offset-aware datetimes`** | Bug (Backend) | 🟢 Closeout wave 3 | Обнаружен в логах 2026-04-15 | ✅ Готово (DEV-1 closeout wave 3) | секция Closeout wave 3 ниже |
 
 **Условные обозначения:**
 - ⬜ TODO / 🔄 в работе / ✅ готово / ⚠️ готово с замечаниями
