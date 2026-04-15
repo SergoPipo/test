@@ -540,3 +540,256 @@ e6e016a docs(claude-md): Gotcha 14 [в develop напрямую]
 ```
 
 **Итог:** Sprint_5_Review **закрыт полностью** после 3 волн closeout. Техдолг = 0. Stack Gotchas = 14. CI на `develop` зелёный. Sprint 6 готов стартовать.
+
+---
+
+## Closeout hotfix — 2026-04-15 (после ручной проверки запуска торговли)
+
+### Проблема (найдена заказчиком при ручной проверке wave 3 #12)
+
+При нажатии «Запустить торговлю» на странице `BacktestResultsPage` модалка `LaunchSessionModal` открывалась, но:
+
+1. **Список стратегий — захардкоженные моки** (`MA Crossover v1 / RSI Mean Reversion v2 / Breakout v1` со значениями `'1'/'2'/'3'`). Это остатки прототипа S5, не заменённые на реальный API.
+2. **Автопредзаполнение стратегии не работало** — из бэктеста в модалку вообще не передавался `strategy_version_id` (в коде wave 3 был TODO-комментарий: «strategy_version_id в BacktestResult пока нет — передаём только ticker/timeframe»). На backend это поле есть, но на frontend тип `Backtest` его не объявлял.
+
+### Фикс
+
+**Frontend:**
+
+- `api/backtestApi.ts` — добавлены поля `strategy_version_id: number` и `version_number?: number` в `Backtest` interface (соответствует `BacktestResponse` в `backend/app/backtest/schemas.py:97`).
+- `pages/BacktestResultsPage.tsx` — передан `initialStrategyVersionId={bt.strategy_version_id}` в `LaunchSessionModal`, убран TODO-комментарий.
+- `components/trading/LaunchSessionModal.tsx`:
+  - Импорт `strategyApi, Strategy, StrategyDetail`.
+  - Добавлены стейты `strategies`, `extraStrategyOption`.
+  - В `useEffect(opened, initialStrategyVersionId)` — параллельно с `brokerApi.getAccounts()` выполняется `strategyApi.list()`.
+  - Если `initialStrategyVersionId` не совпадает ни с одним `current_version_id` в списке (пользователь пришёл из бэктеста по старой версии стратегии) — подтягивается `strategyApi.getById(s.id)` и добавляется extra option `"<name> (v<N>, из бэктеста)"`.
+  - Захардкоженные моки заменены на `strategyOptions` из реального API + extra option, где нужно.
+  - Добавлен disabled state и placeholder «Нет доступных стратегий», если список пуст.
+
+**Проверка:**
+
+- `npx tsc --noEmit` — зелёный, ошибок нет.
+- Ручная проверка через работающие backend (`127.0.0.1:8000`) и frontend (`localhost:5173`) ожидается от заказчика.
+
+### Файлы
+
+- `Develop/frontend/src/api/backtestApi.ts`
+- `Develop/frontend/src/pages/BacktestResultsPage.tsx`
+- `Develop/frontend/src/components/trading/LaunchSessionModal.tsx`
+
+### Статус
+
+Hotfix в рамках S5R closeout wave 3 (#12 follow-up). Commit будет сделан после подтверждения ручной проверки заказчиком. Sprint_5_Review остаётся формально закрытым.
+
+### UX hotfix — динамический label у «Значение размера позиции» (2026-04-15)
+
+**Проблема (заказчик):** поле «Значение размера позиции» не подсказывало, что именно вводить — рубли, лоты или проценты. Пользователь видел абстрактное «10000» и не мог понять единицу.
+
+**Фикс:** в `LaunchSessionModal.tsx` label + description поля стали зависеть от `sizingMode`:
+
+| sizingMode | label | description |
+|---|---|---|
+| `fixed_sum` | «Сумма на сделку (₽)» | Фиксированная сумма, выделяемая на каждую сделку |
+| `fixed_lots` | «Количество лотов» | Фиксированное число лотов в каждой сделке |
+| `percent` | «Доля капитала (%)» | Процент от текущего капитала на каждую сделку (0–100) |
+
+Для `percent` дополнительно добавлен `max={100}`, чтобы нельзя было ввести 150%.
+
+`npx tsc --noEmit` — зелёный.
+
+**Файл:** `Develop/frontend/src/components/trading/LaunchSessionModal.tsx`
+
+### FAQ — расчёт размера позиции (2026-04-15)
+
+По просьбе заказчика задокументировано поведение `_calculate_position_size` (`Develop/backend/app/trading/engine.py:678`) в новом файле **`Develop/FAQ/position_sizing.md`**:
+
+- формула для `fixed_sum` / `fixed_lots` / `percent`;
+- округление вниз до целого лота (floor), остаток возвращается на баланс;
+- краевой случай: если 1 лот дороже `fixed_sum`, всё равно покупается 1 лот (подтверждено заказчиком как ожидаемое поведение, не баг);
+- `percent` считается от `initial_capital`, не от текущего equity — зафиксировано как упрощение M3;
+- комиссия и slippage в sizing не учитываются, списываются постфактум в `PositionTracker.on_order_filled`.
+
+Файл добавлен рядом с существующими `sprint5_features.md` и `strategy_editor_guide.md`.
+
+### UX hotfix — авто-timeframe при открытии графика из торговой сессии (2026-04-15)
+
+**Проблема (заказчик):** при переходе на график из активной торговой сессии (`SessionCard.tsx:120` → `navigate('/chart/{ticker}?session={id}')`) в URL передавался только `ticker`, а `timeframe` — нет. `ChartPage` открывался с последним выбранным пользователем таймфреймом, а не с тем, в котором реально работает стратегия.
+
+**Live-поток уже работал корректно** и без этой правки — бэкенд держит singleton `MarketDataStreamManager` (`stream_manager.py:206`), и график + торговая сессия **подписываются на один и тот же** EventBus-канал `market:{ticker}:{tf}` через `useWebSocket` (`CandlestickChart.tsx:403`). То есть свечи T-Invest gRPC stream-а, которые уже получает SessionRuntime, автоматически транслируются и в график без отдельной подписки (Gotcha 4 соблюдён, rate-лимит не расходуется дважды). Проблема была только в том, что график мог показывать **не тот** таймфрейм.
+
+**Фикс:** в `ChartPage.tsx` при загрузке `sessionInfo` (из `useTradingStore.sessions`) применяется `setTimeframe(sessionInfo.timeframe)` + `fetchCandles()`, если текущий таймфрейм отличается. Применение **одноразовое** — отслеживается через useState-сравнение по ключу `"${sessionId}:${timeframe}"`, чтобы пользователь после этого мог свободно переключать таймфрейм руками, не «прыгая» обратно на сессионный. Паттерн «update state during rendering» — как для `lastTicker` в том же файле.
+
+**Файл:** `Develop/frontend/src/pages/ChartPage.tsx`
+
+`npx tsc --noEmit` — зелёный.
+
+### React-warning hotfix — setTimeframe в useEffect вместо render-phase (2026-04-15)
+
+**Проблема:** предыдущий фикс «авто-timeframe из сессии» в `ChartPage.tsx` вызывал `setTimeframe()` прямо во время рендера через паттерн «update state during rendering» (по аналогии с `lastTicker`). Но `setTimeframe` обновляет `marketDataStore`, а на этот store подписан **другой** компонент — `TimeframeSelector`. React 19 при этом выдаёт:
+```
+Cannot update a component (TimeframeSelector) while rendering a different component (ChartPage).
+```
+Паттерн «update state during rendering» работает только для **собственного** состояния компонента, а не для zustand-store'а, на который подписан сосед.
+
+**Фикс:** перенёс применение timeframe в `useEffect([sessionInfo, currentTimeframe])`. Для отслеживания «уже применил» использован `useRef<string | null>` вместо `useState` — ref не триггерит лишний рендер.
+
+**Файл:** `Develop/frontend/src/pages/ChartPage.tsx` — добавлен импорт `useRef`, `appliedSessionTfRef` вместо `appliedSessionTf` useState, логика перенесена в useEffect.
+
+`npx tsc --noEmit` — зелёный.
+
+### Диагностика «график не обновляется» — корень проблемы найден (2026-04-15)
+
+Заказчик приложил скриншот DevTools Console при открытой странице графика LKOH:1h из активной paper-сессии #12. В консоли: десятки **`Failed to load resource: 401 (Unauthorized)`** на все REST-запросы (`/strategy`, `/trading/sessions`, `/market-data/candles/subscribe`, `/backtest`, `/market-data/instruments/LKOH` и др.).
+
+**Диагноз:** JWT-токен истёк (таймаут сессии). Следствия:
+1. Footer показывает «Нет активных сессий» — `GET /trading/sessions` → 401, `tradingStore.sessions` пустой.
+2. `POST /market-data/candles/subscribe` → 401, `stream_manager.subscribe()` **не** вызывается, фронт получает `wsChannel=null` → `useWebSocket` не подписывается → свечи не доходят до графика.
+3. WS-соединение (`[ws] connected`) было установлено ещё на живом токене, `websocket_endpoint` проверяет JWT только при `accept` и держит сокет дальше — поэтому соединение «живое», но пере-подписка на канал невозможна без свежего токена в REST.
+
+Backend-сторона в логах работает корректно:
+- `stream_started channel=market:LKOH:1h aggregation=True` в 13:37:47;
+- `_SessionListener` для сессии #12 получает события — за час **~11 945** вызовов `strategy_execution_failed` (из `engine.py:442`), т.е. `SignalProcessor.process_candle` реально срабатывает.
+
+**Отдельный баг, обнаруженный в ходе диагностики (не чинится сейчас):** стратегия падает на `RestrictedPython` с `"_entry_order" is an invalid attribute name because it starts with "_"` — около **12k** повторов за час. Generator стратегий создаёт имена с подчёркиванием, которые запрещены sandbox'ом (частичная связь с Gotcha 2/3). Нужен отдельный фикс в `app/strategy/code_generator.py` (переименование служебных атрибутов в non-underscore). Зафиксировано как кандидат в Sprint 6 backlog: **`S6-STRATEGY-UNDERSCORE-NAMES`**.
+
+**Действие заказчика:** перелогиниться (`sergopipo`/`@WSX3edc`), после этого повторно открыть график из сессии. После логина токен свежий, REST вернётся, subscribe отработает, свечи T-Invest дойдут до графика.
+
+**Файлы изменений:** `Develop/frontend/src/pages/ChartPage.tsx` (render-warning fix).
+
+---
+
+## 2026-04-15 — Hotfix: объём 0 в оверлее + WS-стриминг не обновляет текущую свечу
+
+### Симптомы (сообщил заказчик)
+1. В верхней строке графика (ОТКР/МАКС/МИН/ЗАКР/Объём) **Объём всегда 0** на каждом баре, хотя гистограмма объёма внизу отображается корректно.
+2. Живая свеча (1h/5m) визуально **не обновляется** по WS-стримингу, ценовой указатель стоит на месте.
+
+### Корневые причины (оба бага в `CandlestickChart.tsx`)
+
+**Баг 1 — Объём 0:**
+В обработчике `subscribeCrosshairMove` для поиска объёма свечи использовалось:
+```ts
+Math.floor(new Date(c.timestamp).getTime() / 1000) === (data.time as number)
+```
+Но `data.time` — это chart-время (UTC + MSK_OFFSET_SEC = +3ч), а правая часть — чистый UTC. Они никогда не совпадали → `vol` всегда `undefined` → `volume: 0`.
+
+**Баг 2 — WS не обновляет свечу:**
+В `marketWsCallback` конвертация WS-timestamp делалась через `Math.floor(new Date(ts).getTime() / 1000)` (чистый UTC), тогда как chart ожидает UTC+3 (как у исторических данных). WS-точка попадала в неправильный slot на оси времени — chart либо игнорировал update, либо рисовал «призрак» в другой позиции.
+
+### Исправления
+
+**`Develop/frontend/src/components/charts/CandlestickChart.tsx`** — 2 строки:
+
+1. `subscribeCrosshairMove` (строка ~215): поиск объёма через `parseUtcTimestamp(c.timestamp) === (data.time as number)` — теперь обе стороны в UTC+3.
+2. `marketWsCallback` (строка ~381): конвертация WS-timestamp через `parseUtcTimestamp(candle.timestamp)` вместо сырого `Math.floor(...)`.
+
+### Примечание по источнику данных
+«Загрузка из MOEX ISS» — штатное поведение: бэкенд пробует T-Invest gRPC, при отсутствии активного брокера/токена откатывается на MOEX ISS. Надпись исчезает сразу после загрузки.
+
+---
+
+## 2026-04-15 — Hotfix 2: маршрутизация live-тика через store (Variant B)
+
+### Симптом (сообщил заказчик, после предыдущего hotfix)
+После фикса UTC+3 в `subscribeCrosshairMove`/`marketWsCallback` WS-стриминг визуально рисует свечу, но «залипает» OHLCV-overlay в верхней строке графика и объём при hover живой свечи не обновляется. Данные в store остаются stale.
+
+### Корневая причина
+`marketWsCallback` вызывал `candlestickSeriesRef.current.update(...)` **напрямую**, минуя Zustand store. `marketDataStore.candles` при этом не изменялся, `useEffect([candles])` не перезапускался, crosshair-handler читал `candlesRef.current` со старыми значениями, overlay через selector `useMarketDataStore((s) => s.crosshairData)` не получал обновлений.
+
+Это архитектурная проблема: два независимых пути данных (REST → store → chart vs WS → chart напрямую) расходились.
+
+### Решение (Variant B — store-centric flow)
+
+**`Develop/frontend/src/stores/marketDataStore.ts`**
+
+Добавлено action `upsertLiveCandle(candle)`:
+- при совпадении `timestamp` с последней свечой — заменяет её (update case);
+- при `newTs > lastTs` — добавляет как новый бар (append case) с защитой по `MAX_CANDLES`;
+- при `newTs < lastTs` (out-of-order) — игнорирует.
+
+**`Develop/frontend/src/components/charts/CandlestickChart.tsx`**
+
+1. `marketWsCallback` теперь вызывает `useMarketDataStore.getState().upsertLiveCandle(liveCandle)` вместо прямого `series.update()`. Единый путь данных: WS → store → useEffect → chart.
+2. Новый fast-path в `useEffect([candles])` для live-тиков, чтобы не платить за полный `setData()` на каждый тик:
+   - `firstCandleTsRef` отслеживает первый timestamp массива — если не менялся и длина совпадает (`isLiveUpdate`) или +1 (`isLiveAppend`), выполняется `series.update()` по последней свече.
+   - `prevLastCandleTsRef` отслеживает предыдущий last-timestamp — это критично для момента «перекатки» периода: если crosshair стоял на предыдущей last-свече, overlay плавно переходит на новую last-свечу (иначе замерзал на старом баре после смены периода).
+   - Slow path (initial load / pagination старых свечей) сохранён как fallback и тоже обновляет `prevLastCandleTsRef`.
+3. Crosshair override safety: overlay обновляется только когда `crosshair === null` (пользователь не наводит мышь), `crosshair.ts === lastCandle.ts` (наводит на live-бар), или `crosshair.ts === prevLastCandleTsRef.current` (момент перекатки). В остальных случаях explicit hover пользователя не перебивается.
+4. При очистке массива (`candles.length === 0`, смена тикера/TF) сбрасываются оба ref'а, чтобы следующая загрузка корректно распозналась как initial, а не как live-append.
+
+### Верификация (Playwright MCP, 2026-04-15)
+
+Ручной тест через временно добавленный DEV-only хук `window.__marketDataStore` (удалён после верификации). Backend `.venv` не содержит `tinkoff-investments` SDK (см. Gotcha 14 / Stack Gotchas), `/candles/subscribe` возвращает `{channel: null, source: "error"}` → реальный WS недоступен, поэтому синтетические тики инжектировались через `upsertLiveCandle` напрямую.
+
+Сценарии (все passed):
+| TF | Update case | Append case | Crosshair follows live | Overlay (ЗАКР/Объём) |
+|----|-------------|-------------|------------------------|----------------------|
+| D | 5 425,00 → 5 437,34 ✓ | 331 → 332 баров, новый 5 460,50 ✓ | ✓ | обновляется ✓ |
+| 1ч | 5 423,50 → 5 430,50 ✓ | 572 → 573, новый 5 442,50 ✓ | ✓ | обновляется ✓ |
+| 5м | 5 429,50 → 5 432,50 ✓ | 2714 → 2715, новый 5 440,50 ✓ | ✓ | обновляется ✓ |
+| 1м | 5 424,50 → 5 426,00 ✓ | 1004 → 1005, новый 5 429,00 ✓ | ✓ | обновляется ✓ |
+
+Crosshair override safety (1m): курсор мыши уведён в Sidebar, `setCrosshairData(older)` на свечу `15:38`, затем `upsertLiveCandle` на last `15:47` с `close+20`. Результат: `store.candles[last].close` обновился ✓, `crosshairData` остался на `older (15:38, close=5425)` ✓, overlay показывает `5 425,00` ✓.
+
+### Файлы изменений
+- `Develop/frontend/src/stores/marketDataStore.ts` — новое action `upsertLiveCandle` + добавление в `MarketDataState` интерфейс.
+- `Develop/frontend/src/components/charts/CandlestickChart.tsx` — `firstCandleTsRef`, `prevLastCandleTsRef`, fast-path в useEffect 2, переписан `marketWsCallback`.
+
+### Типы
+`cd Develop/frontend && npx tsc --noEmit` → clean (0 errors).
+
+### Блокер для реального WS-тестирования
+Backend `.venv` требует `tinkoff-investments` SDK для работы `/candles/subscribe` endpoint. Ручная установка через `pip install "git+https://github.com/RussianInvestments/invest-python.git" --no-deps` — вне scope этого hotfix (требует перезапуска backend). Синтетический тест через store покрывает ту же логику: WS callback уже починен ранее (timestamps UTC+3), а данный hotfix маршрутизирует `upsertLiveCandle` через store, и именно это покрыли Playwright-тесты.
+
+## 2026-04-15 — Hotfix: StrictMode ref drift → «только одна свеча на графике»
+
+### Симптом
+После волны изменений от 2026-04-14 (Variant B — store-centric live candle flow) пользователь сообщил регрессию: на графике отображается **только одна свеча**, OHLCV = N/A. Баг проявлялся только в dev-режиме (React.StrictMode), воспроизводился на всех таймфреймах.
+
+### Корневая причина
+`React.StrictMode` в dev-режиме делает double-invoke на `useEffect` с монтированием-размонтированием: создаёт chart A → сразу destroy → создаёт chart B. Компонентные `useRef`'ы переживают этот цикл (они живут на уровне component-instance, а не mount-cycle). После пересоздания chart B серия candlestick — **пустая**, а refs `prevCandlesLengthRef` / `firstCandleTsRef` / `prevLastCandleTsRef` всё ещё хранят состояние от старой, уничтоженной серии A.
+
+При следующем проходе `useEffect 2` (обновление данных) путь выбора определялся так:
+- `isInitialLoad = prevCandlesLengthRef.current === 0` → `false` (в ref осталось 2728)
+- `firstUnchanged = firstCandleTsRef.current === candles[0].timestamp` → `true`
+- `isLiveUpdate = true`
+
+Результат: fast-path вызывал `series.update(lastCandle)` на **пустой** серии B → на графике появлялась **ровно одна** свеча. Slow-path с `setData` не проходил, потому что эвристика «initial load» уже думала, что данные давно загружены.
+
+### Диагностика
+Временные console.log'и в `useEffect 2` дали чёткое доказательство:
+```
+[useEffect2] setData done, series.data().length: 2726   ← chart A, корректно
+[fast-path] update {isLiveUpdate: true, lenBefore: 0, ...}  ← chart B, пустая серия
+[fast-path] after update, lenAfter: 1                    ← ровно одна свеча
+```
+
+### Решение
+`Develop/frontend/src/components/charts/CandlestickChart.tsx` — в начало функции `createChartInstance(width, height)` добавлен сброс data-tracking refs:
+```ts
+prevCandlesLengthRef.current = 0;
+firstCandleTsRef.current = null;
+prevLastCandleTsRef.current = null;
+```
+
+Теперь каждый раз, когда создаётся новый chart instance (initial mount, StrictMode remount, или любая будущая причина ре-монтирования), следующий проход `useEffect 2` гарантированно пойдёт через slow-path с полным `setData(chartData)`, а не через fast-path на пустую серию.
+
+### Верификация (Playwright MCP, 2026-04-15)
+| TF | store.candles.length | series.data().length | Совпадение |
+|----|---------------------|----------------------|------------|
+| D | 331 | 331 | ✓ |
+| 1h | 571 | 571 | ✓ |
+| 5m | 2728 | 2728 | ✓ |
+| 1m | 988 | 988 | ✓ |
+
+Визуально: график LKOH на всех TF отображает полный датасет, свечи рисуются корректно, OHLCV показывает реальные данные. Hot-reload Vite после удаления debug-кода — график продолжает отображаться корректно.
+
+### Файлы изменений
+- `Develop/frontend/src/components/charts/CandlestickChart.tsx` — сброс data-tracking refs в `createChartInstance`; удалены временные debug console.log'и и `window.__chart` / `window.__candleSeries` exposition.
+- `Develop/frontend/src/stores/marketDataStore.ts` — удалён временный debug-хук `window.__marketDataStore` (использовался в Playwright-верификации прошлой волны).
+
+### Типы
+`cd Develop/frontend && npx tsc --noEmit` → clean (0 errors).
+
+### Stack Gotcha (кандидат в Develop/CLAUDE.md)
+**React.StrictMode + persistent refs + series pattern:** component refs (`useRef`) не сбрасываются при StrictMode double-invoke cleanup→remount, хотя сами chart-объекты (в данном случае lightweight-charts series) пересоздаются. Если refs используются для path-selection логики (fast-path vs slow-path), они становятся stale после ре-монта и направляют последующие updates на новую пустую серию. **Правило:** при создании нового chart instance **всегда** сбрасывать все refs, отслеживающие состояние данных предыдущей серии. ARCH-ревью: добавить в Stack Gotchas при следующем обновлении.

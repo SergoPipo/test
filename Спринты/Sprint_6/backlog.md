@@ -341,3 +341,41 @@ Wave 3 обошла проблему через stub `sys.modules` в тесте
 
 - **Идеально после** S6-TINVEST-SDK-UPGRADE — чтобы работать с актуальным API SDK.
 - **Блокирует** полноценное использование real-trading в S6 (раздел 6.4 Recovery): без мультиплексирования real-сессии будут ломаться под load'ом.
+
+---
+
+## S6-STRATEGY-UNDERSCORE-NAMES — переименовать служебные атрибуты стратегий без ведущего `_`
+
+**Приоритет:** Medium
+**Оценка:** 2-3 часа
+**Обнаружено:** S5R closeout wave 3 диагностика 2026-04-15
+
+### Проблема
+
+`app/strategy/code_generator.py` генерирует Python-код стратегии, используя служебные атрибуты с ведущим подчёркиванием (`self._entry_order`, `self._sl_order`, `self._tp_order`, `self._is_long`, локальная переменная `_size`) — согласно Gotcha 3 такие атрибуты нужны для correct SL/TP OCO-tracking в Backtrader.
+
+Но `CodeSandbox` на RestrictedPython **запрещает** имена, начинающиеся с `_`:
+```
+Line 25: "_entry_order" is an invalid attribute name because it starts with "_".
+Line 74: "_size" is an invalid variable name because it starts with "_".
+```
+
+Компиляция стратегии падает, `_execute_strategy` возвращает `None`, live-сессия не может сгенерировать ни одного сигнала. В логах наблюдалось **~12 000** повторов `strategy_execution_failed` за час на двух активных сессиях.
+
+### Что сделать
+
+1. В `code_generator.py` переименовать все служебные имена без ведущего подчёркивания, например:
+   - `self._entry_order` → `self.entry_order_ref`
+   - `self._sl_order` → `self.sl_order_ref`
+   - `self._tp_order` → `self.tp_order_ref`
+   - `self._is_long` → `self.is_long_pos`
+   - `_size` → `position_size`
+2. Прогнать E2E и unit-тесты бэктеста, чтобы подтвердить что Backtrader по-прежнему корректно трекает OCO (Gotcha 3 сохраняется).
+3. Переиздать все существующие стратегии в БД через автоматический reformat `strategy_versions.generated_code` миграцией (или через UI — в зависимости от масштаба).
+
+### Связанные файлы
+
+- `Develop/backend/app/strategy/code_generator.py`
+- `Develop/backend/app/sandbox/executor.py` (если нужно ослабить правило)
+- `Develop/backend/app/backtest/engine.py` (Gotcha 3 контекст)
+- `Develop/CLAUDE.md` раздел «Gotcha 2 — CodeSandbox: `__import__` вырезан» (возможное дополнение правилом «именование без ведущего _»)
