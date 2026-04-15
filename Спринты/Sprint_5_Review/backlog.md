@@ -14,9 +14,11 @@
 | 4 | E2E S4 fix (30+ падающих тестов) | Fix | 🔴 Блокер | 2 (интеграционная валидация) | ✅ Готово (DEV-1 волна 2, 101 passed / 8 skipped) | `PENDING_S5R_e2e_s4_fix.md` |
 | 5 | Обкатка нового процесса работы DEV-субагентов | Process | 🔴 Критично | S6 | ✅ Проведена, findings в `arch_review_s5r.md` секция 4 | этот файл + arch_review_s5r.md |
 | 6 | Актуализация ФТ/ТЗ за S5 + S5R | Docs | 🟡 Обязательно | — | ✅ Готово (ФТ/ТЗ/план + новый `ui_checklist_s5r.md`) | `arch_review_s5r.md` секция 6 |
-| 7 | **FAVORITES input — поиск внутри списка избранного** | Fix | 🟢 Closeout | 4 E2E skip | ⬜ TODO | секция Closeout ниже |
-| 8 | **E2E PAPER-REAL-MODE fixture** | Fix | 🟢 Closeout | 1 E2E skip | ⬜ TODO | секция Closeout ниже |
-| 9 | **MODEL-FIGI: FIGI в LiveTrade + source-правило через FIGI** | Feature | 🟢 Closeout | Замечание C8 | ⬜ TODO | секция Closeout ниже |
+| 7 | **FAVORITES input — поиск внутри списка избранного** | Fix | 🟢 Closeout | 4 E2E skip | ✅ Готово (DEV-1 closeout wave 1) | секция Closeout ниже |
+| 8 | **E2E PAPER-REAL-MODE fixture** | Fix | 🟢 Closeout | 1 E2E skip | ✅ Готово (DEV-1 closeout wave 1) | секция Closeout ниже |
+| 9 | **MODEL-FIGI: FIGI в LiveTrade + source-правило через FIGI** | Feature | 🟢 Closeout | Замечание C8 | ✅ Готово (DEV-1 closeout wave 1) | секция Closeout ниже |
+| 10 | **E2E: 2 pre-existing failing через моки API** | Fix | 🟢 Closeout wave 2 | Неожиданность из wave 1 | ⬜ TODO | секция Closeout ниже |
+| 11 | **Alembic drift санитайзер-миграция** | Fix (БД) | 🟢 Closeout wave 2 | Неожиданность из wave 1 | ⬜ TODO | секция Closeout ниже |
 
 **Условные обозначения:**
 - ⬜ TODO / 🔄 в работе / ✅ готово / ⚠️ готово с замечаниями
@@ -371,13 +373,144 @@ DEV-3 в S5R.3 реализовал определение `source: strategy | e
   grep -rn "figi_strategy_set\|figi in " backend/app/broker/  # новое правило
   ```
 
-### Ветка и порядок работы
+### Ветка и порядок работы — wave 1 (задачи 7-9)
 
 **Ветка:** `s5r/closeout` от `develop` (актуальное состояние после 4 мержей S5R).
 
-**Порядок выполнения DEV-1 closeout:**
+**Порядок выполнения DEV-1 closeout wave 1:**
 1. Задача 8 (PAPER-REAL-MODE fixture) — самая маленькая, разогрев. Коммит отдельный.
 2. Задача 7 (FAVORITES filter-input) — frontend + 4 e2e теста. Коммит отдельный.
 3. Задача 9 (MODEL-FIGI) — backend + миграция + unit-тесты. Коммит отдельный.
 
-После всех 3 коммитов — push, CI должен быть зелёный, мерж `s5r/closeout → develop` через `--no-ff`.
+**Статус wave 1 (2026-04-14):** ✅ завершён. CI run `24423480163` зелёный, 3 коммита `be7b5ea / 0ff166d / 4521b12` запушены. Но при локальном прогоне обнаружены две неожиданности — см. wave 2 ниже.
+
+---
+
+### Closeout wave 2 — неожиданности из wave 1 (задачи 10-11)
+
+DEV-1 closeout wave 1 при финальном `npx playwright test` локально увидел:
+- **100 passed / 8 skipped / 2 failed** — где 2 failed это `s5-account.spec.ts::"balance cards"` и `s5-ticker-logos.spec.ts::"Тестовая"`.
+- DEV проверил через `git stash`: эти тесты падают и на голом `develop` коммите `a9b69ea` (до его правок) — **это pre-existing environmental**, не регрессия.
+- Причина: оба теста зависят от seed-данных в БД — реальный T-Invest broker account для user `sergopipo` и стратегия с именем «Тестовая». На локальном окружении wave 1 таких данных не было.
+
+Плюс при `alembic revision --autogenerate` DEV-1 обнаружил **кумулятивный drift схемы БД**: NOT NULL изменения на `ai_provider_configs.id`, `user_ai_settings.id`, `broker_accounts.has_trading_rights`, `trading_sessions.strategy_name` и индекс `idx_ai_user`. Это накопленные ручные правки, не отражённые в истории миграций. DEV-1 wave 1 **вычистил** drift из миграции figi вручную (правильно — не вышел за scope задачи), но сам drift существует и требует санитайзер-миграции.
+
+Заказчик 2026-04-15 решил **закрыть обе проблемы сейчас**, а не переносить в S6.
+
+### Задача 10 — E2E: 2 pre-existing failing через моки API
+
+**Тип:** Fix (E2E фикстуры)
+**Приоритет:** 🟢 Closeout wave 2
+**Исполнитель:** DEV-1 closeout wave 2
+
+#### Что чинить
+
+**Test A:** `frontend/e2e/s5-account.spec.ts::"balance cards"` — при заходе на страницу «Счёт» ожидается отрисовка balance cards с суммами. Тест падает потому что нет замоканного broker account.
+
+**Test B:** `frontend/e2e/s5-ticker-logos.spec.ts::"Тестовая"` — тест ожидает раскрытие раздела стратегии с именем «Тестовая» и проверяет ticker logos в её раскрытом списке. Тест падает потому что такой стратегии нет в БД тестового пользователя.
+
+#### Подход
+
+Использовать `page.route('**/api/v1/...', ...)` моки, как уже сделано в задаче 8 (PAPER-REAL-MODE). **НЕ** использовать seed-данные БД — моки более надёжны, не зависят от состояния окружения, прогон 24/7.
+
+**Для Test A — s5-account balance cards:**
+- Замокать `GET /api/v1/broker/accounts` → возвращает минимум один active non-sandbox BrokerAccount (используй такой же мок, как в задаче 8 PAPER-REAL-MODE — возможно можно вынести в общую фикстуру).
+- Замокать `GET /api/v1/broker/accounts/{id}/portfolio` (или тот endpoint, который возвращает балансы — посмотри в `backend/app/broker/router.py`) → вернуть фиксированный набор балансов в `RUB` (например `[{"currency": "RUB", "balance": "100000.00", "blocked": "0"}]`).
+- Проверить, что тест проходит: balance cards отрисованы с ожидаемыми суммами.
+
+**Для Test B — s5-ticker-logos «Тестовая»:**
+- Замокать `GET /api/v1/strategies` (или тот endpoint, который возвращает список стратегий) → вернуть массив со стратегией `{id: 1, name: "Тестовая", ticker: "SBER", is_active: true, ...}`. Минимальные поля, достаточные для рендера раскрывающегося раздела.
+- Замокать связанные endpoints (если тест раскрывает стратегию и ожидает backtests/trades — тоже мок).
+- Снять зависимость от реальной БД.
+
+#### Выносимые фикстуры
+
+Если в задаче 8 мок `broker/accounts` inline в тесте — **вынести в общую фикстуру** `frontend/e2e/fixtures/api_mocks.ts` (создать файл) с helper-функциями:
+- `mockBrokerAccounts(page, accounts)` — передаёт массив аккаунтов, регистрирует route.
+- `mockBrokerPortfolio(page, accountId, portfolio)` — для Test A.
+- `mockStrategies(page, strategies)` — для Test B.
+
+Это позволит переиспользовать в будущих тестах (и снизит дублирование).
+
+**Не обязательно** делать всё через общий файл, если это сложно — можно inline в тестах. Приоритет — закрыть 2 failing, а не идеальный рефакторинг.
+
+#### Критерии готовности
+
+- [ ] `npx playwright test s5-account.spec.ts::"balance cards"` → passed
+- [ ] `npx playwright test s5-ticker-logos.spec.ts` (все тесты, включая «Тестовая») → passed
+- [ ] **Полный прогон** `npx playwright test` → **0 failures** (допустимы уже существующие 8 skipped с TODO-тикетами)
+- [ ] Тесты проходят **независимо от состояния БД** — можно запустить на пустой БД, прогон всё равно зелёный.
+- [ ] Моки не используют хардкод пароля/токена (только мок broker API response).
+
+#### Коммит
+
+Отдельный коммит: `fix(e2e): pre-existing failing через API-моки (S5R closeout #10)`
+
+### Задача 11 — Alembic drift санитайзер-миграция
+
+**Тип:** Fix (БД)
+**Приоритет:** 🟢 Closeout wave 2
+**Исполнитель:** DEV-1 closeout wave 2
+
+#### Контекст
+
+При задаче 9 DEV-1 wave 1 запустил `alembic revision --autogenerate -m "add figi to live_trades"` и обнаружил, что автогенерация показала **не только** ожидаемое `ADD COLUMN figi`, но и кумулятивный дрейф схемы:
+
+- `ai_provider_configs.id` — `NOT NULL` изменение (вероятно колонка уже `NOT NULL` в БД, но не в модели)
+- `user_ai_settings.id` — то же самое
+- `broker_accounts.has_trading_rights` — изменение NOT NULL / default
+- `trading_sessions.strategy_name` — изменение NOT NULL / default
+- Индекс `idx_ai_user` — неожиданно отсутствует или добавляется
+
+Это означает: в какой-то момент в БД локально (и возможно на проде) применялись ручные правки, которые **не отражены** в истории миграций Alembic. Если не исправить сейчас, каждая новая миграция в S6 будет тянуть этот drift как noise.
+
+#### Что делать
+
+1. **Проанализировать drift.** В `s5r/closeout` ветке заново запусти `alembic revision --autogenerate -m "drift sanitizer"` (или аналог). Посмотри, что именно autogenerate предлагает как drift.
+
+2. **Сверить с моделями.** Для каждого drift-изменения (колонка, constraint, индекс) — проверь в соответствующей `models.py`:
+   - Если модель уже содержит `nullable=False` / `index=True` / `server_default=...`, но БД не содержит — это **forward drift** (модель впереди БД), санитайзер просто синхронизирует БД.
+   - Если модель **тоже** не содержит — это означает, что drift в БД был применён вручную, и модель надо либо обновить, либо отбросить drift.
+
+3. **Создать миграцию санитайзер.** Имя: `<hash>_schema_drift_sanitizer.py`. Содержимое `upgrade()`:
+   - `op.alter_column(...)` для NOT NULL колонок
+   - `op.create_index(...)` / `op.drop_index(...)` для индексов
+   - `op.alter_column(...)` для `server_default`
+   Каждое изменение — с явным комментарием, к какой модели оно относится.
+
+4. **Проверить round-trip.** `downgrade()` должен откатывать то же самое, что `upgrade()` применил. Проверь:
+   ```bash
+   alembic upgrade head
+   alembic downgrade -1
+   alembic upgrade head
+   ```
+5. **Регрессионный прогон.** После миграции запусти `pytest tests/unit/` + `pytest tests/test_broker/` + `pytest tests/test_trading/` — убедись, что существующие тесты не сломались (они используют модели, которые теперь должны совпадать с БД).
+
+6. **НЕ расширять scope.** Если в процессе обнаружишь, что какие-то колонки реально проблемные (например, дублирующиеся данные) — зафиксируй в отчёте как «найденный баг», но **не пытайся починить** в рамках этой задачи. Цель — убрать drift, не перепроектировать схему.
+
+#### Критерии готовности
+
+- [ ] Новая миграция `alembic/versions/<hash>_schema_drift_sanitizer.py`
+- [ ] `alembic revision --autogenerate -m "test"` **после** санитайзера возвращает **пустой** upgrade()/downgrade() (нет остатков drift)
+- [ ] Round-trip `upgrade → downgrade → upgrade` чистый
+- [ ] `pytest tests/unit/` + `tests/test_broker/` + `tests/test_trading/` — все зелёные (без регрессии)
+- [ ] `ruff` + `mypy` — зелёные (новый файл миграции не ломает базлайн)
+
+#### Коммит
+
+Отдельный коммит: `fix(db): санитайзер накопленного schema drift (S5R closeout #11)`
+
+### Ветка wave 2 — та же `s5r/closeout`
+
+- **Не создавать** новую ветку. wave 2 продолжает `s5r/closeout`, в которой уже есть 3 коммита wave 1.
+- После задач 10 и 11 — push, gh run watch, зелёный CI, **затем** мерж `s5r/closeout → develop` через `--no-ff` (делает оркестратор).
+
+### Gotcha 11 — Alembic autogenerate detects drift
+
+Независимо от задач 10/11, оркестратор добавляет в `Develop/CLAUDE.md` новую ловушку **Gotcha 11** (кандидат от DEV-1 wave 1):
+
+> **Симптом:** `alembic revision --autogenerate` показывает не только ожидаемое изменение, но и кумулятивный drift схемы — NOT NULL / index / server_default — которого DEV не планировал.
+> **Причина:** в БД локально (и возможно на проде) применялись ручные правки, не отражённые в истории миграций.
+> **Правило:** всегда визуально ревьюить `upgrade()`/`downgrade()` после autogenerate. Неожиданный drift **вычищать** из миграции с текущей задачей и выносить в отдельную санитайзер-миграцию. Никогда не коммитить миграцию, которая смешивает ожидаемую логику задачи с неожиданным drift.
+
+Это добавит в `Develop/CLAUDE.md` **коммитом оркестратора** перед запуском DEV-1 wave 2, чтобы субагент уже видел правило.
