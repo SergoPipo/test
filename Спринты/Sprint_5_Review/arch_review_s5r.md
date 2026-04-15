@@ -14,6 +14,8 @@
 
 **Финальный вердикт:** **PASS WITH NOTES** (блокеров для мержа нет; заметки — процессные и для Sprint 6).
 
+**Update 2026-04-15 — Closeout фаза закрыта:** Заказчик решил не переносить 5 рекомендованных в S6 задач, а закрыть их в S5R. DEV-1 closeout в две волны (wave 1: задачи 7-9, wave 2: задачи 10-11) выполнил все 5, плюс попутно был добавлен Gotcha 11 (Alembic cumulative drift), 12 (SQLite batch_alter default), 13 (forward model drift). Wave 2 валидирована полным локальным `npx playwright test` → 102 passed / 8 skipped / 0 failed. Ветка `s5r/closeout` (8 коммитов) смержена в `develop` через `--no-ff` коммитом `a79432f`, CI run #24439692553 ✅. Полные детали — в `Sprint_5_Review/changelog.md` раздел «2026-04-15 — Финальное закрытие S5R closeout (оркестратор)».
+
 ---
 
 ## 1. Baseline «до/после»

@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-04-14 (после закрытия Sprint_5_Review)
+> Последнее обновление: 2026-04-15 (после закрытия Sprint_5_Review closeout)
 
 ---
 
-## Текущий спринт: S5 ✅ + **Sprint_5_Review ✅ завершён** → **S6 готов к старту**
+## Текущий спринт: S5 ✅ + **Sprint_5_Review ✅ закрыт полностью (фазы 1-2 + closeout 7-11)** → **S6 готов к старту**
 
 ## Прогресс по спринтам
 
@@ -17,9 +17,9 @@
 | S2 | Данные и графики | ✅ завершён | Брокер, графики, шифрование, 175 тестов | Sprint_2/sprint_report.md |
 | S3 | Стратегии + редактор | ✅ завершён | Blockly, Sandbox, CSRF, 320 тестов | Sprint_3/sprint_report.md |
 | S4 | AI + бэктестинг | ✅ завершён | AI chat, Backtest Engine, 577 тестов | Sprint_4/sprint_report.md |
-| S5 | Торговля | ⚠️ завершён с замечаниями (долг устранён в S5R) | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E | Sprint_5/arch_review_s5.md |
-| **S5 Review** | **Внеплановое ревью: стабилизация перед S6** | **✅ завершён** | **CI зелёный впервые с 2026-04-03, Live Runtime Loop замкнут, реальные позиции T-Invest, 101 Playwright passed, 10 Stack Gotchas, 2 бизнес-бага починены. Вердикт ARCH: PASS WITH NOTES, блокеров нет.** | **Sprint_5_Review/arch_review_s5r.md** |
-| S6 | Уведомления | ⬜ готов к старту | Telegram, Email, In-app, Recovery, Graceful Shutdown + S6-MODEL-FIGI + S6-PLAYWRIGHT-NIGHTLY + 3 E2E fix | Sprint_6/sprint_report.md |
+| S5 | Торговля | ⚠️ завершён с замечаниями (весь долг устранён в S5R + closeout) | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E | Sprint_5/arch_review_s5.md |
+| **S5 Review** | **Внеплановое ревью + closeout: стабилизация перед S6** | **✅ закрыт полностью** | **CI зелёный впервые с 2026-04-03, Live Runtime Loop замкнут, реальные позиции T-Invest (source через FIGI), 102 Playwright passed (моки), 13 Stack Gotchas, 2 бизнес-бага починены, schema drift устранён. Вердикт ARCH: PASS WITH NOTES, блокеров нет. Closeout фаза (задачи 7-11) закрыла все дополнительные замечания, изначально предложенные ARCH к переносу в S6.** | **Sprint_5_Review/arch_review_s5r.md** + **Sprint_5_Review/changelog.md** разделы closeout |
+| S6 | Уведомления | ⬜ готов к старту | Telegram, Email, In-app, Recovery, Graceful Shutdown + 3 backlog задачи (см. ниже) | Sprint_6/sprint_report.md |
 | S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
 
@@ -28,25 +28,27 @@
 ## Что делать дальше
 
 ```
-ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 — Уведомления + накопленный backlog S5R
-  → 6.0 — скипнуто (Live Runtime Loop замкнут в S5R)
-  → 6.3 — In-app уведомления (EventBus канал trades:{session_id} с 6 событиями готов из S5R)
-  → 6.4 — Recovery (SessionRuntime.restore_all готов, дополнить real-side StreamManager.subscribe)
-  → 6.5 — Graceful Shutdown (SessionRuntime.shutdown готов, добавить сохранение pending событий)
+ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 — Уведомления + 3 задачи backlog из S5R closeout
+  → 6.0 — закрыто в S5R.2 (Live Runtime Loop замкнут)
+  → 6.3 — In-app уведомления (EventBus trades:{session_id} с 6 событиями готов)
+  → 6.4 — Recovery (SessionRuntime.restore_all готов, добавить real-side
+            StreamManager.subscribe + сверка позиций с брокером)
+  → 6.5 — Graceful Shutdown (SessionRuntime.shutdown готов, добавить
+            сохранение pending событий)
   → 6.6 — Telegram/Email/In-App интеграции
-  → 6.9 — скипнуто (реальные позиции T-Invest готовы из S5R)
-  → 6.11 — S6-MODEL-FIGI: FIGI в LiveTrade/Order, source-правило на FIGI
+  → 6.9 — закрыто в S5R.3 (реальные позиции T-Invest)
+  → 6.11 — закрыто в S5R closeout #9 (FIGI в LiveTrade + source через FIGI)
 
-ДОП.БЭКЛОГ S6 (из Sprint_5_Review arch_review секция 8):
-  → S6-PLAYWRIGHT-NIGHTLY — отдельный cron-workflow в рабочие часы MSK
-  → S6-E2E-FAVORITES-INPUT — text-input в FavoritesPanel + снять skip ×4
-  → S6-E2E-PAPER-REAL-MODE — fixture non-sandbox, снять skip ×1
-  → S6-E2E-CHART-MOCK-ISS — моки ISS для нерабочих часов, снять skip ×3
+БЭКЛОГ ИЗ S5R closeout (см. Sprint_6/backlog.md):
+  → S6-PLAYWRIGHT-NIGHTLY — cron-workflow для E2E в рабочие часы MSK
+  → S6-E2E-CHART-MOCK-ISS — моки MOEX ISS для 3 тестов свежести свечей
+  → S5R-E2E-MOCKS-EXPANSION — расширить api_mocks.ts на ~40 login-зависимых E2E
 
 ПРЕДВАРИТЕЛЬНО: Sprint_6_Review после S6 (обновить ФТ/ТЗ по новому объёму S6)
 
 ФАЙЛ СОСТОЯНИЯ: Sprint_6/sprint_state.md (когда S6 откроется)
-ПОСЛЕДНЕЕ РЕВЬЮ: Sprint_5_Review/arch_review_s5r.md (вердикт PASS WITH NOTES)
+ФАЙЛ BACKLOG S6: Sprint_6/backlog.md (создан 2026-04-14, дополнен 2026-04-15)
+ПОСЛЕДНЕЕ РЕВЬЮ: Sprint_5_Review/arch_review_s5r.md + closeout в changelog.md
 ```
 
 ## Ключевые решения (кросс-спринтовые)
@@ -68,12 +70,14 @@ _Накапливается по мере продвижения, берётся
 | # | Спринт | Описание | Приоритет | Статус |
 |---|--------|----------|-----------|--------|
 | 1 | S1 | Footer со статическими данными | Low | Отложено (не критично) |
-| 2 | S4 | 30+ E2E тестов S4 падают | ~~High~~ | ✅ **Закрыт S5R.4** (DEV-1 волна 2, 101 passed / 0 failed) |
-| 3 | S5 | Реальные позиции/операции T-Invest | ~~Medium~~ | ✅ **Закрыт S5R.3** (DEV-3, endpoints работают с реальными данными) |
+| 2 | S4 | 30+ E2E тестов S4 падают | ~~High~~ | ✅ **Закрыт S5R.4** (DEV-1 волна 2, 102 passed / 0 failed после closeout) |
+| 3 | S5 | Реальные позиции/операции T-Invest | ~~Medium~~ | ✅ **Закрыт S5R.3** + S5R closeout #9 (FIGI source-правило вместо ticker) |
 | 4 | S5 | Live Runtime Loop не замкнут | ~~High~~ | ✅ **Закрыт S5R.2** (DEV-2, `runtime.py:374` — единственная production-точка `process_candle`) |
-| 5 | S1-S5 | CI красный 11+ дней | ~~High~~ | ✅ **Закрыт S5R.1** (DEV-1 волна 1+1b, зелёный CI, 10 Stack Gotchas) |
+| 5 | S1-S5 | CI красный 11+ дней | ~~High~~ | ✅ **Закрыт S5R.1** (DEV-1 волна 1+1b, зелёный CI, 13 Stack Gotchas) |
+| 6 | S5R closeout | Schema drift в БД (forward model drift) | ~~Medium~~ | ✅ **Закрыт S5R closeout #11** (миграция `0896e228f3ed_schema_drift_sanitizer`) |
+| 7 | S5R closeout | E2E зависимость от seed user `sergopipo` | ~~Medium~~ | ✅ **Частично закрыт S5R closeout #10** (5 тестов на моках, остальные ~40 — `S5R-E2E-MOCKS-EXPANSION` в S6) |
 
-**Текущий High-долг: 0.** Все блокеры, выявленные до S5R, закрыты полностью.
+**Текущий High-долг: 0.** Все блокеры, выявленные до S5R и в ходе closeout, закрыты полностью.
 
 ## Перенесённые задачи
 
