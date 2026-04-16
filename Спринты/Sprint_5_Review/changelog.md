@@ -1,5 +1,134 @@
 # Sprint_5_Review — changelog
 
+## 2026-04-15 — Диагностика графиков, Фаза 1 (ROOT CAUSE найден)
+
+### Симптом
+
+Пользователь прислал два скриншота графика SBER 1h (запущенного из торговой сессии #11), снятых с разницей в несколько секунд. На одном последняя свеча подписана `15 апр. '26 00:00`, на втором — `15 апр. '26 03:00`. Обе метки приходятся на ночные часы MSK, когда MOEX не торгует. Пользователь сообщил: «до сих пор у нас с графиками какая-то беда, на них не отображаются актуальные свечи».
+
+### Что сделано
+
+Создан диагностический документ `Sprint_5_Review/chart_diagnostics.md` с гипотезами и планом из 4 фаз. Выполнена **Фаза 1 — Фиксация фактов**:
+
+1. Прочитаны ключевые backend-файлы: [market_data/service.py](Develop/backend/app/market_data/service.py), [market_data/router.py](Develop/backend/app/market_data/router.py), [broker/moex_iss/parser.py](Develop/backend/app/broker/moex_iss/parser.py), [broker/tinvest/mapper.py](Develop/backend/app/broker/tinvest/mapper.py).
+2. Прочитан frontend: [CandlestickChart.tsx](Develop/frontend/src/components/charts/CandlestickChart.tsx) (`parseUtcTimestamp`), [marketDataStore.ts](Develop/frontend/src/stores/marketDataStore.ts).
+3. Воспроизведено через Playwright MCP: открыт `/chart/SBER` c 1h, проверен `/api/v1/market-data/candles`.
+4. Сделаны **прямые curl-запросы к MOEX ISS** (обход backend) — `iss.moex.com/iss/engines/stock/markets/shares/securities/SBER/candles.json?interval=60&from=2026-04-14&till=2026-04-15` и `interval=1&from=2026-04-14T06:55&till=2026-04-14T07:05`.
+
+### Root cause
+
+**MOEX ISS API возвращает `begin` в UTC, а не в MSK.** Парсер [backend/app/broker/moex_iss/parser.py:37-40](Develop/backend/app/broker/moex_iss/parser.py#L37-L40) с комментарием «MOEX ISS возвращает время в МСК» вешает на строку MSK-tz и конвертирует в UTC:
+```python
+msk_dt = datetime.strptime(val, "%Y-%m-%d %H:%M:%S").replace(tzinfo=MOSCOW_TZ)
+record[col] = msk_dt.astimezone(timezone.utc)
+```
+Это даёт **лишний сдвиг −3h** на всех свечах ISS-источника. Frontend `parseUtcTimestamp` компенсирует `+3h` (для визуализации MSK в lightweight-charts, у которого axis всегда UTC) — но сдвиг частично складывается, из-за чего весь график смещён.
+
+### Доказательство
+
+Raw ISS response для SBER 1h 2026-04-14:
+```
+2026-04-14 06:00:00  volume=1537
+2026-04-14 07:00:00  volume=266281
+...
+```
+Raw ISS response для SBER 1m вокруг 07:00:
+```
+2026-04-14 06:59:00  volume=1537
+2026-04-14 07:00:00  volume=10726
+2026-04-14 07:01:00  volume=6981
+```
+Свеча `06:59` с volume=1537 — это премаркет-аукцион SBER в **09:59 MSK** перед открытием основной сессии в 10:00 MSK. В MSK-интерпретации такой торговли быть не может (ранее 09:50 MSK нет сделок). Следовательно `06:59` — это UTC, и реальное время — `06:59 UTC = 09:59 MSK`. Аналогично `07:00 UTC = 10:00 MSK` (резкий рост volume до 266K — открытие основной сессии).
+
+«Ночные фантомы» на скриншотах пользователя (`00:00 MSK` и `03:00 MSK` 15.04) — это реальные extended-hours/premarket свечи (`00:00 UTC` = `03:00 MSK` premarket, и `03:00 UTC` = `06:00 MSK` ранний премаркет), которые из-за −3h сдвига подписаны на 3 часа раньше реального времени.
+
+### Влияние
+
+- Все свечи ISS-источника (`source='moex_iss'`, `source='tinvest+iss'`) смещены на −3h.
+- Все таймфреймы затронуты: `5m`, `15m`, `1h`, `4h`. Для `D`/`W`/`M` ошибка маскируется размером bucket'а, но внутренний timestamp некорректен.
+- T-Invest gRPC свечи (`source='tinvest'`) **корректны**, т.к. `mapper.py:candle_to_candle_data` получает tz-aware UTC напрямую из protobuf.
+- `_build_current_candle` (фолбэк на 1m-агрегацию) корректен, т.к. использует `datetime.now(timezone.utc)`. Но при merge с кэшем получает дубликаты часов под разными ключами — отсюда визуальные глитчи и «лишние» свечи.
+- `ohlcv_cache` содержит накопленные повреждённые записи — после фикса парсера потребуется очистка/миграция.
+
+### План фикса (Фазы 2–4)
+
+**Фаза 2 — Backend парсер:**
+- `parser.py:39-40` — заменить `replace(tzinfo=MOSCOW_TZ).astimezone(UTC)` на `replace(tzinfo=timezone.utc)`, убрать неверный комментарий.
+- Обновить unit-тесты парсера (зафиксировать, что `"2026-04-15 07:00:00"` → `datetime(2026, 4, 15, 7, 0, tzinfo=UTC)`).
+
+**Фаза 3 — Инвалидация кэша:**
+- Alembic data-миграция либо одноразовый cleanup: `DELETE FROM ohlcv_cache WHERE source IN ('moex_iss', 'tinvest+iss')`. Опция `UPDATE timestamp = timestamp + 3h` тоже возможна, но DELETE безопаснее — данные перезапросятся.
+
+**Фаза 4 — E2E проверка:**
+- Playwright: SBER/GAZP/LKOH на 5m/15m/1h/4h/D — последняя свеча должна лежать в реальном текущем торговом часе MSK.
+- Подтверждение, что WS live-stream (после S5R closeout wave 3 #11 fix) дорисовывает в корректный час.
+
+### Файлы
+
+- `Спринты/Sprint_5_Review/chart_diagnostics.md` — **новый** диагностический документ с полным разбором Root cause, гипотезами H1–H4, находками F1–F5 и планом.
+- `Спринты/Sprint_5_Review/changelog.md` — текущая запись.
+
+### Что дальше
+
+Ждём решение от заказчика: (a) идти в Фазу 2 (фикс парсера), (b) инвалидировать кэш через DELETE или UPDATE, (c) после фикса — полный e2e-цикл на 3 тикерах × 5 таймфреймов.
+
+---
+
+## 2026-04-15 — Архитектурное решение: T-Invest как единственный источник
+
+### Контекст
+
+По итогам диагностики chart-бага (запись выше) обсуждена стратегия источников рыночных данных. Заказчик сформулировал принцип: для бэктеста и торговых сессий — **только T-Invest**, т.к. именно T-Invest исполняет сделки, и любая дивергенция с другими источниками рушит корреляцию между бэктестом и live-торговлей. MOEX ISS оставляем только ради сценария «пользователь без подключённого T-Invest хочет посмотреть график».
+
+Рассмотрены два варианта поведения при подключённом T-Invest:
+- **Вариант A (строгий):** T-Invest подключён → **только** T-Invest, без fallback. Если T-Invest не знает тикер — пустой график + ошибка.
+- **Вариант B (мягкий):** T-Invest подключён → сначала T-Invest, при пустом ответе fallback на ISS в viewer-режиме.
+
+**Принят вариант A.** Обоснование: простота, предсказуемость, отсутствие скрытых смесей источников.
+
+### Принятое решение
+
+**Матрица «режим × подключение T-Invest → источник»** (см. [decision_market_data_source.md](decision_market_data_source.md)):
+
+| T-Invest | Режим    | Источник      | При отсутствии данных                            |
+|:--------:|:---------|:--------------|:--------------------------------------------------|
+| Да       | viewer   | T-Invest only | Пустой график + «Инструмент недоступен в T-Invest»|
+| Да       | backtest | T-Invest only | HTTP 409 + модалка «Не удалось загрузить T-Invest»|
+| Да       | trading  | T-Invest only | HTTP 409 + модалка                                |
+| Нет      | viewer   | MOEX ISS      | Badge «Данные MOEX (для просмотра)»               |
+| Нет      | backtest | **БЛОК**      | HTTP 409 + модалка «Подключите T-Invest»          |
+| Нет      | trading  | **БЛОК**      | HTTP 409 + модалка «Подключите T-Invest»          |
+
+**Дополнительно:**
+- DELETE для кэша — удаляем **весь** `ohlcv_cache` целиком (а не только `source='moex_iss'`), т.к. merge-смесь `tinvest+iss` тоже подозрительна.
+- Metadata-эндпоинты ISS (`/instruments`, `/bonds`, `/market-status`, календарь) — остаются без изменений.
+
+### Что сделано в этой сессии
+
+1. Создан `Sprint_5_Review/decision_market_data_source.md` — ADR с полной матрицей, обоснованием, планом реализации из 7 фаз, влиянием на модули, рисками и out-of-scope.
+2. Обновлён `chart_diagnostics.md` — добавлена секция «Принятое архитектурное решение» и расширенный план Фаз 2–7.
+3. Обновлён `changelog.md` (этот файл).
+4. Добавлена project-memory о приоритете T-Invest (ссылка в `MEMORY.md`).
+
+### Что НЕ сделано (запланировано для новой сессии с чистым контекстом)
+
+Фазы 2–7 реализации. Текущая сессия завершается, т.к. контекстное окно заполнено диагностикой и компакт не даёт достаточной очистки. Новая сессия стартует со следующего punch list:
+
+1. **Фаза 2** — Parser fix: `parser.py:38-40` заменить на `replace(tzinfo=timezone.utc)`, unit-тест.
+2. **Фаза 3** — `MarketDataService.get_candles(..., mode=Literal["viewer","backtest","trading"])`, `TInvestRequiredError` → 409, обновить вызовы в `backtest/` и `trading/`, удалить merge-логику `tinvest+iss`.
+3. **Фаза 4** — Alembic миграция `DELETE FROM ohlcv_cache`.
+4. **Фаза 5** — Frontend: axios-interceptor на 409, `TInvestRequiredModal`, виджет-badge «Данные MOEX» в viewer-режиме.
+5. **Фаза 6** — Код-клинап: убрать `tinvest+iss` как валидное значение source.
+6. **Фаза 7** — E2E Playwright по всей матрице (viewer/backtest/trading × с T-Invest / без × SBER/GAZP/LKOH × 5m/15m/1h/4h/D).
+
+### Файлы
+
+- `Спринты/Sprint_5_Review/decision_market_data_source.md` — **новый** ADR.
+- `Спринты/Sprint_5_Review/chart_diagnostics.md` — обновление с принятым решением.
+- `Спринты/Sprint_5_Review/changelog.md` — текущая запись.
+
+---
+
 ## 2026-04-14 — S5R.1 CI cleanup (волна 1), DEV-1
 
 ### Реализовано
@@ -793,3 +922,499 @@ prevLastCandleTsRef.current = null;
 
 ### Stack Gotcha (кандидат в Develop/CLAUDE.md)
 **React.StrictMode + persistent refs + series pattern:** component refs (`useRef`) не сбрасываются при StrictMode double-invoke cleanup→remount, хотя сами chart-объекты (в данном случае lightweight-charts series) пересоздаются. Если refs используются для path-selection логики (fast-path vs slow-path), они становятся stale после ре-монта и направляют последующие updates на новую пустую серию. **Правило:** при создании нового chart instance **всегда** сбрасывать все refs, отслеживающие состояние данных предыдущей серии. ARCH-ревью: добавить в Stack Gotchas при следующем обновлении.
+
+## 2026-04-15 — Диагностика графиков, Фаза 2 (Parser fix)
+
+### Контекст
+Продолжение работ по chart-диагностике (`chart_diagnostics.md`, `decision_market_data_source.md`). Root cause зафиксирован в Фазе 1: парсер MOEX ISS ошибочно считал `begin`/`end` МСК-временем и делал `.astimezone(UTC)`, давая сдвиг −3h на всех свечах ISS-источника.
+
+### Что сделано
+
+**1. Фикс парсера** — [Develop/backend/app/broker/moex_iss/parser.py](Develop/backend/app/broker/moex_iss/parser.py):
+- В `parse_candles_raw` заменено `datetime.strptime(...).replace(tzinfo=MOSCOW_TZ).astimezone(timezone.utc)` на `datetime.strptime(...).replace(tzinfo=timezone.utc)` — строка ISS интерпретируется как уже-UTC, сдвига нет.
+- Убран неверный комментарий «MOEX ISS возвращает время в МСК», заменён на «MOEX ISS возвращает время уже в UTC».
+- Удалён неиспользуемый `import zoneinfo` и константа `MOSCOW_TZ` — больше нигде в файле не применяется.
+
+**2. Unit-тесты** — [Develop/backend/tests/unit/test_moex_iss/test_parser.py](Develop/backend/tests/unit/test_moex_iss/test_parser.py):
+- `test_parse_candles_raw_treats_begin_end_as_utc` — фиксирует регрессию: `"2026-04-15 07:00:00"` парсится как `datetime(2026, 4, 15, 7, 0, tzinfo=timezone.utc)` (без сдвига на ±3h).
+- `test_parse_candles_raw_decimal_prices` — цены как `Decimal`, volume как int, прямое покрытие `parse_candles_raw` (ранее тестировался только высокоуровневый `parse_candles`).
+- Добавлен импорт `timezone` из `datetime`.
+
+### Запуск тестов
+```
+cd Develop/backend && python3 -m pytest tests/unit/test_moex_iss/test_parser.py -v
+```
+Результат: **5 passed** (2 новых + 3 существующих) за 0.01s.
+
+### Файлы изменений
+- `Develop/backend/app/broker/moex_iss/parser.py` — фикс tz-парсинга begin/end + чистка неиспользуемых импортов.
+- `Develop/backend/tests/unit/test_moex_iss/test_parser.py` — 2 новых теста + импорт `timezone`.
+
+### Что осталось из плана (decision_market_data_source.md)
+- **Фаза 3** — mode-guard в `MarketDataService.get_candles` (`DataSourceMode`, `TInvestRequiredError` → HTTP 409), убрать merge `tinvest+iss`, обновить вызовы в `backtest/` и `trading/`.
+- **Фаза 4** — alembic data-миграция `DELETE FROM ohlcv_cache` (очистка накопленного повреждённого кэша).
+- **Фаза 5** — frontend: 409-interceptor + `TInvestRequiredModal` + viewer-badge «Данные MOEX».
+- **Фаза 6** — чистка кода (убрать ветку `tinvest+iss` merge).
+- **Фаза 7** — E2E верификация по матрице режимов × тикеров × таймфреймов.
+
+### Риски
+Само по себе изменение парсера **не возвращает** пользователя к корректным графикам: в `ohlcv_cache` остались свечи со старым −3h сдвигом, они продолжат отдаваться клиенту. Корректное отображение требует Фазы 4 (wipe cache) и/или естественного перезапроса свежих данных. До миграции кэша фикс парсера сам по себе безопасен — свежие ISS-ответы пишутся с корректным UTC.
+
+---
+
+## 2026-04-15 — Рефакторинг: Stack Gotchas вынесены в каталог `Develop/stack_gotchas/`
+
+### Мотив
+
+Секция `## ⚠️ Stack Gotchas` в `Develop/CLAUDE.md` разрослась до ~180 строк (14 записей). Файл автоматически подгружается в контекст каждого DEV-субагента при работе в `Develop/`, т.е. каждый DEV платил контекстом за всю секцию независимо от релевантности. В самой секции прописано правило: «если >80 строк — выносить». Лимит был превышен вдвое. Диагностика текущей сессии пользователя показала >50% контекста занятыми уже после одной задачи — прямой триггер рефакторинга.
+
+### Что сделано
+
+Создан каталог `Develop/stack_gotchas/` (16 файлов):
+- `INDEX.md` (33 строки) — реестр-таблица «# → слой → симптом → файл», точка входа для DEV.
+- `README.md` — политика append-only, шаблон нового gotcha, ARCH-чеклист.
+- `gotcha-01-pydantic-decimal.md` … `gotcha-14-sdk-sys-modules-stub.md` — 14 файлов, по одному на ловушку. Каждый с frontmatter (`id`, `slug`, `title`, `layer`, `severity`, `sprints`, `related_files`, `symptoms_short`, `tags`) и секциями «Симптом / Причина / Правило обхода / Ретро». Текст — дословный перенос из `Develop/CLAUDE.md`.
+
+Ключевое решение: **номер Gotcha зашит в имя файла** (`gotcha-04-*.md`). Все ~22 исторические ссылки «Gotcha 4» из замороженных спринтов (Sprint_5_Review/*, Sprint_6/backlog.md) остаются грepпабельны — backward compatibility 100%.
+
+### Правки документов
+
+- `Develop/CLAUDE.md` — секция Stack Gotchas сокращена со 118 строк до ~11-строчного редиректа. Якорь `## ⚠️ Stack Gotchas` сохранён. Файл уменьшен с 259 до 152 строк.
+- `Спринты/prompt_template.md` — 3 правки:
+  - строка 39 (Обязательное чтение): `Develop/stack_gotchas/INDEX.md` выделен отдельным пунктом.
+  - строки 210–211 (секция 7 отчёта): «Применённые Stack Gotchas» → список `gotcha-NN-*.md`.
+  - строка 215 (секция 8 отчёта): «Новые ловушки» — ARCH заводит `gotcha-<N+1>-<slug>.md` + строку в `INDEX.md`.
+- `CLAUDE.md` (корневой `Test/CLAUDE.md`) — строка 63: ссылка на `Develop/stack_gotchas/INDEX.md` как первичную точку входа + пояснение автоподгрузки редиректа.
+
+### Не тронуто (по решению пользователя — «не трогать историю»)
+
+- `Спринты/Sprint_5_Review/**/*.md` (prompt_DEV, prompt_ARCH_review, changelog предыдущих волн, arch_review_s5r, backlog, PENDING_*).
+- `Спринты/Sprint_6/backlog.md`.
+- `Спринты/project_state.md`.
+- Отчёты в `Спринты/Sprint_*/reports/`.
+
+Адресация по номерам сохраняется через имена файлов — переписывать замороженную историю нет смысла.
+
+### Верификация
+
+- Каталог `Develop/stack_gotchas/` содержит ровно 16 файлов (1 INDEX + 1 README + 14 gotcha).
+- `INDEX.md` содержит 14 строк таблицы (Gotcha 1–14).
+- `Develop/CLAUDE.md` — 152 строки (было 259, экономия ~107 строк на каждой автоподгрузке).
+- Ссылки «Gotcha N» из замороженных документов прошлых спринтов остаются валидны через имена файлов.
+
+### Добавленные файлы
+
+- `Develop/stack_gotchas/INDEX.md`
+- `Develop/stack_gotchas/README.md`
+- `Develop/stack_gotchas/gotcha-01-pydantic-decimal.md`
+- `Develop/stack_gotchas/gotcha-02-codesandbox-import.md`
+- `Develop/stack_gotchas/gotcha-03-backtrader-notify-order.md`
+- `Develop/stack_gotchas/gotcha-04-tinvest-stream.md`
+- `Develop/stack_gotchas/gotcha-05-circuit-breaker-lock.md`
+- `Develop/stack_gotchas/gotcha-06-mypy-result-narrowing.md`
+- `Develop/stack_gotchas/gotcha-07-app-shadow.md`
+- `Develop/stack_gotchas/gotcha-08-asyncsession-get-bind.md`
+- `Develop/stack_gotchas/gotcha-09-playwright-strict.md`
+- `Develop/stack_gotchas/gotcha-10-moex-e2e-session.md`
+- `Develop/stack_gotchas/gotcha-11-alembic-drift.md`
+- `Develop/stack_gotchas/gotcha-12-sqlite-batch-alter.md`
+- `Develop/stack_gotchas/gotcha-13-forward-model-drift.md`
+- `Develop/stack_gotchas/gotcha-14-sdk-sys-modules-stub.md`
+
+### Изменённые файлы
+
+- `Develop/CLAUDE.md` — секция Stack Gotchas → редирект.
+- `CLAUDE.md` (корневой проектный) — строка 63.
+- `Спринты/prompt_template.md` — строки 39, 210–211, 215.
+
+### Вне scope
+
+- Полноценная миграция в Claude Skill — отложена (текущая структура frontmatter-совместима).
+- CI-скрипт проверки «число файлов = число строк INDEX» — отдельная задача.
+- Ревизия/консолидация формулировок самих gotcha — не требуется, миграция была строго копированием один-в-один.
+
+---
+
+## 2026-04-16 — Диагностика графиков, Фаза 4 (wipe ohlcv_cache)
+
+### Контекст
+Продолжение после Фазы 2 (parser fix, 2026-04-15). В `ohlcv_cache` остались ~16K строк ISS-свечей со старым −3h сдвигом, которые отдавались frontend-у и давали «призрачные» свечи на графике. Фаза 2 исправила запись новых свечей, но старые требовали целевой очистки.
+
+### Что сделано
+
+**1. Alembic data-миграция** — [Develop/backend/alembic/versions/e1f2a3b4c5d6_wipe_ohlcv_cache_iss_tz_drift.py](Develop/backend/alembic/versions/e1f2a3b4c5d6_wipe_ohlcv_cache_iss_tz_drift.py):
+- `upgrade()` — `DELETE FROM ohlcv_cache WHERE source IN ('moex_iss', 'tinvest+iss')`.
+- `downgrade()` — no-op с комментарием, что rollback невозможен (удалённые строки не восстанавливаются; но и не должны — они были повреждены).
+- `down_revision = '0896e228f3ed'` — новый head `e1f2a3b4c5d6`.
+
+Удаляются две категории записей:
+- `source='moex_iss'` — чистые ISS-свечи, полностью повреждены сдвигом.
+- `source='tinvest+iss'` — merged records, в которых ISS-часть повреждена; проще удалить всю запись и пересобрать кэш на следующем запросе, чем селективно чистить ISS-подмножество.
+
+Свечи `source='tinvest'` (gRPC) **не** затрагиваются — mapper получает tz-aware UTC напрямую из protobuf, сдвига не было никогда.
+
+**2. Прогон на локальной БД** — `Develop/backend/data/terminal.db`:
+- Перед upgrade: 15 667 × `moex_iss`, 673 × `tinvest+iss`, 19 440 × `tinvest` (итого 35 780).
+- После upgrade: 0 × `moex_iss`, 0 × `tinvest+iss`, 19 440 × `tinvest` (итого 19 440).
+- Удалено **16 340 повреждённых строк**.
+- `alembic current` → `e1f2a3b4c5d6 (head)`.
+
+### Эффект для пользователя
+При следующем открытии графика с 5m/15m/1h/4h таймфреймом `MarketDataService.get_candles` не найдёт ISS-свечей в кэше и перезапросит MOEX ISS; новый ответ запишется с корректным UTC-timestamp (фикс парсера из Фазы 2). Призрачные свечи на ночных часах (`00:00 MSK`, `03:00 MSK`) должны исчезнуть.
+
+**Ограничение:** T-Invest-свечи останутся прежними (они и были корректны). Но `tinvest+iss` merge-ветка больше не генерирует записи с этим source до Фазы 3 — до тех пор merge-логика ещё активна в сервисе; если поднять backend и запросить 1h свечи по тикеру с частичным ISS-покрытием, может снова появиться `tinvest+iss` запись (уже с корректным timestamp после Фазы 2, но с семантикой, которую Фаза 3 собирается убрать).
+
+### Файлы изменений
+- `Develop/backend/alembic/versions/e1f2a3b4c5d6_wipe_ohlcv_cache_iss_tz_drift.py` — новая миграция.
+
+### Что осталось из плана
+- **Фаза 3** — mode-guard `DataSourceMode` + HTTP 409 (убирает `tinvest+iss` merge, делает ISS viewer-only).
+- **Фаза 5** — frontend 409-interceptor + `TInvestRequiredModal` + badge «Данные MOEX».
+- **Фаза 6** — чистка кода (удалить merge-ветку окончательно).
+- **Фаза 7** — E2E верификация по матрице режимов × тикеров × таймфреймов.
+
+### Риски
+Production-запуск на боевой БД повторит DELETE — один раз, безопасно. Повторный `alembic upgrade head` на уже обновлённой БД выполнит `DELETE` на пустом наборе (строк `moex_iss`/`tinvest+iss` больше нет) — no-op. Миграция идемпотентна по факту результата.
+
+Бэкап перед прогоном на production не делался на dev (пользователь выбрал «запустить без бэкапа»); для production-окружения рекомендуется стандартная процедура `cp terminal.db terminal.db.pre_e1f2a3b4c5d6`.
+
+---
+
+## 2026-04-16 — S5R Фаза 3: mode-guard `DataSourceMode` + HTTP 409
+
+### Контекст
+Визуальная проверка Фазы 2 на локальном стенде (пользователь, production T-Invest read-only) обнажила две вещи:
+1. На графике SBER 1h мигает badge «Источник: MOEX ISS», а не `T-Invest` — `MarketDataService._fetch_candles` **молча уходил на ISS** при любой ошибке / пустом ответе T-Invest (`broker_fetch_failed_fallback_to_iss` warn → continue). Пользователь видел некорректный источник без диагностики.
+2. Live-минутные свечи не обновляются — WS-подписка `stream_manager.subscribe` не активируется, если резолв FIGI через T-Invest падает (та же причина, что и №1: проблема с adapter скрыта под ISS-fallback).
+
+Уточнение политики от пользователя (совместимое с `decision_market_data_source.md`):
+- **viewer (ChartPage)**: есть T-Invest → T-Invest; нет T-Invest → MOEX ISS с явным badge.
+- **backtest/trading**: только T-Invest; без него — 409. **Дополнительно**: перед загрузкой `ticker+timeframe` ISS-записи в `ohlcv_cache` принудительно удаляются, чтобы гарантированно пересобрать кэш на T-Invest.
+
+### Что сделано
+
+**1. Новое исключение `TInvestRequiredError` + handler HTTP 409**
+`Develop/backend/app/common/exceptions.py`:
+- Класс `TInvestRequiredError(detail, mode)` — `mode` передаётся в ответ для фронт-логики.
+- `register_exception_handlers` регистрирует handler → `JSONResponse(status_code=409, {detail, error_code="tinvest_required", mode})`.
+
+**2. `DataSourceMode` + mode-guard в `MarketDataService.get_candles`**
+`Develop/backend/app/market_data/service.py`:
+- `DataSourceMode = Literal["viewer", "backtest", "trading"]`.
+- `get_candles(..., mode: DataSourceMode = "viewer")` — новый обязательный (с default) параметр.
+- Добавлен метод `_has_active_tinvest_account(user_id)` — SQL: `broker_type='tinvest' AND is_active=True AND is_sandbox=False AND encrypted_api_key IS NOT NULL`.
+- Логика:
+  - `has_tinvest=False AND mode!="viewer"` → `raise TInvestRequiredError`.
+  - `has_tinvest=True AND mode!="viewer"` → `_purge_iss_cache(ticker, timeframe)` (новый метод: `DELETE FROM ohlcv_cache WHERE source IN ('moex_iss','tinvest+iss')` для пары).
+  - `_build_current_candle` теперь дёргается только при `has_tinvest=True` (раньше — при `user_id`, что давало ложные срабатывания без активного аккаунта).
+
+**3. `_fetch_candles` — убран молчаливый fallback + merge**
+- Сигнатура: `_fetch_candles(..., user_id, has_tinvest)` (было: `user_id`).
+- `has_tinvest=True`: только `_fetch_via_broker`. Ошибка или пустой ответ → `([], "tinvest")`. Никаких попыток ISS.
+- `has_tinvest=False`: только `_fetch_via_iss` с retry (как раньше).
+- Удалён блок merge `tinvest+iss` (~33 строки). Никакой код больше не пишет `source='tinvest+iss'` в кэш.
+
+**4. Роутер `/api/v1/market-data/candles` — query-param `mode`**
+`Develop/backend/app/market_data/router.py`:
+- Новый query `mode: str = Query("viewer", pattern="^(viewer|backtest|trading)$")` прокидывается в `get_candles`.
+
+**5. Вызыватели в `backtest/` и `trading/`**
+- `Develop/backend/app/backtest/engine.py:334` — `mode="backtest"` в `_load_data`. Запуск бэктеста без T-Invest теперь → 409 (а не падение на ISS).
+- `Develop/backend/app/trading/runtime.py:545` — `mode="trading"` в `preload_history`. Pre-load истории для live-торговли без T-Invest → 409.
+- `backtest/router.py:591` (просмотр завершённого бэктеста) и `backtest/engine.py:266` (IMOEX benchmark) + `backtest/benchmark.py:44` (`calculate_imoex`) — оставлены в default `mode="viewer"`: это вспомогательные read-only пути, им ISS-fallback приемлем.
+
+**6. Unit-тесты**
+`Develop/backend/tests/unit/test_market_data/test_service.py`:
+- `TestFetchFallback` → `TestFetchCandles` (переработан):
+  - `test_tinvest_error_no_fallback` — has_tinvest=True + broker.side_effect → `([], "tinvest")`, ISS не вызван.
+  - `test_tinvest_empty_no_fallback` — has_tinvest=True + broker return [] → `([], "tinvest")`, ISS не вызван.
+  - `test_no_tinvest_uses_iss` — has_tinvest=False → ISS.
+- Новый класс `TestModeGuard`:
+  - `test_backtest_without_tinvest_raises` — mode="backtest" без T-Invest → `TInvestRequiredError(mode="backtest")`.
+  - `test_trading_without_tinvest_raises` — mode="trading" без T-Invest → `TInvestRequiredError(mode="trading")`.
+  - `test_viewer_without_tinvest_uses_iss` — mode="viewer" без T-Invest → ISS, без raise.
+  - `test_backtest_with_tinvest_purges_iss_cache` — засеянная ISS-запись удаляется, в кэше остаются только `tinvest`.
+- `pytest tests/unit/test_market_data/ tests/unit/test_exceptions.py tests/unit/test_backtest/test_engine.py` → **44 passed**.
+
+### Эффект для пользователя
+- Мигающий badge `MOEX ISS` на SBER 1h при подключённом T-Invest **пропадёт**: либо T-Invest вернёт данные и badge будет `T-Invest`, либо в логах появится однозначный `tinvest_fetch_failed` / `tinvest_empty_result` с traceback (диагностика, почему T-Invest не работает, станет видимой).
+- Запуск бэктеста / торговой сессии без активного production T-Invest теперь даёт HTTP 409 с `error_code="tinvest_required"` (во Фазе 5 фронт поймает и покажет модалку «Подключите T-Invest…»).
+- Впервые при запуске backtest/trading — ISS-записи в кэше для этого `ticker+timeframe` гарантированно удаляются (per-ticker purge; Фаза 4 была глобальной разовой чисткой, Фаза 3 делает это автоматически при каждом переходе в production-режим).
+
+### Файлы изменений
+- `Develop/backend/app/common/exceptions.py` — `TInvestRequiredError` + 409 handler.
+- `Develop/backend/app/market_data/service.py` — `DataSourceMode`, `get_candles(mode=)`, `_has_active_tinvest_account`, `_purge_iss_cache`, `_fetch_candles(has_tinvest)`, удалён merge `tinvest+iss`.
+- `Develop/backend/app/market_data/router.py` — query-param `mode`.
+- `Develop/backend/app/backtest/engine.py` — `mode="backtest"`.
+- `Develop/backend/app/trading/runtime.py` — `mode="trading"`.
+- `Develop/backend/tests/unit/test_market_data/test_service.py` — переписан `TestFetchFallback`, добавлен `TestModeGuard`.
+
+### Открытые вопросы
+- **Live-стрим минутных свечей** у пользователя не обновляется. После Фазы 3 корень станет очевиден: если T-Invest `share_by` падает для SBER, это проявится в логах `tinvest_fetch_failed` (раньше скрывалось). Следующий шаг — визуальная проверка после Фазы 5 (badge на фронте) + лог `backend`.
+- `source='tinvest+iss'` в `_save_to_cache` on-conflict ветке больше не возникает (merge удалён). Формальную «Фазу 6» (выпилить строковую константу из `source` и упростить ветвление `on_conflict`) можно слить с этим патчем или отложить — в текущем виде код корректен, просто содержит мёртвую ветку для обратной совместимости.
+
+### Что осталось из плана
+- **Фаза 5** — frontend: axios 409-interceptor → `TInvestRequiredModal`; badge «Данные MOEX» на ChartPage (текст уже есть в `CandlestickChart.tsx:511`, менять не нужно).
+- **Фаза 7** — E2E верификация по матрице режимов × тикеров × таймфреймов.
+
+---
+
+## 2026-04-16 — Фаза 3.1: broker test-connection + фикс стрима свечей
+
+### Контекст
+
+По итогам визуальной проверки Фазы 3 пользователь увидел в Console серию ошибок `Chart live update failed: Error: Cannot update oldest data, last time=[object Object], new time=[object Object]` на всех таймфреймах **кроме `D`** (см. скриншот от 2026-04-16). Параллельно задан вопрос: «статус `is_active=true` на карточке брокера — это локальный флаг или система реально проверила ключ у T-Invest?». По умолчанию — только локальный флаг (ставится при создании в [broker/service.py:128](Develop/backend/app/broker/service.py#L128)).
+
+### Найденный корень стрим-бага
+
+В [marketDataStore.ts:218](Develop/frontend/src/stores/marketDataStore.ts#L218) сравнение `candle.timestamp === last.timestamp` — строковое. Бэкенд отдаёт исторические свечи из SQLite без tz-суффикса (naive UTC → `"2026-04-16T09:00:00"`), а стрим T-Invest — с `+00:00` (`"2026-04-16T09:00:00+00:00"`). Строки не совпадали → срабатывала ветка «append», в массив `candles` добавлялся дубликат, после чего lightweight-charts `series.update()` ругался «Cannot update oldest data», потому что по unix-секундам (после `parseUtcTimestamp` с MSK-оффсетом) время новой свечи совпадало с текущей последней. Для `D` ошибка была менее заметна: и naive, и aware варианты всё равно маппились на одну и ту же полночь.
+
+### Изменения
+
+1. **`Develop/backend/app/broker/router.py`** — добавлен endpoint `POST /api/v1/broker-accounts/{account_id}/test-connection` (response_model `BrokerTestConnectionResponse`). Эндпоинт расшифровывает ключ, создаёт адаптер, делает реальный вызов `adapter.get_accounts()` (read-only, совместимо с ключом только для чтения), возвращает `{ok, accounts_seen, latency_ms, checked_at, error_code?, detail?}`. Ошибки декрипта, коннекта, отсутствия зашифрованных ключей — все возвращают 200 с `ok=false` и соответствующим `error_code` (чтобы UI унифицированно показывал сообщение). Успешный вызов логируется как `broker_test_connection_ok`, ошибка — `broker_test_connection_failed`.
+
+2. **`Develop/backend/app/broker/schemas.py`** — новая схема `BrokerTestConnectionResponse` (`ok: bool`, `accounts_seen: int`, `latency_ms: int`, `checked_at: datetime`, `error_code: str | None`, `detail: str | None`).
+
+3. **`Develop/frontend/src/api/brokerApi.ts`** — тип `BrokerTestConnectionResponse` + метод `brokerApi.testConnection(id)`.
+
+4. **`Develop/frontend/src/components/settings/BrokerAccountList.tsx`** — кнопка-иконка `IconPlugConnected` («Проверить подключение к T-Invest») в колонке «Действия» каждой строки; рядом со статусом `Активен/Неактивен` показывается вторым Badge результат последней проверки (`Проверен HH:MM` зелёный или `Ошибка HH:MM` красный). Состояние результата — локальное (`useState`, per-account) — между перезагрузками страницы не сохраняется. Это осознанно: пользователь хотел «проверить сейчас», а не смотреть историю.
+
+5. **`Develop/frontend/src/stores/marketDataStore.ts`** — функция-хелпер `toUtcUnix(ts)`, которая трактует naive-строки как UTC (добавляет `Z`) и возвращает unix-секунды. `upsertLiveCandle` переписан: сравнение `newTs === lastTs` / `newTs > lastTs` теперь по unix-секундам, а не по строкам. Это устраняет фантомный аппенд дубликатов при расхождении naive/aware форматов исторических и live-свечей.
+
+### Видимый эффект
+
+- В **«Настройки → Брокер»** у каждой карточки появилась иконка «plug-connected». Нажатие вызывает `POST /test-connection`; успех → зелёный Badge «Проверен HH:MM» + notification; ошибка → красный Badge «Ошибка HH:MM» + notification с деталью.
+- На графиках **1m / 5m / 15m / 1h / 4h** должны исчезнуть ошибки «Cannot update oldest data» в Console; последняя свеча должна корректно тикать по live-потоку T-Invest (как это уже работало на `D`).
+
+### Файлы изменений
+- `Develop/backend/app/broker/router.py` — новый endpoint `test_broker_connection`.
+- `Develop/backend/app/broker/schemas.py` — `BrokerTestConnectionResponse`.
+- `Develop/frontend/src/api/brokerApi.ts` — метод `testConnection`.
+- `Develop/frontend/src/components/settings/BrokerAccountList.tsx` — кнопка проверки + state результата + второй Badge.
+- `Develop/frontend/src/stores/marketDataStore.ts` — `toUtcUnix` + фикс `upsertLiveCandle` (сравнение по unix).
+
+### Открытые вопросы / следующий шаг
+- Визуальная проверка пользователем: (а) кнопка проверки ключа даёт ожидаемый ответ для production и sandbox; (б) на минутном графике в DevTools больше нет ошибок «Cannot update oldest data», и живая свеча действительно тикает на 1m / 5m / 1h.
+- **Фаза 5** (axios 409-interceptor + TInvestRequiredModal) — в работе после подтверждения Фазы 3.1.
+
+## 2026-04-16 — Фаза 3.2: ISS-агрегация + gap-tolerance + чистка dirty-кеша
+
+### Симптомы (со слов пользователя после Фазы 3.1)
+- На 5m SBER свечи в кеше шли с разницей **1 минута**, а не 5.
+- На 1h LKOH пропала свеча 12:00 между 11:00 и 13:00; после переключения ТФ обратно — дыра исчезала.
+
+### Root cause
+1. **ISS не поддерживает 5m/15m/4h нативно.** В `Develop/backend/app/broker/moex_iss/client.py` старый `TIMEFRAME_MAP` маппил `5m→1`, `15m→10`, `4h→60` — клиент получал от ISS свечи меньшей гранулярности, а `_save_to_cache` складывал их под тегом `timeframe='5m'` (и т.д.). `_find_gaps` гэпов не видел — плотные данные. В итоге кеш содержал 1-минутные свечи под тегом 5m (3330 записей в `ohlcv_cache`, `SBER/5m/moex_iss`).
+2. **`_find_gaps` для intraday.** Толеранс вычислялся как `max(duration*2, timedelta(days=3))` — для 1h/5m/15m/4h/1m эффективный порог был **3 дня**, пропуск 1 свечи (1ч) не детектировался как gap → дозапрос не делался. Дыра «12:00» у LKOH держалась до момента, когда `_build_current_candle` успевал перекрыть её свежей 1m-агрегацией (эффект «после переключения исчезло»).
+3. **ISS-кеш в viewer не чистился.** `_purge_iss_cache` вызывался только при `mode != "viewer"`, старые ISS-записи пережили включение T-Invest и мешали на графике.
+
+### Правки
+- **`Develop/backend/app/broker/moex_iss/client.py`:**
+  - Разделил интервалы: `_NATIVE_INTERVAL` (1m, 10m, 1h, D, W, M) и `_AGGREGATION` (`5m→(1m,×5)`, `15m→(1m,×15)`, `4h→(1h,×4)`).
+  - `get_candles()` для агрегируемых ТФ запрашивает базовый нативный ТФ и вызывает `_aggregate` (`open` первой, `close` последней, `high=max`, `low=min`, `volume/value=sum`; группировка по `_floor_to_period`).
+  - `TIMEFRAME_MAP` оставлен как alias `_NATIVE_INTERVAL + базовые интервалы агрегируемых ТФ` для обратной совместимости с тестами.
+- **`Develop/backend/app/market_data/service.py`:**
+  - `_find_gaps`: для intraday ТФ `mid_tolerance = 1.5 × duration` (1h→90 минут, 5m→7.5 минут и т.д.). Ночной перерыв MOEX (~9ч) → детектируется как gap → T-Invest/ISS вернут пустой список → `on_conflict_do_nothing` не зациклит.
+  - `get_candles`: `_purge_iss_cache` вызывается **всегда** при `has_tinvest=True` (в т.ч. в viewer), а не только в backtest/trading.
+
+### Миграция данных
+- `DELETE FROM ohlcv_cache WHERE source='moex_iss' AND timeframe IN ('5m','15m','4h')` — выполнено на `Develop/backend/data/terminal.db`, удалено **3330** записей (все SBER/5m с неверной гранулярностью). Нативные `moex_iss + 1m/D` и все `tinvest + *` остались нетронутыми.
+
+### Файлы
+- `Develop/backend/app/broker/moex_iss/client.py` — агрегация + рефакторинг `get_candles` / `_fetch_native` / `_aggregate` / `_floor_to_period`.
+- `Develop/backend/app/market_data/service.py` — `_find_gaps` tolerance + `_purge_iss_cache` в viewer.
+
+### Верификация
+- `python -c "from app.broker.moex_iss.client import MOEXISSClient, TIMEFRAME_MAP, _AGGREGATION"` → OK.
+- `python -c "from app.market_data.service import MarketDataService"` → OK.
+- `sqlite3 data/terminal.db "SELECT source, timeframe, COUNT(*) FROM ohlcv_cache GROUP BY source, timeframe"` → грязных записей нет, только нативные ISS (1m, D) и T-Invest.
+
+### Открытые вопросы
+- Визуальная проверка пользователем на LKOH 1h (отсутствующая свеча 12:00 должна догружаться) и SBER 5m (свечи спейснуты ровно на 5 минут).
+- При отключённом T-Invest (чистый viewer-режим) агрегированные 5m/15m/4h не проверены вживую — сделать отдельный прогон.
+
+## 2026-04-16 — Фаза 3.3: naive→aware datetime для T-Invest SDK + daily tooltip
+
+### Симптомы (после Фазы 3.2, со слов пользователя)
+- На 1h после обновления графика снова «12:00 → 14:00» без свечи 13:00.
+- На 5m предпоследняя свеча 12:25, последняя 14:25 — дыра **ровно 2 часа**.
+- На дневном ТФ в tooltip crosshair и на оси времени показываются часы — не нужно, достаточно даты.
+- Графики нашего терминала визуально отличаются от графиков в терминале TradingView для тех же тикеров/ТФ.
+
+### Root cause (Gotcha 15)
+`tinkoff-investments` SDK при сериализации `datetime` в gRPC-timestamp **не проверяет `tzinfo`**. Для naive `datetime` вызывается `datetime.timestamp()`, который трактует naive как локальное системное время: на сервере CEST=UTC+2 → все запросы свечей уезжали на **2 часа назад** (`[from−2h, to−2h]`).
+
+Эффект: последний фрагмент торгового дня попадал «за границу» ответа. MSK=UTC+3 дал бы дыру «ровно 3 часа», MSK-offset соседних зон даёт другие значения — отсюда устойчивая корреляция «величина дыры = UTC-offset системы».
+
+Фаза 3.2 (tolerance `_find_gaps` = 1.5×duration) была необходима, но недостаточна: gap стабильно появлялся в тот же момент на каждом новом запросе, а не устранялся.
+
+Доказательство: прямой тест на одном и том же сервере в одну и ту же секунду:
+```
+# naive datetime.utcnow():          last=09:35 UTC
+# aware datetime.now(timezone.utc): last=11:35 UTC   (актуальное время MOEX)
+```
+
+### Правки
+- **`Develop/backend/app/broker/tinvest/adapter.py`:**
+  - Добавлен хелпер `_to_utc_aware(dt: datetime) -> datetime` на уровне модуля.
+  - Применён во всех вызовах SDK, принимающих временные рамки: `get_historical_candles` (`get_candles` line ~280), `get_operations` (sandbox и non-sandbox ветки, lines ~462, ~827).
+- **`Develop/frontend/src/components/charts/CandlestickChart.tsx`:**
+  - Добавлен selector `currentTimeframe` из `useMarketDataStore`.
+  - Новый `useEffect([currentTimeframe])`: для `D/W/M` применяет `chart.applyOptions({ timeScale: { timeVisible: false } })`, для intraday — `true`. На оси времени и в лейблах crosshair часы больше не показываются на Daily/Weekly/Monthly.
+
+### Файлы
+- `Develop/backend/app/broker/tinvest/adapter.py` — helper + 3 call sites.
+- `Develop/frontend/src/components/charts/CandlestickChart.tsx` — селектор + useEffect (timeVisible).
+- `Develop/stack_gotchas/gotcha-15-tinvest-naive-datetime.md` — новый gotcha (описание, правило обхода, `related_files`).
+- `Develop/stack_gotchas/INDEX.md` — строка #15, `last_updated` → 2026-04-16.
+
+### Stack Gotcha 15 добавлен
+`gotcha-15-tinvest-naive-datetime.md` — T-Invest SDK интерпретирует naive datetime как локальное системное время. Правило: всегда передавать tz-aware UTC через `_to_utc_aware()` перед вызовом SDK.
+
+### Верификация (до UI пользователя)
+- Прямой тест SDK с aware UTC: SBER 5m last=11:35 UTC (совпало с ожидаемым моментом MOEX).
+- LKOH 1h last=11:00 UTC — свеча «12:00 MSK» (11:00 UTC → 14:00 MSK на axis после `+3h` shift в `parseUtcTimestamp`) присутствует.
+- Остаётся визуальная проверка пользователем:
+  1. 1h LKOH и 5m SBER — последние свечи без 2-часовой дыры.
+  2. Daily SBER — на оси времени и в tooltip только дата, без часов.
+  3. Сравнение с TradingView — ожидаем, что данные теперь совпадают (поскольку источник один и тот же — T-Invest/MOEX).
+
+### Гипотеза по различиям с TradingView
+Основная причина расхождения — тот же 2-часовой сдвиг T-Invest (Gotcha 15). TradingView использует собственные MOEX-feed-и без этой ошибки, поэтому их график всегда был «правее». После Фазы 3.3 ожидается совпадение в пределах задержки streaming. Если расхождения останутся — проверять отдельно по симптому (конкретный ТФ, конкретный тикер, конкретное время).
+
+## 2026-04-16 — Фаза 3.4: client-side cache по (ticker, tf) для мгновенного переключения
+
+### Симптом (со слов пользователя)
+При переключении таймфрейма на странице графика появляется крутящийся спиннер, хотя данные уже были загружены ранее в этой же сессии — система «снова думает», а не показывает кешированное.
+
+### Root cause
+[marketDataStore.ts](Develop/frontend/src/stores/marketDataStore.ts) хранил только текущий массив `candles`. При `setTimeframe(tf)` массив очищался (`candles: []`), потом `fetchCandles()` поднимал `loading: true` и шёл на backend. Даже если пользователь уже смотрел этот ТФ секунду назад, данные не переиспользовались.
+
+### Правка
+- Добавлено поле `candlesCache: Record<string, Candle[]>` с ключом `${ticker}:${tf}`.
+- `setTicker` / `setTimeframe` подставляют `candles` из кеша **синхронно** (без спиннера). Если кеша нет — пустой массив.
+- `fetchCandles` не ставит `loading: true`, если кеш уже подставлен: рефреш выполняется молча в фоне и по завершении обновляет и `candles`, и запись в `candlesCache`.
+- `fetchOlderCandles` (lazy-load) и `upsertLiveCandle` (WS-стрим) тоже пишут в кеш — иначе следующее переключение получило бы устаревший снимок.
+
+### Файлы
+- `Develop/frontend/src/stores/marketDataStore.ts` — поле `candlesCache`, синхронизация в `setTicker`, `setTimeframe`, `fetchCandles`, `fetchOlderCandles`, `upsertLiveCandle`.
+
+### Эффект
+Переключение на ранее просмотренный ТФ — мгновенное (без спиннера); первая загрузка нового ТФ по-прежнему показывает спиннер. Фоновый рефреш держит данные актуальными.
+
+### Открытый вопрос
+Пользователь также сообщил о визуальной «дыре» на 1h/5m. В SQLite (`ohlcv_cache`) свечи SBER 1h и 5m за 15–16 апреля идут без gap'ов (проверено: ровно 1h / 5m step). Gap, вероятно, — визуальный шов между концом extended-session (23:00 MSK) и началом премаркета (06:00–07:00 MSK следующего дня), либо артефакт lightweight-charts. Нужен скриншот с конкретным тикером/временем для точной диагностики.
+
+## 2026-04-16 — Фаза 3.5: race-guard в fetchCandles/fetchOlderCandles
+
+### Симптом (со слов пользователя)
+После Фазы 3.4 («клиентский кеш по ticker:tf»): «Перешёл на дневной график, а он показывает формально данные часового графика».
+
+### Root cause
+Добавленный в Фазе 3.4 клиентский кеш ввёл новое окно гонки: `fetchCandles` читал `currentTimeframe` до `await`, затем после ответа перезаписывал `state.candles` без проверки, что пользователь всё ещё на том же ТФ. Если успеть переключить `1h → D` до завершения запроса за 1h, `set({ candles: newCandles })` перетирал daily-массив часовыми свечами. До Фазы 3.4 race существовал тоже, но маскировался полным сбросом `candles: []` в `setTimeframe` — разрыв между «пусто» и «актуальное» был короткий и визуально не цеплял; с кешем стало видно сразу.
+
+### Правка
+`Develop/frontend/src/stores/marketDataStore.ts`:
+- `fetchCandles`: сохраняет `requestTicker` / `requestTimeframe` **до** сетевого запроса. После ответа `set((state) => …)` проверяет `stillActive = state.currentTicker === requestTicker && state.currentTimeframe === requestTimeframe`. Массив `candles` и флаг `loading` обновляются только если `stillActive`. Запись в `candlesCache[cacheKey]` делается **всегда** — данные корректные для своего ключа, пригодятся при возврате на этот ТФ.
+- Аналогично — в `fetchOlderCandles`: мерж с существующими свечами делается либо с `state.candles` (если активен), либо с `candlesCache[cacheKey]` (если пользователь уже ушёл). UI не трогается, если запрос устарел.
+- `catch`-ветки тоже под guard'ом: сообщение «Не удалось загрузить данные» показывается только если ошибка пришла в актуальный ТФ.
+
+### Файлы
+- `Develop/frontend/src/stores/marketDataStore.ts` — race-guard в `fetchCandles` и `fetchOlderCandles`.
+
+### Верификация
+- `npx tsc --noEmit` — чисто.
+- Остаётся визуальная проверка пользователем: быстрое переключение `D → 1h → 5m → D` не должно показывать свечи чужого ТФ.
+
+### Открытые вопросы (перенесено)
+- Визуальные «дыры» на intraday (1h/5m): подтверждено по скриншотам — это поведение lightweight-charts в UTCTimestamp-режиме. Библиотека размещает свечи **пропорционально реальному времени**, поэтому нерабочие часы MOEX (23:50 → 06:50 MSK) рисуются как пустые слоты. TradingView-подобное «скрытие нерабочих часов» требует перевода intraday на **sequential-index mode** (виртуальные равномерные timestamp'ы + `localization.timeFormatter` / `tickMarkFormatter` для форматирования из lookup-массива реальных timestamp'ов). Отдельная задача, не в этой фазе.
+- Массовые 401 Unauthorized после релогина (видны в консоли скриншота 2026-04-16): требуют отдельной диагностики auth-flow (refresh_token, `revoked_tokens`, перезапуск backend с изменением `SECRET_KEY`). Кандидаты: сравнить token из `localStorage` с тем, что выдаёт `/auth/login`; проверить, не отозван ли jti в `RevokedToken`.
+
+
+## 2026-04-16 — Фаза 3.6: persist `candlesCache` в localStorage
+
+### Симптом (со слов пользователя)
+«Снова сделал логаут и логин, обновил страницу, зашёл в часовой Сбер — он опять грузился секунд 5, потом отрисовался». Ожидание: данные «уже в памяти», должно быть мгновенно.
+
+### Root cause
+`candlesCache`, введённый в Фазе 3.4, жил только в RAM Zustand-store. `window.location.reload()` (после логаут/логин или явного refresh) пересоздаёт store с начальным состоянием `candlesCache: {}`. Первый заход в график снова идёт по full-path: `setTicker → fetchCandles → GET /candles → backend (`_purge_iss_cache` → `_find_gaps` → T-Invest gRPC `GetCandles` + `_build_current_candle` 1m-агрегация)`. На cold gRPC-коннекте это стабильно 2–5 секунд.
+
+### Правка
+`Develop/frontend/src/stores/marketDataStore.ts`:
+- Добавлены helper'ы `loadCandlesCache()` / `saveCandlesCache()` (ключ localStorage: `candlesCache`).
+- Формат записи: `{ [key]: { candles, savedAt } }`. При чтении отбрасываются записи старше `CANDLES_CACHE_TTL_MS = 24h`.
+- LRU-обрезка: при сохранении оставляем `CANDLES_CACHE_MAX_KEYS = 20` последних ключей по `savedAt`.
+- Размер: `CANDLES_CACHE_MAX_PER_KEY = 2000` последних свечей на ключ (защита от localStorage quota).
+- `candlesCache` инициализируется через `loadCandlesCache()` при создании store.
+- Запись в localStorage — только после успешных `fetchCandles` и `fetchOlderCandles` (обе ветки: активный ТФ и race-обновление чужого ключа). `upsertLiveCandle` **не** пишет в localStorage — JSON.stringify 10k-массива на каждый live-tick не окупается; актуальная свеча дозагрузится ближайшим fetch'ем.
+- `try/catch` вокруг `setItem` — `QuotaExceededError` проглатывается молча (кеш — опциональная оптимизация, не критично).
+
+### Файлы
+- `Develop/frontend/src/stores/marketDataStore.ts` — helper'ы `loadCandlesCache`/`saveCandlesCache`, инициализация `candlesCache` из localStorage, вызовы `saveCandlesCache` в `fetchCandles` и обеих ветках `fetchOlderCandles`.
+
+### Эффект
+После refresh страницы график ранее просмотренного `(ticker, tf)` рисуется мгновенно из localStorage (без спиннера). Фоновый fetch догоняет свежие данные и молча обновляет массив + запись в кеше. TTL 24 ч защищает от показа совсем устаревших свечей; LRU — от неограниченного роста.
+
+### Верификация
+- `npx tsc --noEmit` — чисто.
+- Ручная проверка пользователем: открыть SBER 1h → логаут → логин → открыть SBER 1h. Ожидается: мгновенная отрисовка (без 5-сек спиннера), затем беззвучное обновление свежими данными.
+
+### Открытые вопросы
+- **Daily-график: отсутствует live-обновление текущей дневной свечи.** На скриншоте TradingView SBER 2026-04-16 закрывается по +0,49 %, last=322,37; наш терминал показывает последнюю дневную свечу без текущего движения дня. Причина: stream_manager подписывается на `timeframe=D` T-Invest gRPC-стрима, который отдаёт дневные свечи **раз в день на закрытии**, тики внутри дня туда не приходят. Фикс на бэке (`_build_current_candle`) работает только на первый fetch, live не покрывает. Варианты: (а) на фронте для агрегируемых ТФ подписываться на 1m-stream и агрегировать последнюю свечу локально; (б) polling `GET /candles` последней свечи каждые 15–30 сек; (в) на бэке — второй подписчик на 1m-stream, который публикует агрегированные D/1h/4h в тот же `market:{ticker}:{D}` канал. Выбор — в отдельной фазе.
+- Intraday «дыры» (sequential-index mode) и 401 после релогина — без изменений, перенесены.
+
+## 2026-04-16 — Фаза 3.7: фикс D-мигания + closeout S5R
+
+### Симптом (со слов пользователя)
+«Когда перехожу на дневной, сначала на долю секунды корректный график, потом он сбрасывается и появляется неверный».
+
+### Root cause
+При переключении ТФ `1h → D` в `ChartPage.tsx` запускается async `subscribeCandleStream(ticker, D)` (POST /candles/subscribe, 1–3 с). Пока ждём ответ, prop `wsChannel` в `CandlestickChart` всё ещё равен `market:{ticker}:1h` → `useWebSocket` **не** отписан от старого канала. Живая 1h-свеча прилетает через WS → `marketWsCallback` → `useMarketDataStore.getState().upsertLiveCandle(candle)`. `upsertLiveCandle` **не проверяет ТФ** свечи — добавляет её в хвост текущего массива `candles`, который уже подставлен из `candlesCache[ticker:D]`. Результат: на долю секунды виден корректный Daily, затем «порченый» (1h-свеча в хвосте Daily-массива), потом снова корректный — после завершения `fetchCandles(D)`.
+
+### Правка
+[Develop/frontend/src/pages/ChartPage.tsx:78-102](Develop/frontend/src/pages/ChartPage.tsx#L78-L102):
+синхронный `setWsChannel(null)` в первой строке useEffect, **до** запуска async-подписки. `useWebSocket` ([Develop/frontend/src/hooks/useWebSocket.ts:147-155](Develop/frontend/src/hooks/useWebSocket.ts#L147-L155)) при смене prop `channel` на `null` немедленно вызывает cleanup → `unsubscribe(oldChannel, callback)` → старый канал снимается до того, как прилетит следующая 1h-свеча. Когда async-запрос вернёт новый `market:{ticker}:D`, подписка поднимется уже на правильный канал.
+
+### Файлы
+- `Develop/frontend/src/pages/ChartPage.tsx` — `setWsChannel(null)` в useEffect [ticker, currentTimeframe] (1 строка + комментарий).
+
+### Верификация
+- `npx tsc --noEmit` — чисто.
+- Ручная проверка пользователем: SBER, последовательность 1h → D → 1h → 5m → D не должна показывать «порченые» свечи чужого ТФ.
+
+### Почему не полноценный фикс (отложено в S5R-2 Трек 2)
+`upsertLiveCandle` по-прежнему не проверяет ТФ приходящей свечи. Если в payload события добавить поле `timeframe`, callback сможет отфильтровать рассинхронизированные свечи на уровне store — это правильная архитектурная защита, но требует правок на бэкенде (`stream_manager` publisher) и выходит за scope S5R. Перенесено в Трек 2 (backend live-агрегация) — там всё равно трогаем publisher.
+
+---
+
+## 2026-04-16 — Closeout S5R (окончательный)
+
+S5R закрывается в четвёртой (и последней) волне. Все неотложные баги графика, замеченные пользователем в ходе ручного тестирования 14–16 апреля, исправлены (фазы 3.3–3.7). Остаются четыре крупные задачи, которые **не укладываются в ревью-цикл** по объёму и архитектурному масштабу — они переносятся в **новый цикл «Sprint 5 Review 2» (S5R-2)**:
+
+- **Трек 1** — backend prefetch свечей для активных торговых сессий пользователя при логине (устраняет 7-сек лаг первого открытия нового ТФ). Идея пользователя.
+- **Трек 2** — backend live-агрегация 1m→D/1h/4h (Daily/1h не растут в реальном времени во время торгов; T-Invest gRPC `SubscribeCandles(D)` публикует только на закрытии дня).
+- **Трек 3** — sequential-index mode для intraday-графиков (убрать визуальные «дыры» нерабочих часов MOEX).
+- **Трек 4** — диагностика массовых 401 Unauthorized после релогина + фикс.
+
+Каталог `Спринты/Sprint_5_Review_2/` будет создан в следующей сессии как первый шаг нового цикла.
+
+## 2026-04-16 — Открытый вопрос: Daily-мигание частично остаётся → перенесено в S5R-2 Трек 5
+
+### Состояние после Фазы 3.7
+Пользователь подтвердил: после фикса `setWsChannel(null)` мигание Daily-графика **осталось**. Очистка `localStorage['candlesCache']` + refresh (гипотеза «stale битый массив») тоже не помогла — значит проблема не в закешированных данных.
+
+### Почему 3.7 не закрыл проблему полностью
+`setWsChannel(null)` убирает старую WS-подписку **мгновенно после next render**, но между `setTimeframe('D')` (store-мутация) и реальным `unsubscribe` старого канала остаётся окно в 0–10 мс. Если в этот интервал успевает прилететь 1h-тик через singleton WebSocket, он попадает в `marketWsCallback` → `upsertLiveCandle(candle)` без проверки ТФ → добавляется в хвост Daily-массива. `upsertLiveCandle` по-прежнему **не знает**, свечу какого ТФ ему прислали — доверяет вслепую. `useWebSocket` — singleton subscription map ([hooks/useWebSocket.ts:15](Develop/frontend/src/hooks/useWebSocket.ts#L15)), поэтому даже после unsubscribe callback'а может сработать, если событие уже было в очереди.
+
+### Решение (перенесено)
+Проблема вынесена в **S5R-2 Трек 5: TF-aware `upsertLiveCandle`**. Варианты:
+1. **Frontend-only:** добавить `TF_STEP_SECONDS` map и в `upsertLiveCandle` отбрасывать тики с `newTs - lastTs` меньше ожидаемого step'а текущего ТФ. Быстро, не ломает live-агрегацию.
+2. **Full fix:** в `stream_manager` publisher включать `timeframe` в payload; на фронте callback отбрасывает несовпадение. Архитектурно правильнее, связано с Треком 2 (live-агрегация).
+
+Рекомендуется начать с варианта 1 (изолированный frontend-фикс 10–15 строк), вариант 2 встроить в Трек 2 на этапе правок stream_manager publisher.
+
+### Почему оставляем Фазу 3.7 в коде
+`setWsChannel(null)` перед async-подпиской — **правильная архитектурная гигиена** (не держать подписку на мёртвый канал во время ожидания нового). Уменьшает окно гонки с «1–3 сек ожидание POST + любые тики в этот период» до «0–10 мс между store-update и unsubscribe callback». Сам по себе не закрывает проблему, но должен оставаться — без него Трек 5 будет работать на большем окне.
+
+### Формальное состояние S5R
+S5R **остаётся закрытым**. Замеченная остаточная проблема перенесена в S5R-2 без переоткрытия текущего цикла — это соответствует зафиксированному принципу: крупные треки chart-hardening идут в отдельном патч-цикле.

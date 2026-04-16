@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-04-15 (после закрытия Sprint_5_Review closeout wave 3)
+> Последнее обновление: 2026-04-16 (после закрытия Sprint_5_Review wave 4: фазы 3.3–3.7 — chart bug-fixes)
 
 ---
 
-## Текущий спринт: S5 ✅ + **Sprint_5_Review ✅ закрыт полностью (фазы 1-2 + closeout 7-14)** → **S6 готов к старту**
+## Текущий спринт: S5 ✅ + **Sprint_5_Review ✅ закрыт полностью (фазы 1-2 + closeout 7-14 + wave 4: фазы 3.3–3.7)** → **S5R-2 как преемник chart-hardening + S6 готов к старту**
 
 ## Прогресс по спринтам
 
@@ -18,7 +18,8 @@
 | S3 | Стратегии + редактор | ✅ завершён | Blockly, Sandbox, CSRF, 320 тестов | Sprint_3/sprint_report.md |
 | S4 | AI + бэктестинг | ✅ завершён | AI chat, Backtest Engine, 577 тестов | Sprint_4/sprint_report.md |
 | S5 | Торговля | ⚠️ завершён с замечаниями (весь долг устранён в S5R + closeout) | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E | Sprint_5/arch_review_s5.md |
-| **S5 Review** | **Внеплановое ревью + 3 волны closeout: стабилизация перед S6** | **✅ закрыт полностью** | **CI зелёный впервые с 2026-04-03 на всех 5 ветках + develop. Live Runtime Loop замкнут, реальные позиции T-Invest (source через FIGI), 109 Playwright passed (моки, работают 24/7 без seed), 14 Stack Gotchas, 2 бизнес-бага починены, schema drift устранён, tinvest stream API исправлен, iss_tail_fetch timezone, кнопка Запустить торговлю из бэктеста подключена. Вердикт ARCH: PASS WITH NOTES, блокеров нет. Три волны closeout (задачи 7-14) закрыли все дополнительные замечания + проблемы, обнаруженные при ручном тестировании после wave 2.** | **Sprint_5_Review/arch_review_s5r.md** + **Sprint_5_Review/changelog.md** разделы closeout |
+| **S5 Review** | **Внеплановое ревью + 3 волны closeout + wave 4 (chart bug-fixes): стабилизация перед S6** | **✅ закрыт полностью** | **CI зелёный впервые с 2026-04-03 на всех 5 ветках + develop. Live Runtime Loop замкнут, реальные позиции T-Invest (source через FIGI), 109 Playwright passed (моки, работают 24/7 без seed), **15** Stack Gotchas, 2 бизнес-бага починены, schema drift устранён, tinvest stream API исправлен, iss_tail_fetch timezone, кнопка Запустить торговлю из бэктеста подключена. **Wave 4 (фазы 3.3–3.7, 2026-04-16):** T-Invest naive→aware (gotcha-15), client-side `candlesCache` + persist в localStorage, race-guard в `fetchCandles`/`fetchOlderCandles`, фикс D-мигания в ChartPage. Крупные треки (backend prefetch, live-агрегация 1m→D, sequential-index mode, 401 debug) вынесены в **Sprint_5_Review_2** (S5R-2). Вердикт ARCH: PASS WITH NOTES, блокеров нет.** | **Sprint_5_Review/arch_review_s5r.md** + **Sprint_5_Review/changelog.md** разделы closeout + фазы 3.3–3.7 |
+| **Sprint_5_Review_2** | **Chart hardening — отдельный патч-цикл после S5R wave 4** | ⬜ не начат | Backend prefetch свечей при логине (идея пользователя) · live-агрегация 1m→D/1h/4h · sequential-index mode intraday · 401-debug · **TF-aware `upsertLiveCandle`** (фикс остаточного Daily-мигания — 3.7 закрыл часть окна гонки, но singleton WebSocket может доставить тик в микро-интервал между store-update и unsubscribe). Каждый трек — в отдельной Claude-сессии для экономии контекста. | Sprint_5_Review_2/ (создаётся в следующей сессии) |
 | S6 | Уведомления | ⬜ готов к старту | Telegram, Email, In-app, Recovery, Graceful Shutdown + 3 backlog задачи (см. ниже) | Sprint_6/sprint_report.md |
 | S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
@@ -46,11 +47,19 @@
   → S6-TINVEST-SDK-UPGRADE — апгрейд tinkoff-investments до beta117+ (wave 3)
   → S6-TINVEST-STREAM-MULTIPLEX — persistent gRPC stream с multiplex (wave 3)
 
+ПАРАЛЛЕЛЬНО (chart-hardening, независимо от S6):
+  → S5R-2 Трек 1 — backend prefetch свечей для активных торговых сессий при логине
+  → S5R-2 Трек 2 — backend live-агрегация 1m→D/1h/4h (Daily/1h не растут в реальном времени)
+  → S5R-2 Трек 3 — sequential-index mode для intraday (визуальные «дыры» нерабочих часов)
+  → S5R-2 Трек 4 — 401 Unauthorized после релогина (диагностика + фикс)
+  → S5R-2 Трек 5 — TF-aware upsertLiveCandle (остаточное Daily-мигание после 3.7)
+
 ПРЕДВАРИТЕЛЬНО: Sprint_6_Review после S6 (обновить ФТ/ТЗ по новому объёму S6)
 
 ФАЙЛ СОСТОЯНИЯ: Sprint_6/sprint_state.md (когда S6 откроется)
 ФАЙЛ BACKLOG S6: Sprint_6/backlog.md (создан 2026-04-14, дополнен 2026-04-15)
-ПОСЛЕДНЕЕ РЕВЬЮ: Sprint_5_Review/arch_review_s5r.md + closeout в changelog.md
+ПОСЛЕДНЕЕ РЕВЬЮ: Sprint_5_Review/arch_review_s5r.md + closeout + wave 4 (фазы 3.3–3.7) в changelog.md
+СЛЕДУЮЩИЙ ПАТЧ-ЦИКЛ: Sprint_5_Review_2/ (будет создан в отдельной сессии)
 ```
 
 ## Ключевые решения (кросс-спринтовые)
