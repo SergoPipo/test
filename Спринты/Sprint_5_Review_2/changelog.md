@@ -32,6 +32,33 @@
 
 ---
 
+## 2026-04-16 — Трек 4: детализация плана (diagnose-first)
+
+**Контекст:** пользователь утвердил начало S5R-2 с трека 4 (401 Unauthorized после релогина) как UX-блокера. Ветка: `docs/s5r2-skeleton-track4`.
+
+**Что сделано:**
+- Explore-агент изучил реальный код frontend (authStore, api client, marketDataStore, useWebSocket, e2e) и выдал карту архитектуры + 3 гипотезы root cause.
+- `PENDING_S5R2_track4_401_unauthorized.md` переписан со скелета в полный план:
+  - Секция «Контекст» — реальная архитектура (Zustand persist + axios interceptor + Zustand market store + singleton WS) с конкретными путями файлов и диапазонами строк.
+  - Секция «Корень проблемы» — 3 пронумерованные гипотезы + побочные наблюдения (candlesCache не чистится, WS на старом токене).
+  - Секция «План диагностики» — 7 шагов (воспроизведение → фиксация 401 → timing-трейс console.debug → localStorage-инспекция → backend JWT-декод → incognito → root cause).
+  - Секция «Предлагаемое решение» — 4 варианта (cleanup hook / subscribe pattern / interceptor guard / ChartPage defer).
+  - Секция «Затрагиваемые файлы» — 7 файлов (5 src + 2 test) + опциональный backend.
+  - Секция «Критерии готовности» — 7 пунктов, обязательный новый `gotcha-16-relogin-race.md`.
+  - Секция «Риски» — 4 пункта (persist coupling, AbortController UX, persist-архитектура, Dev vs prod).
+  - Секция «Открытые вопросы к пользователю» — 5 пунктов.
+- Оценка: 1–2 DEV-сессии, один промпт по `prompt_template.md`.
+
+**Файлы:** `Спринты/Sprint_5_Review_2/PENDING_S5R2_track4_401_unauthorized.md`, этот changelog.
+
+**Тесты:** не применимо (документация).
+
+**Что НЕ сделано (следующий шаг):** создать `prompt_DEV-track4.md` по `prompt_template.md` — уже на этапе B, когда ответим на 5 открытых вопросов пользователю и получим подтверждение.
+
+**Результат:** ✅ план трека 4 готов к обсуждению с пользователем.
+
+---
+
 ## Шаблон для будущих записей
 
 ```

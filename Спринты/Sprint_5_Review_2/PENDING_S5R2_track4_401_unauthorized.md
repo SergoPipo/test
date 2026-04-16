@@ -2,70 +2,92 @@
 
 > **Источник:** ручной тест 2026-04-15. Сценарий воспроизводится **неконсистентно**.
 > **Приоритет:** 🔴 UX-блокер (пользователь вынужден перезагружать страницу).
-> **Статус:** ⬜ TODO — скелет создан 2026-04-16, диагностика нужна.
+> **Статус:** 🔄 План детализирован 2026-04-16 на основе изучения реального кода frontend. Диагностика — первый шаг DEV-сессии.
 
 ## Контекст
 
-TODO детализировать. Краткая суть:
-- Сценарий: пользователь `logout` → `login` → открывает `ChartPage` / `BacktestPage` → запросы свечей возвращают `401 Unauthorized`.
-- Иногда проходит без ошибок, иногда — стабильно 401 до полного перезапуска вкладки.
-- Подозрение: **гонка между AuthContext, useSWR-кешем и persist-ом токена**. После logout старые SWR-подписки не пересоздаются, отправляют запрос со старым/пустым токеном.
+Сценарий: пользователь `logout` → `login` → открывает `ChartPage` / `BacktestPage` → запросы свечей (`GET /api/v1/market-data/candles`) возвращают `401 Unauthorized`. Иногда проходит без ошибок, иногда стабильно 401 до полной перезагрузки вкладки (`window.location.reload()`).
 
-## Корень проблемы (предполагаемый)
+Архитектура auth/данных во frontend (по состоянию на 2026-04-16):
 
-TODO подтвердить/опровергнуть в диагностической фазе:
-- После `logout` в `AuthContext` токен обнуляется, но существующие SWR-mutators успели зафетчить до обнуления.
-- После `login` новый токен кладётся в store, но **старые** запросы в `inflight` возвращаются с 401 и триггерят global error-handler.
-- Возможная вторая причина: persist-слой (localStorage) хранит токен дольше, чем нужно, и в интерсепторе axios/fetch попадается старый.
-- Возможная третья: backend кеширует `current_user` между запросами одной сессии, после logout session не инвалидируется на backend.
+- **Auth store:** Zustand + `persist`-middleware (localStorage, ключ `auth-storage`) — `Develop/frontend/src/stores/authStore.ts:1-30`. Поля: `token`, `refreshToken`, `user`. Actions: `login`, `logout` (очищает три поля), `setToken` (вызывается refresh-interceptor). **Нет `expiryTime`, нет side-effect cleanup при `logout`.**
+- **API client:** axios в `Develop/frontend/src/api/client.ts`. Request interceptor (строки 14–29) берёт `token` синхронно через `useAuthStore.getState().token` **в момент отправки запроса**. Response interceptor на 401 (строки 56–95) пробует refresh через `doRefresh()`, на неудаче — `logout()` + `window.location.href = '/login'` (hard-reload).
+- **Market-data store:** `Develop/frontend/src/stores/marketDataStore.ts` — кеширует свечи в in-memory `candlesCache` + localStorage (TTL 24h). **Нет подписки на authStore, нет cleanup при logout.**
+- **ChartPage:** `Develop/frontend/src/pages/ChartPage.tsx:103-110` — `useEffect` при открытии вызывает `setTicker(ticker)` (подставляет cached candles) → `fetchInstrumentInfo(ticker)` → `setTimeout(() => fetchCandles(), 0)`.
+- **WebSocket:** `Develop/frontend/src/hooks/useWebSocket.ts:20-24` — singleton WS, токен в URL `?token=${token}` через `getWsUrl()`. При `logout()` соединение **не закрывается автоматически**, reconnect использует свежий token только если `subscriptions.size > 0`.
+
+## Корень проблемы (гипотезы)
+
+Диагностический отчёт выявил **3 кандидата на root cause**, порядок — от наиболее к наименее вероятному. Все требуют подтверждения в DEV-сессии через логи сети/консоли:
+
+1. **Request interceptor race** (`client.ts:14-29`) — interceptor вычитывает `token` из store синхронно при каждом запросе. Если `fetchCandles()` стартовал **до** того, как `login()` обновил store, в заголовок попадает `undefined` или старый token из persist.
+2. **localStorage persist vs in-memory state** — persist-middleware восстанавливает старый `token` при hydrate на «чистом» открытии вкладки, но между `logout` и `login` новый `token` приходит в store через pending-промис `login()`. Окно рассинхронизации: hydrate успел вернуть старое, `login()` ещё не дошёл до `setToken`.
+3. **Отсутствие cleanup pending-запросов при 401→refresh→retry** — `client.ts` retry'ит только один запрос, который поймал 401. Но запросы, вставшие в очередь между logout и login (ChartPage → fetchCandles), уходят со старым/пустым token и 401-reply обрабатывается индивидуально; при этом `marketDataStore` не инвалидирует cache и не триггерит `mutate`.
+
+Побочные наблюдения (не root cause, но смежные):
+- `marketDataStore.candlesCache` (localStorage) сохраняется после logout — чужой пользователь после релогина увидит чужие тикеры (отдельный security-nit).
+- WebSocket не пересоздаётся на logout → активный stream на старом токене до первого `onclose`.
 
 ## План диагностики (ДО написания фикса)
 
-TODO:
-1. Запустить проект локально, открыть Network / Console.
-2. Повторить сценарий: `logout → login → ChartPage`. Зафиксировать запросы 401 и заголовки `Authorization`.
-3. Проверить `AuthContext` reducer — порядок `setToken(null)` → `clearUser()` → navigate.
-4. Проверить axios/fetch интерсептор на переупорядочивание refresh-token.
-5. Проверить backend логи: чей JWT в упавшем запросе — старый или новый?
-6. Зафиксировать root cause в `PENDING_S5R2_track4_401_unauthorized.md` → перейти к решению.
+1. **Воспроизведение локально** — Chrome DevTools Network + Console. Логин пользователем `sergopipo` (креды — `user_test_credentials.md`), открыть `ChartPage` → `logout` через меню → `login` повторно → открыть `ChartPage` того же тикера.
+2. **Зафиксировать 401-запрос** — скопировать заголовок `Authorization` из failed-запроса. Сравнить с `useAuthStore.getState().token` в консоли **в момент 401**.
+3. **Проверить timing** — добавить `console.debug` в: `authStore.login` (`[auth] login set token`), `client.ts` request interceptor (`[api] send ${url} token=${token?.slice(0,8)}`), `marketDataStore.fetchCandles` (`[md] fetch start`). Собрать трассу и найти окно рассинхронизации.
+4. **Проверить localStorage** — `localStorage.getItem('auth-storage')` сразу после logout и сразу после login. Должно ли persist очищаться синхронно?
+5. **Backend-side** — достать из backend-логов JWT упавшего 401-запроса, декодировать (`jwt.io`). Старый токен или новый невалидный?
+6. **Воспроизведение у другого пользователя / вкладки в incognito** — нужна ли persist-коллизия или проблема повторяется на чистом старте.
+7. Root cause зафиксировать в этом файле → перейти к решению.
 
 ## Предлагаемое решение (post-diagnose)
 
-TODO после диагностики. Варианты:
-1. **SWR global mutate(undefined)** на logout — сбрасывает все кеши и inflight-запросы.
-2. **Axios interceptor** — при 401 принудительно пересчитывает токен из store и повторяет запрос один раз (стандартный паттерн).
-3. **AuthContext listener** — компонент `ChartPage` подписывается на событие `auth:token-refreshed` и пере-фетчит свечи.
-4. **Backend session invalidation** — logout инвалидирует server-side session/JWT blacklist.
+Выбор применяется после шага 7 диагностики. Варианты (один или комбинация):
+
+1. **Cleanup hook в `authStore.logout`** — при logout: `localStorage.removeItem('auth-storage')` **синхронно**, закрыть WS (`closeWS()`), сбросить `marketDataStore` (`clearCandlesCache()`), abort всех inflight через общий `AbortController`.
+2. **Subscribe-паттерн** — `marketDataStore` + `useWebSocket` подписываются на `authStore` через `useAuthStore.subscribe((s, prev) => { if (prev.token && !s.token) cleanup(); })`. Cleanup = инвалидация кеша + отписка WS.
+3. **Interceptor guard** — в `client.ts` request interceptor: если `!token`, отбросить запрос с `return Promise.reject(new AxiosError('no token', 'ECANCELED'))` вместо отправки без Authorization. Предотвращает race-запросы во время релогина.
+4. **ChartPage defer** — `useEffect` ждёт `useAuthStore(s => s.token)` как зависимость, не стреляет `fetchCandles` пока токена нет. Убирает `setTimeout(…, 0)`.
+
+Рекомендация по результатам диагностики — минимальный набор, закрывающий подтверждённую гипотезу, без over-engineering.
 
 ## Затрагиваемые файлы
 
-TODO после диагностики. Ожидаемые:
-- `frontend/src/features/auth/AuthContext.tsx`
-- `frontend/src/api/client.ts` (или эквивалент axios/fetch)
-- `frontend/src/features/chart/hooks.ts` — SWR-хуки свечей
-- `backend/app/auth/dependencies.py` — если invalidate нужен на бэке
+- `Develop/frontend/src/stores/authStore.ts` — logout cleanup hook
+- `Develop/frontend/src/api/client.ts` — опционально guard в request interceptor
+- `Develop/frontend/src/stores/marketDataStore.ts` — subscribe на authStore, cleanup
+- `Develop/frontend/src/hooks/useWebSocket.ts` — `closeWS()` на logout
+- `Develop/frontend/src/pages/ChartPage.tsx` — убрать `setTimeout(…, 0)`, сделать зависимость от token
+- `Develop/frontend/e2e/auth.spec.ts` — новый E2E-сценарий «logout → login → ChartPage → нет 401»
+- `Develop/frontend/src/stores/__tests__/authStore.test.ts` — vitest на logout cleanup
+- (возможно) `Develop/backend/app/auth/dependencies.py` — если backend-сторонняя session-invalidation понадобится
 
 ## Критерии готовности
 
-TODO:
-- [ ] Root cause задокументирован (одна из 4+ гипотез выше или новая)
-- [ ] Фикс применён и воспроизведение сценария 20 раз подряд → 0 × 401
-- [ ] Регрессионный E2E-тест Playwright: `logout → login → ChartPage → свечи загружены`
-- [ ] Документирован Stack Gotcha — **обязательно**, т.к. гонка аутентификации — классическая ловушка
-- [ ] Vitest или unit-тест на новый interceptor/listener
+- [ ] Root cause задокументирован в этом файле — одна из 3 гипотез подтверждена (или новая с обоснованием)
+- [ ] Фикс применён. Повтор сценария `logout → login → ChartPage` 20 раз подряд в Chrome → 0 × 401
+- [ ] То же в incognito (без persist) — 0 × 401
+- [ ] Новый E2E-тест Playwright `auth.spec.ts`: `logout → login → open ChartPage для тикера SBER → свечи отрисованы, 0 запросов с 401`
+- [ ] Новый vitest-тест на `authStore.logout` cleanup: после logout `marketDataStore.candlesCache` пуст, WS `closeWS()` вызван, localStorage `auth-storage` очищен
+- [ ] Stack Gotcha — **обязательно** `Develop/stack_gotchas/gotcha-16-relogin-race.md` (или следующий номер) + строка в `INDEX.md`. Гонка persist/in-memory/inflight-requests — классика, стоит отдельной записи
+- [ ] CI зелёный на ветке фикса
+- [ ] Регрессия не сломала happy-path login (без logout) — существующие тесты `auth.spec.ts` passed
 
 ## Риски
 
-TODO:
-- Может оказаться, что проблема — в нескольких местах одновременно (frontend race + backend cache). Тогда фикс будет в двух репо, нужны две ветки.
-- Нельзя сломать текущий happy-path login (без logout) — регрессионный тест обязателен.
+- Агрессивный `localStorage.removeItem` на logout может сломать сценарий «запомнить меня» если когда-то добавим — тогда чистить только `token`/`refreshToken`, не весь store.
+- `AbortController` на inflight запросах может обрушить корректные in-flight запросы в момент logout (сообщения пользователю типа «network error»). Мягко подавлять ECANCELED в error-reporting.
+- Если гипотеза 2 (persist vs in-memory) подтвердится, решение может потребовать отказа от persist для `token` (только session-storage или только in-memory) — это архитектурное решение, согласовать с пользователем.
+- Баг может проявляться только в Dev-сборке / только в prod-сборке — проверить в обеих.
 
 ## Оценка
 
-TODO (черновая): 0.5–1 сессия на диагностику + 0.5 сессии на фикс.
+- Диагностика: 0.5–1 сессия (6 шагов плана, основная трата — воспроизведение + сбор трасс).
+- Фикс + тесты: 0.5–1 сессия в зависимости от выбранного варианта.
+- Итого: **1–2 DEV-сессии**, один промпт по `prompt_template.md`.
 
 ## Открытые вопросы к пользователю
 
-- На каком браузере / ОС воспроизводится? Chrome, Safari, Firefox?
-- Есть ли recording сессии с ошибкой (HAR-файл, видео, или хотя бы скриншот Network)?
-- Повторяется ли сценарий, если логиниться **другим** пользователем (а не тем же)?
+- На каком браузере / ОС воспроизводится? (в отчёте — DevTools Chrome, но у пользователя мог быть Safari / Firefox)
+- Есть ли видео / HAR-файл сессии с ошибкой? (если да — ускорит шаг 1 диагностики)
+- Повторяется ли сценарий при login **другим** пользователем после logout? (не тем же)
+- Persist для `token` в localStorage — требование или можно переключить на sessionStorage / in-memory? (влияет на выбор решения 1)
+- Нужен ли backend-side session invalidate (JWT blacklist на logout) или достаточно frontend-only?
