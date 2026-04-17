@@ -59,6 +59,38 @@
 
 ---
 
+## 2026-04-17 — Трек 4: решения пользователя + prompt_DEV + JWT blacklist анализ
+
+**Контекст:** пользователь ответил на 5 открытых вопросов. HAR-файлы (Chrome + Safari) не содержат 401 — баг не воспроизвёлся при записи. Стратегия изменена на «превентивный фикс + диагностическая трассировка».
+
+**Решения пользователя:**
+- Persist token: **localStorage** + cleanup-хуки (не менять хранилище).
+- Backend JWT blacklist: **Вариант Б** — реализовать как отдельную задачу.
+- Браузер: Safari (основной). Chrome — для HAR-записи.
+- Другой пользователь: не обязателен сейчас.
+- HAR: не коммитить (в Chrome HAR лежит пароль!).
+
+**Что сделано:**
+- `JWT_blacklist_analysis.md` — развёрнутый анализ 5 вариантов backend JWT invalidation (PG таблица / token versioning / Redis / short-lived access + DB refresh / гибрид). Сравнительная таблица, рекомендация: вариант 5 (гибрид). Ожидает выбора пользователя.
+- `prompt_DEV-track4.md` — полный промпт по `prompt_template.md` (11 секций):
+  - 6 задач + 1 опциональная: diagnostic tracing, cleanup hook в logout, guard в interceptor, ChartPage defer, E2E тест, Stack Gotcha 16.
+  - Integration Verification Checklist: 7 grep-проверок.
+  - Тесты: 3+ vitest + 1 E2E Playwright.
+- `PENDING_S5R2_track4_401_unauthorized.md` — обновлён: зафиксировано решение пользователя.
+- `changelog.md` — эта запись.
+
+**Файлы:**
+- `Спринты/Sprint_5_Review_2/JWT_blacklist_analysis.md`
+- `Спринты/Sprint_5_Review_2/prompt_DEV-track4.md`
+- `Спринты/Sprint_5_Review_2/PENDING_S5R2_track4_401_unauthorized.md`
+- `Спринты/Sprint_5_Review_2/changelog.md`
+
+**Следующее действие:** пользователь ревьюирует JWT_blacklist_analysis.md (выбирает вариант). Параллельно можно запускать DEV-сессию по prompt_DEV-track4.md.
+
+**Результат:** ✅ этап B для трека 4 завершён, промпт готов к запуску.
+
+---
+
 ## Шаблон для будущих записей
 
 ```

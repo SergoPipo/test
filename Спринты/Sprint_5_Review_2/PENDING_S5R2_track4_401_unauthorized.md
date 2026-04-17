@@ -47,7 +47,10 @@
 3. **Interceptor guard** — в `client.ts` request interceptor: если `!token`, отбросить запрос с `return Promise.reject(new AxiosError('no token', 'ECANCELED'))` вместо отправки без Authorization. Предотвращает race-запросы во время релогина.
 4. **ChartPage defer** — `useEffect` ждёт `useAuthStore(s => s.token)` как зависимость, не стреляет `fetchCandles` пока токена нет. Убирает `setTimeout(…, 0)`.
 
-Рекомендация по результатам диагностики — минимальный набор, закрывающий подтверждённую гипотезу, без over-engineering.
+**Решение пользователя (2026-04-17):**
+- Persist: **localStorage** — оставить, фиксить через cleanup-хуки (вариант 1).
+- Backend JWT blacklist: **будет реализован** как отдельная задача (не в треке 4). Анализ вариантов → `JWT_blacklist_analysis.md`.
+- Стратегия трека 4: **превентивный фикс** (cleanup + guard + ChartPage defer) + **диагностическая трассировка** (console.debug).
 
 ## Затрагиваемые файлы
 
