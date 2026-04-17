@@ -27,8 +27,8 @@
 ├── DEV (сессия) → Трек 1 (backend prefetch) — требует детализации + prompt
 └── DEV (сессия) → Трек 2 (backend live-агрегация 1m→D/1h/4h) — требует детализации + prompt
 
-Фаза 4: Финальное ревью
-└── ARCH → arch_review_s5r2.md + оценка применения prompt_template.md
+Фаза 4: Финальное ревью ✅
+└── ARCH → arch_review_s5r2.md — ПРИНЯТ (0 критических, 1 minor)
 
 Фаза 5: Закрытие S5R-2
 ├── Коммиты+push в оба репо
