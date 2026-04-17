@@ -49,6 +49,42 @@
 
 ---
 
+## 2026-04-17 — Волна 1: DEV-1 + DEV-2 + DEV-3 (параллельно)
+
+**Контекст:** Три DEV-агента запущены параллельно после прохождения merge gate 0→1.
+
+**DEV-1 — In-app WS + Recovery + Graceful Shutdown:**
+- NotificationService: create_notification, dispatch_external, listen_session_events, stop_listening
+- 6 REST endpoints: GET /, GET /unread-count, PATCH /{id}/read, PUT /read-all, GET/PUT /settings
+- WS канал `notifications:{user_id}` интегрирован в существующий мультиплексор `/ws`
+- Recovery: restore_all расширен для real-сессий (сверка позиций с брокером, расхождения → pause + notification)
+- Graceful Shutdown: sessions → "suspended", pending orders timeout 30s, notification "Система остановлена"
+- NotificationService интегрирован в lifespan + start_session
+- 13 новых тестов
+
+**DEV-2 — Telegram Bot + Email:**
+- TelegramNotifier: HTML parse_mode, severity→emoji, inline-кнопки
+- TelegramWebhookHandler: /start (привязка 6-значным токеном TTL 5 мин), /positions, /status, /help
+- EmailNotifier: SMTP через aiosmtplib, только критические события
+- dispatch_external: реальная реализация (TelegramNotifier + EmailNotifier)
+- link_store: in-memory хранилище токенов
+- config.py: 6 новых полей (TELEGRAM_*, SMTP_*), .env.example обновлён
+- 16 новых тестов
+
+**DEV-3 — T-Invest SDK upgrade:**
+- SDK 0.2.0b117 зафиксирован в pyproject.toml (тег 0.2.0-beta117)
+- sys.modules stub удалён (Gotcha 14 закрыт)
+- 4 предсуществующих ruff E402 исправлены в adapter.py
+- Breaking changes = 0
+
+**Файлы:** 29 файлов (14 DEV-1 + 12 DEV-2 + 3 DEV-3)
+**Тесты:** pytest 654 passed, 0 failed; ruff 0 errors
+**Stack Gotchas применённые:** Gotcha 1, 4, 5, 8, 14
+**Stack Gotchas новые:** нет
+**Результат:** ✅ Волна 1 завершена. Merge gate 1→2 пройден.
+
+---
+
 ## 2026-04-17 — Волна 0: DEV-0 S6-STRATEGY-UNDERSCORE-NAMES
 
 **Контекст:** Критический баг — `code_generator.py` генерировал `_`-prefixed имена (`self._entry_order`, `self._sl_order`, `self._tp_order`, `self._is_long`, `_size`), которые RestrictedPython категорически отвергает. Live-сессии не могли генерировать сигналы (~12 000 `strategy_execution_failed` в час).
