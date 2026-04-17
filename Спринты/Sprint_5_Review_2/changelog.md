@@ -91,6 +91,42 @@
 
 ---
 
+## 2026-04-17 — Трек 4: DEV-сессия — 401 Unauthorized после релогина (фикс)
+
+**Контекст:** UX-блокер — после logout → login запросы свечей могли уходить с пустым/старым token. Стратегия: превентивный фикс (cleanup + guard + ChartPage defer) + диагностическая трассировка (console.debug в DEV-режиме).
+
+**Что сделано:**
+- **4.1 Diagnostic tracing:** console.debug в authStore (login/logout) и client.ts (request interceptor + 401 response). Только `import.meta.env.DEV`, не попадает в production.
+- **4.2 Cleanup hook в logout():** порядок — closeWS → abortAllInflight → set(null) → localStorage.removeItem('auth-storage') → clearCandlesCache.
+  - `useWebSocket.ts`: экспортирована `closeWS()` — закрывает singleton WS, очищает subscriptions, отменяет reconnect.
+  - `marketDataStore.ts`: экспортирована `clearCandlesCache()` — сбрасывает in-memory + localStorage candlesCache.
+  - `client.ts`: глобальный `AbortController` (`abortAllInflight` / `renewAbortController`) привязывается к каждому запросу; ECANCELED подавляется в response interceptor.
+- **4.3 Guard в request interceptor:** `!token && !url.startsWith('/auth/')` → `AxiosError('ECANCELED')`. Предотвращает отправку запросов без Authorization.
+- **4.4 ChartPage defer:** `useEffect` deps теперь включают `token`; убран `setTimeout(() => fetchCandles(), 0)`. Если token=null → effect не стреляет.
+- **4.5 E2E тест:** `auth.spec.ts` — новый сценарий «logout → login → chart loads without 401» с трекингом 401 responses.
+- **4.6 Stack Gotcha 16:** `gotcha-16-relogin-race.md` создан, INDEX.md обновлён (строка 16).
+
+**Файлы:**
+- `Develop/frontend/src/stores/authStore.ts` — cleanup hook, tracing
+- `Develop/frontend/src/api/client.ts` — AbortController, guard, tracing
+- `Develop/frontend/src/stores/marketDataStore.ts` — clearCandlesCache()
+- `Develop/frontend/src/hooks/useWebSocket.ts` — closeWS()
+- `Develop/frontend/src/pages/ChartPage.tsx` — token dep в useEffect
+- `Develop/frontend/e2e/auth.spec.ts` — E2E сценарий logout→login→chart
+- `Develop/frontend/src/stores/__tests__/authStore.test.ts` — 10 тестов (logout cleanup)
+- `Develop/frontend/src/api/__tests__/client.test.ts` — 3 теста (guard)
+- `Develop/stack_gotchas/gotcha-16-relogin-race.md` + INDEX.md
+
+**Тесты:** tsc --noEmit: 0 errors, vitest: 226 passed (47 файлов), lint: 0 новых errors (1 pre-existing в ChartPage WS effect).
+
+**Stack Gotchas применённые:** нет (трек 4 — новый класс проблемы).
+
+**Stack Gotchas новые:** `gotcha-16-relogin-race.md` (Auth/Zustand/Axios race)
+
+**Результат:** ✅ задачи 4.1–4.6 реализованы. 4.7 (Safari GUI тест) — SKIP (нет доступа к Safari GUI из CLI-агента).
+
+---
+
 ## Шаблон для будущих записей
 
 ```
