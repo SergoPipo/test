@@ -6,9 +6,9 @@
 
 ## Статус
 
-- **Спринт:** 🔄 в процессе — этап планирования
-- **Активная фаза:** создание артефактов (execution_order, prompt_DEV-*.md)
-- **Следующая фаза:** Волна 0 — багфикс S6-STRATEGY-UNDERSCORE-NAMES
+- **Спринт:** 🔄 в процессе
+- **Активная фаза:** Волна 0 завершена (DEV-0 ✅), готов к запуску волны 1
+- **Следующая фаза:** Волна 1 — DEV-1, DEV-2, DEV-3 (параллельно)
 
 ---
 
@@ -120,15 +120,15 @@
 ## Чек-лист планирования
 
 - [x] execution_order.md создан
-- [ ] sprint_state.md создан
-- [ ] preflight_checklist.md создан
-- [ ] prompt_DEV-0.md создан (волна 0)
-- [ ] prompt_DEV-1.md создан (волна 1)
-- [ ] prompt_DEV-2.md создан (волна 1)
-- [ ] prompt_DEV-3.md создан (волна 1)
-- [ ] prompt_DEV-4.md создан (волна 2)
-- [ ] prompt_DEV-5.md создан (волна 2)
-- [ ] prompt_DEV-6.md создан (волна 2)
-- [ ] prompt_DEV-7.md создан (волна 3)
-- [ ] prompt_ARCH_review.md создан (волна 3)
-- [ ] project_state.md обновлён — S6 🔄
+- [x] sprint_state.md создан
+- [x] preflight_checklist.md создан
+- [x] prompt_DEV-0.md создан (волна 0)
+- [x] prompt_DEV-1.md создан (волна 1) — 2026-04-17
+- [x] prompt_DEV-2.md создан (волна 1) — 2026-04-17
+- [x] prompt_DEV-3.md создан (волна 1) — 2026-04-17
+- [x] prompt_DEV-4.md создан (волна 2) — 2026-04-17
+- [x] prompt_DEV-5.md создан (волна 2) — 2026-04-17
+- [x] prompt_DEV-6.md создан (волна 2) — 2026-04-17
+- [x] prompt_DEV-7.md создан (волна 3) — 2026-04-17
+- [x] prompt_ARCH_review.md создан (волна 3) — 2026-04-17
+- [x] project_state.md обновлён — S6 🔄 — 2026-04-17

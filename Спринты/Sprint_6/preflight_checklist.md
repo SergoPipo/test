@@ -59,17 +59,17 @@ npx playwright test --project=chromium  # Зафиксировать: X passed /
 
 | Проверка | Результат | Дата |
 |----------|-----------|------|
-| Python version | | |
-| alembic upgrade head | | |
-| ruff check | | |
-| mypy | | |
-| pytest | | |
-| T-Invest SDK | | |
-| Node version | | |
-| pnpm lint | | |
-| tsc --noEmit | | |
-| pnpm test (vitest) | | |
-| Playwright | | |
+| Python version | 3.11.15 ✅ | 2026-04-17 |
+| alembic upgrade head | — (не проверялся, pure code fix) | 2026-04-17 |
+| ruff check | 4 E402 (предсуществующие, tinvest/adapter.py) | 2026-04-17 |
+| mypy | — (не проверялся) | 2026-04-17 |
+| pytest | **623 passed, 0 failed** ✅ | 2026-04-17 |
+| T-Invest SDK | — | 2026-04-17 |
+| Node version | v20.20.1 ✅ | 2026-04-17 |
+| pnpm lint | 1 error + 7 warnings (предсуществующие) | 2026-04-17 |
+| tsc --noEmit | — (не проверялся) | 2026-04-17 |
+| pnpm test (vitest) | **238 passed, 0 failed** ✅ | 2026-04-17 |
+| Playwright | — (не запускался, нет backend) | 2026-04-17 |
 
 ## Критерий прохождения
 

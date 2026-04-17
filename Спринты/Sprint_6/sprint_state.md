@@ -6,7 +6,7 @@
 
 | Волна | Статус | DEV-агенты | Результат |
 |-------|--------|------------|-----------|
-| 0 (Preflight + багфикс) | ⬜ не начата | DEV-0 | — |
+| 0 (Preflight + багфикс) | ✅ завершена | DEV-0 | 207 passed, 0 failed; blocker устранён |
 | 1 (Backend ядро) | ⬜ не начата | DEV-1, DEV-2, DEV-3 | — |
 | 2 (Frontend + Infra) | ⬜ не начата | DEV-4, DEV-5, DEV-6 | — |
 | 3 (E2E + ARCH) | ⬜ не начата | DEV-7, ARCH | — |
@@ -17,7 +17,7 @@
 
 | DEV | Задачи | Волна | Статус | Отчёт |
 |-----|--------|-------|--------|-------|
-| DEV-0 | S6-STRATEGY-UNDERSCORE-NAMES | 0 | ⬜ | — |
+| DEV-0 | S6-STRATEGY-UNDERSCORE-NAMES | 0 | ✅ | reports/DEV-0_report.md |
 | DEV-1 | 6.3 In-app WS + 6.4 Recovery + 6.5 Shutdown | 1 | ⬜ | — |
 | DEV-2 | 6.1 Telegram + 6.2 Email | 1 | ⬜ | — |
 | DEV-3 | S6-TINVEST-SDK-UPGRADE | 1 | ⬜ | — |
@@ -31,7 +31,7 @@
 
 | Гейт | Условие | Статус |
 |-------|---------|--------|
-| Волна 0 → 1 | DEV-0 merged, pytest=0, pnpm test=0 | ⬜ |
+| Волна 0 → 1 | DEV-0 merged, pytest=0, pnpm test=0 | ✅ (pytest 623=0f, vitest 238=0f) |
 | Волна 1 → 2 | DEV-1,2,3 merged (порядок: 1→2→3), pytest=0, pnpm test=0 | ⬜ |
 | Волна 2 → 3 | DEV-4,5,6 merged, pytest=0, pnpm test=0 | ⬜ |
 
@@ -43,4 +43,4 @@ _(пусто — заполняется по ходу спринта)_
 
 | Блокер | Описание | Статус |
 |--------|----------|--------|
-| S6-STRATEGY-UNDERSCORE-NAMES | code_generator.py генерирует `_`-имена → RestrictedPython отбрасывает → живая торговля не работает | ⬜ DEV-0 |
+| S6-STRATEGY-UNDERSCORE-NAMES | code_generator.py генерирует `_`-имена → RestrictedPython отбрасывает → живая торговля не работает | ✅ DEV-0 (2026-04-17) |
