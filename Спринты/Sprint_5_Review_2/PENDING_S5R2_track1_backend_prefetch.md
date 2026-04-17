@@ -2,7 +2,7 @@
 
 > **Источник:** идея пользователя в handoff S5R wave 4 (2026-04-16).
 > **Приоритет:** 🟡 Важно (UX-ускорение для активных торговых сессий).
-> **Статус:** ⬜ TODO — скелет создан 2026-04-16, детализация нужна.
+> **Статус:** 🔄 В работе — решение утверждено 2026-04-17, prompt создан.
 
 ## Контекст
 
@@ -17,12 +17,16 @@ TODO:
 - Где именно «пауза»: REST к MOEX ISS или к T-Invest historical? Холодный кеш `candlesCache`?
 - Почему это болит именно на активных сессиях.
 
-## Предлагаемое решение
+## Утверждённое решение (2026-04-17)
 
-TODO — варианты для обсуждения:
-1. **Warm cache on login** — backend в хуке login'а в фоне дёргает `market_data.fetch_candles` для тикеров активных сессий и складывает в кеш/БД. Фронт не меняется — просто первый запрос свечей возвращается мгновенно из кеша.
-2. **Prefetch endpoint** — новый `GET /api/market-data/prefetch/active-sessions` возвращает DTO `{ticker: candles[]}` для всех активных тикеров пользователя. Фронт при bootstrap сразу кладёт в store.
-3. **WebSocket push on login** — после логина backend шлёт по уже установленному сокету initial-snapshot свечей для активных тикеров.
+**Вариант:** Warm cache on login (fire-and-forget asyncio.create_task).
+
+После успешного login, backend в фоновой задаче:
+1. Запрашивает active + paused TradingSessions пользователя
+2. Для каждой (ticker, timeframe) вызывает `MarketDataService.get_candles()` — кеш прогревается автоматически
+3. Frontend НЕ меняется — `GET /candles` просто быстрее отвечает из ohlcv_cache
+4. Параллелизм ограничен `asyncio.Semaphore(3)` (gotcha-04: rate limits T-Invest)
+5. Ошибки отдельных тикеров логируются и не блокируют login
 
 ## Затрагиваемые файлы
 

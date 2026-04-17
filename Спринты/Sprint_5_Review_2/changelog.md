@@ -192,6 +192,33 @@
 
 ---
 
+## 2026-04-17 — Фаза 3: подготовка промптов треков 1 и 2 (backend)
+
+**Контекст:** фазы 1–2 завершены и закоммичены. Исследование backend-кода выявило, что `stream_manager.py` уже содержит `_AggregatingCandle` для live-агрегации (трек 2 — верификация, а не новая реализация).
+
+**Решения пользователя:**
+- Трек 1: warm cache в фоне (fire-and-forget), active + paused сессии
+- Трек 2: верифицировать существующую агрегацию + тесты + фикс багов
+- Оба трека параллельны
+
+**Что сделано:**
+- Исследованы backend-модули: `market_data/stream_manager.py`, `service.py`, `router.py`, `auth/router.py`, `trading/models.py`, `common/event_bus.py`, `broker/base.py`, `main.py`
+- `PENDING_S5R2_track1_backend_prefetch.md` — обновлён с утверждённым решением
+- `PENDING_S5R2_track2_live_aggregation.md` — обновлён: ключевое открытие (агрегация уже есть)
+- `prompt_DEV-track1.md` — создан (11 секций по шаблону, 4 задачи, 4 теста)
+- `prompt_DEV-track2.md` — создан (11 секций по шаблону, 6 задач, 12 тестов)
+
+**Файлы:**
+- `Спринты/Sprint_5_Review_2/prompt_DEV-track1.md` (новый)
+- `Спринты/Sprint_5_Review_2/prompt_DEV-track2.md` (новый)
+- `Спринты/Sprint_5_Review_2/PENDING_S5R2_track1_backend_prefetch.md` (обновлён)
+- `Спринты/Sprint_5_Review_2/PENDING_S5R2_track2_live_aggregation.md` (обновлён)
+- `Спринты/Sprint_5_Review_2/changelog.md` (эта запись)
+
+**Результат:** ✅ промпты фазы 3 готовы к запуску в параллельных Claude-сессиях.
+
+---
+
 ## Шаблон для будущих записей
 
 ```
