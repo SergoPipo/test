@@ -1,18 +1,18 @@
 # Sprint_5_Review_2 — Backlog
 
 > 5 треков chart-hardening, каждый — отдельная Claude-сессия.
-> Статус патч-цикла: **🔄 скелет создан 2026-04-16, этап A (планирование)**.
+> Статус патч-цикла: **🔄 фазы 1–2 завершены (треки 3, 4, 5), фаза 3 — в работе (треки 1, 2)**.
 > Детальные планы треков — в отдельных `PENDING_S5R2_track*.md` файлах в этой папке.
 
 ## Сводная таблица
 
 | # | Трек | Тип | Приоритет | Зависимости | Статус | Документ |
 |---|------|-----|-----------|-------------|--------|----------|
-| 1 | Backend prefetch свечей при логине | Feature (backend) | 🟡 Важно | — | ⬜ TODO | `PENDING_S5R2_track1_backend_prefetch.md` |
-| 2 | Backend live-агрегация 1m → D/1h/4h | Feature (backend) | 🟡 Важно | — | ⬜ TODO | `PENDING_S5R2_track2_live_aggregation.md` |
-| 3 | Sequential-index mode для intraday | Fix (frontend) | 🟢 UX | — | ⬜ TODO | `PENDING_S5R2_track3_sequential_index.md` |
-| 4 | 401 Unauthorized после релогина | Bug (diagnose+fix) | 🔴 UX-блокер | — | ⬜ TODO | `PENDING_S5R2_track4_401_unauthorized.md` |
-| 5 | TF-aware `upsertLiveCandle` | Fix (frontend) | 🟡 Важно | — | ⬜ TODO | `PENDING_S5R2_track5_tf_aware_upsert.md` |
+| 1 | Backend prefetch свечей при логине | Feature (backend) | 🟡 Важно | — | 🔄 в работе | `PENDING_S5R2_track1_backend_prefetch.md` |
+| 2 | Backend live-агрегация 1m → D/1h/4h | Feature (backend) | 🟡 Важно | — | 🔄 в работе | `PENDING_S5R2_track2_live_aggregation.md` |
+| 3 | Sequential-index mode для intraday | Fix (frontend) | 🟢 UX | — | ✅ готово | `reports/DEV-track3_report.md` |
+| 4 | 401 Unauthorized после релогина | Bug (diagnose+fix) | 🔴 UX-блокер | — | ✅ готово | `reports/DEV-track4_report.md` |
+| 5 | TF-aware `upsertLiveCandle` | Fix (frontend) | 🟡 Важно | — | ✅ готово | `reports/DEV-track5_report.md` |
 
 **Условные обозначения:**
 - ⬜ TODO / 🔄 в работе / ✅ готово / ⚠️ готово с замечаниями

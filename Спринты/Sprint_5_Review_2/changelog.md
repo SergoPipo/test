@@ -142,6 +142,56 @@
 
 ---
 
+## 2026-04-17 — Трек 5: DEV-сессия — TF-aware upsertLiveCandle
+
+**Контекст:** при смене ТФ на графике, живые тики от предыдущего WS-канала успевали попасть в store до отписки. Результат: «мигание» графика чужими свечами на 100–200ms.
+
+**Что сделано:**
+- **marketDataStore.ts:** расширена сигнатура `upsertLiveCandle(candle, sourceTf?)` — TF-aware guard: тики чужого TF отбрасываются; debug-лог в DEV-режиме
+- **CandlestickChart.tsx:** извлечение TF из `wsChannel` (формат `market:{ticker}:{tf}`, 3-й сегмент), передача `channelTf` в `upsertLiveCandle`
+- **marketDataStore.test.ts:** 3 новых теста — отброс чужого TF, приём своего, обратная совместимость
+
+**Файлы:**
+- `Develop/frontend/src/stores/marketDataStore.ts`
+- `Develop/frontend/src/components/charts/CandlestickChart.tsx`
+- `Develop/frontend/src/stores/__tests__/marketDataStore.test.ts`
+
+**Тесты:** tsc 0 errors, vitest 229/229 passed (+3 новых), lint 0 новых.
+
+**Stack Gotchas применённые:** Gotcha 16 (singleton WS race).
+
+**Stack Gotchas новые:** нет.
+
+**Результат:** ✅ все задачи реализованы. Контракт для трека 2: `upsertLiveCandle(candle, sourceTf?)` обратно совместим.
+
+---
+
+## 2026-04-17 — Трек 3: DEV-сессия — Sequential-index mode для intraday
+
+**Контекст:** на TF < D (1m/5m/15m/1h/4h) ось времени линейная — нерабочие часы MOEX создают визуальные «дыры» на графике.
+
+**Что сделано:**
+- **sequentialIndex.ts:** (новый) утилитный модуль — конвертация candles → sequential indices, reverse mapping index→timestamp, форматирование MSK-времени, `isIntradayTimeframe()`
+- **CandlestickChart.tsx:** prop `sequentialMode`, dual-mode data pipeline (UTCTimestamp / sequential index), custom `tickMarkFormatter` + `localization.timeFormatter`, crosshair с маппингом, live-update в sequential mode
+- **ChartPage.tsx:** state `sequentialPref`, toggle-кнопка `IconChartDots`/`IconClock` (видна только для intraday), localStorage persist `sequentialTimeAxis`, автосброс в real-time для D/W/M
+- **sequentialIndex.test.ts:** (новый) 9 vitest-тестов — конвертация с gap, reverse mapping, isIntraday, getCandleByIndex
+
+**Файлы:**
+- `Develop/frontend/src/components/charts/sequentialIndex.ts` (новый)
+- `Develop/frontend/src/components/charts/__tests__/sequentialIndex.test.ts` (новый)
+- `Develop/frontend/src/components/charts/CandlestickChart.tsx`
+- `Develop/frontend/src/pages/ChartPage.tsx`
+
+**Тесты (объединённый результат треков 3+5):** tsc 0 errors, vitest 238/238 passed (+12 суммарно), lint 1 pre-existing error (не от S5R-2).
+
+**Stack Gotchas применённые:** Gotcha 16 (localStorage state + auth flow).
+
+**Stack Gotchas новые:** нет.
+
+**Результат:** ✅ все задачи реализованы. Переключатель в UI, crosshair показывает реальное MSK-время.
+
+---
+
 ## Шаблон для будущих записей
 
 ```
