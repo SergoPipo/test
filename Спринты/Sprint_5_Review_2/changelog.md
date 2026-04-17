@@ -219,6 +219,58 @@
 
 ---
 
+## 2026-04-17 — Трек 2: DEV-сессия — Верификация live-агрегации 1m->D/1h/4h
+
+**Контекст:** `stream_manager.py` содержит `_candle_period_start()` и `_AggregatingCandle` для агрегации 1m-свечей в D/1h/4h. Тесты отсутствовали, end-to-end не проверялось.
+
+**Что сделано:**
+- Написаны 12 тестов (задачи 2.1-2.4): `_candle_period_start()` (5 TF), `_AggregatingCandle` (60m->1h, period transition, daily, dict format), timezone (Daily midnight vs MOEX, 4h блоки), event_bus integration
+- Верификация timezone: Daily period = midnight UTC совпадает с T-Invest GetCandles API (gotcha-15 учтена)
+- Баги не обнаружены, production-код **не модифицирован**
+- Integration Verification Checklist пройден (4/4 пункта)
+
+**Файлы:**
+- `Develop/backend/tests/test_market_data/__init__.py` (новый)
+- `Develop/backend/tests/test_market_data/test_stream_aggregation.py` (новый, 12 тестов)
+- `Спринты/Sprint_5_Review_2/reports/DEV-track2_report.md` (новый)
+
+**Тесты:** pytest tests/test_market_data/ 12/12 passed, pytest tests/ 619/619 passed (baseline 607 + 12 новых), ruff: 0 новых errors.
+
+**Stack Gotchas применённые:** gotcha-15 (naive datetime UTC-offset), gotcha-04 (T-Invest stream reconnect).
+
+**Stack Gotchas новые:** нет.
+
+**Результат:** ✅ агрегация верифицирована, багов не обнаружено. Контракт WS-сообщений с derived-TF подтверждён.
+
+---
+
+## 2026-04-17 — Трек 1: DEV-сессия — Backend prefetch свечей при логине
+
+**Контекст:** при логине frontend постепенно догружает свечи через REST по мере открытия инструментов. Для активных торговых сессий это означает паузу «график пустой -> заполняется». Решение: backend при логине в фоне прогревает ohlcv_cache для тикеров активных/приостановленных сессий.
+
+**Что сделано:**
+- **1.1 prefetch.py** (новый): `prefetch_active_sessions(user_id, db_factory)` — фоновый прогрев кеша. JOIN через StrategyVersion -> Strategy для резолва user_id (TradingSession не хранит user_id). Дедупликация (ticker, timeframe). Semaphore(3) для T-Invest rate limits. Fallback timeframe="D" для NULL. Двухуровневая обработка ошибок.
+- **1.2 auth/router.py**: fire-and-forget `asyncio.create_task(prefetch_active_sessions(...))` после успешного login. user_id извлекается из JWT access_token. Ошибка prefetch НЕ блокирует login.
+- **1.3 test_prefetch.py** (новый): 4 теста — warms_cache (2 сессии active+paused), skips_stopped, handles_errors (ConnectionError не пробрасывается), null_timeframe (fallback на "D").
+- **1.4 Stack Gotcha**: новых ловушек не обнаружено, применены gotcha-04, gotcha-15, gotcha-08.
+
+**Файлы:**
+- `Develop/backend/app/market_data/prefetch.py` (новый)
+- `Develop/backend/app/auth/router.py` (изменён: +asyncio, +structlog, +prefetch блок)
+- `Develop/backend/tests/test_market_data/__init__.py` (новый)
+- `Develop/backend/tests/test_market_data/test_prefetch.py` (новый, 4 теста)
+- `Спринты/Sprint_5_Review_2/reports/DEV-track1_report.md` (новый)
+
+**Тесты:** pytest tests/test_market_data/test_prefetch.py 4/4 passed, pytest tests/ 623/623 passed (baseline 607 + 16), ruff: 0 новых errors.
+
+**Stack Gotchas применённые:** gotcha-04 (Semaphore 3), gotcha-15 (aware UTC datetime), gotcha-08 (db_factory, не живая сессия).
+
+**Stack Gotchas новые:** нет.
+
+**Результат:** ✅ задачи 1.1-1.4 реализованы. Integration verification пройдена.
+
+---
+
 ## Шаблон для будущих записей
 
 ```
