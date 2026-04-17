@@ -127,6 +127,21 @@
 
 ---
 
+## 2026-04-17 — Треки 5 и 3: создание prompt_DEV
+
+**Контекст:** после DEV-сессии трека 4. Подготовка промптов для фазы 2 (параллельные сессии).
+
+**Что сделано:**
+- `prompt_DEV-track5.md` — TF-aware upsertLiveCandle. 4 задачи: извлечение TF из wsChannel, guard в upsertLiveCandle, vitest тесты, gotcha. Cross-DEV contract: поставщик сигнатуры для трека 2.
+- `prompt_DEV-track3.md` — Sequential-index mode для intraday. 4 задачи: dual-mode mapping + formatters, переключатель в UI, vitest, gotcha. lightweight-charts v5, порядковые индексы + custom timeFormatter.
+- Оба промпта: по `prompt_template.md` (11 секций), с цитатами из реального кода, integration checklist.
+
+**Файлы:** `prompt_DEV-track5.md`, `prompt_DEV-track3.md`, этот changelog.
+
+**Результат:** ✅ промпты фазы 2 готовы к запуску в отдельных Claude-сессиях.
+
+---
+
 ## Шаблон для будущих записей
 
 ```
