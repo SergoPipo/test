@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-04-16 (после закрытия Sprint_5_Review wave 4: фазы 3.3–3.7 — chart bug-fixes)
+> Последнее обновление: 2026-04-17 (Sprint 6 открыт, промпты DEV-0..7 + ARCH созданы)
 
 ---
 
-## Текущий спринт: S5 ✅ + **Sprint_5_Review ✅ закрыт полностью (фазы 1-2 + closeout 7-14 + wave 4: фазы 3.3–3.7)** → **S5R-2 как преемник chart-hardening + S6 готов к старту**
+## Текущий спринт: **S6 🔄 в процессе** (Уведомления + Recovery + Graceful Shutdown) + S5R-2 параллельно
 
 ## Прогресс по спринтам
 
@@ -19,8 +19,8 @@
 | S4 | AI + бэктестинг | ✅ завершён | AI chat, Backtest Engine, 577 тестов | Sprint_4/sprint_report.md |
 | S5 | Торговля | ⚠️ завершён с замечаниями (весь долг устранён в S5R + closeout) | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E | Sprint_5/arch_review_s5.md |
 | **S5 Review** | **Внеплановое ревью + 3 волны closeout + wave 4 (chart bug-fixes): стабилизация перед S6** | **✅ закрыт полностью** | **CI зелёный впервые с 2026-04-03 на всех 5 ветках + develop. Live Runtime Loop замкнут, реальные позиции T-Invest (source через FIGI), 109 Playwright passed (моки, работают 24/7 без seed), **15** Stack Gotchas, 2 бизнес-бага починены, schema drift устранён, tinvest stream API исправлен, iss_tail_fetch timezone, кнопка Запустить торговлю из бэктеста подключена. **Wave 4 (фазы 3.3–3.7, 2026-04-16):** T-Invest naive→aware (gotcha-15), client-side `candlesCache` + persist в localStorage, race-guard в `fetchCandles`/`fetchOlderCandles`, фикс D-мигания в ChartPage. Крупные треки (backend prefetch, live-агрегация 1m→D, sequential-index mode, 401 debug) вынесены в **Sprint_5_Review_2** (S5R-2). Вердикт ARCH: PASS WITH NOTES, блокеров нет.** | **Sprint_5_Review/arch_review_s5r.md** + **Sprint_5_Review/changelog.md** разделы closeout + фазы 3.3–3.7 |
-| **Sprint_5_Review_2** | **Chart hardening — отдельный патч-цикл после S5R wave 4** | ⬜ не начат | Backend prefetch свечей при логине (идея пользователя) · live-агрегация 1m→D/1h/4h · sequential-index mode intraday · 401-debug · **TF-aware `upsertLiveCandle`** (фикс остаточного Daily-мигания — 3.7 закрыл часть окна гонки, но singleton WebSocket может доставить тик в микро-интервал между store-update и unsubscribe). Каждый трек — в отдельной Claude-сессии для экономии контекста. | Sprint_5_Review_2/ (создаётся в следующей сессии) |
-| S6 | Уведомления | ⬜ готов к старту | Telegram, Email, In-app, Recovery, Graceful Shutdown + 3 backlog задачи (см. ниже) | Sprint_6/sprint_report.md |
+| **Sprint_5_Review_2** | **Chart hardening — 5 треков патч-цикла** | **✅ закрыт (ARCH: ПРИНЯТ)** | **Трек 4:** 401 fix (cleanup+guard+gotcha-16). **Трек 5:** TF-aware upsertLiveCandle. **Трек 3:** sequential-index mode intraday. **Трек 1:** prefetch свечей при логине (warm cache). **Трек 2:** верификация агрегации 1m→D/1h/4h (12 тестов, багов нет). ARCH-ревью: 15 проверок, 14 OK, 1 minor. Тесты: 238 frontend + 623 backend = 861 total, 0 failures. | Sprint_5_Review_2/arch_review_s5r2.md |
+| **S6** | **Уведомления** | **🔄 в процессе** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade, Stream Multiplex, E2E infra + backlog задачи | Sprint_6/sprint_state.md |
 | S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
 
@@ -29,37 +29,30 @@
 ## Что делать дальше
 
 ```
-ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 — Уведомления + 3 задачи backlog из S5R closeout
-  → 6.0 — закрыто в S5R.2 (Live Runtime Loop замкнут)
-  → 6.3 — In-app уведомления (EventBus trades:{session_id} с 6 событиями готов)
-  → 6.4 — Recovery (SessionRuntime.restore_all готов, добавить real-side
-            StreamManager.subscribe + сверка позиций с брокером)
-  → 6.5 — Graceful Shutdown (SessionRuntime.shutdown готов, добавить
-            сохранение pending событий)
-  → 6.6 — Telegram/Email/In-App интеграции
-  → 6.9 — закрыто в S5R.3 (реальные позиции T-Invest)
-  → 6.11 — закрыто в S5R closeout #9 (FIGI в LiveTrade + source через FIGI)
+ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 — Уведомления + Recovery + Graceful Shutdown
+  Волновая параллелизация: 4 волны, 8 DEV-агентов + ARCH.
+  Промпты DEV-0..7 + ARCH созданы 2026-04-17.
 
-БЭКЛОГ ИЗ S5R closeout (см. Sprint_6/backlog.md):
-  → S6-PLAYWRIGHT-NIGHTLY — cron-workflow для E2E в рабочие часы MSK
-  → S6-E2E-CHART-MOCK-ISS — моки MOEX ISS для 3 тестов свежести свечей
-  → S5R-E2E-MOCKS-EXPANSION — расширить api_mocks.ts на ~40 login-зависимых E2E
-  → S6-TINVEST-SDK-UPGRADE — апгрейд tinkoff-investments до beta117+ (wave 3)
-  → S6-TINVEST-STREAM-MULTIPLEX — persistent gRPC stream с multiplex (wave 3)
+  Волна 0 (blocker): DEV-0 — S6-STRATEGY-UNDERSCORE-NAMES
+  Волна 1 (3 параллельных):
+    DEV-1 — In-app WS + Recovery + Graceful Shutdown
+    DEV-2 — Telegram Bot + Email
+    DEV-3 — T-Invest SDK upgrade (beta59 → beta117+)
+  Волна 2 (3 параллельных):
+    DEV-4 — Frontend Notification Center
+    DEV-5 — T-Invest Stream Multiplex (persistent gRPC)
+    DEV-6 — E2E infra (playwright-nightly, ISS моки, mocks expansion)
+  Волна 3 (2 параллельных):
+    DEV-7 — E2E S6 + Security
+    ARCH  — финальное ревью + docs update
 
-ПАРАЛЛЕЛЬНО (chart-hardening, независимо от S6):
-  → S5R-2 Трек 1 — backend prefetch свечей для активных торговых сессий при логине
-  → S5R-2 Трек 2 — backend live-агрегация 1m→D/1h/4h (Daily/1h не растут в реальном времени)
-  → S5R-2 Трек 3 — sequential-index mode для intraday (визуальные «дыры» нерабочих часов)
-  → S5R-2 Трек 4 — 401 Unauthorized после релогина (диагностика + фикс)
-  → S5R-2 Трек 5 — TF-aware upsertLiveCandle (остаточное Daily-мигание после 3.7)
+S5R-2 ЗАКРЫТ ✅ (2026-04-17): все 5 треков, ARCH ПРИНЯТ.
+  Рекомендации для S6: channelTf split валидация, localStorage-prefetch, aggregator warm-up.
 
-ПРЕДВАРИТЕЛЬНО: Sprint_6_Review после S6 (обновить ФТ/ТЗ по новому объёму S6)
-
-ФАЙЛ СОСТОЯНИЯ: Sprint_6/sprint_state.md (когда S6 откроется)
-ФАЙЛ BACKLOG S6: Sprint_6/backlog.md (создан 2026-04-14, дополнен 2026-04-15)
-ПОСЛЕДНЕЕ РЕВЬЮ: Sprint_5_Review/arch_review_s5r.md + closeout + wave 4 (фазы 3.3–3.7) в changelog.md
-СЛЕДУЮЩИЙ ПАТЧ-ЦИКЛ: Sprint_5_Review_2/ (будет создан в отдельной сессии)
+ФАЙЛ СОСТОЯНИЯ: Sprint_6/sprint_state.md
+ФАЙЛ ПОРЯДКА: Sprint_6/execution_order.md
+ФАЙЛ BACKLOG: Sprint_6/backlog.md
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: запуск волны 0 (DEV-0 багфикс _underscore)
 ```
 
 ## Ключевые решения (кросс-спринтовые)
