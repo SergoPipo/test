@@ -107,6 +107,53 @@
 
 ---
 
+## 2026-04-17 — Волна 2: DEV-6 E2E Infrastructure (Playwright Nightly + ISS Mocks + Mocks Expansion)
+
+**Контекст:** E2E инфраструктура требовала трёх улучшений: nightly CI workflow, моки MOEX ISS для 24/7 тестов, миграция ~17 файлов с UI-login на API-моки.
+
+**Что сделано:**
+- **6.1 S6-PLAYWRIGHT-NIGHTLY:** Верифицирован `playwright-nightly.yml` — cron `0 7,9,11,13 * * 1-5`, workflow_dispatch, Node 20, pnpm, cache, artifacts. Соответствует спецификации.
+- **6.2 S6-E2E-CHART-MOCK-ISS:** Создан `e2e/fixtures/moex_iss_mock.ts` — `generateFreshCandles()` (random walk), `mockMoexCandles()`, `mockMoexCandlesAllTimeframes()`. Свечи генерируются с Gotcha 1 (числа → строки). Переписан `s5-chart-timeframes.spec.ts` — удалён `test.skip("S5R-CHART-FRESHNESS")`, 5 тестов работают 24/7 без MOEX.
+- **6.3 S5R-E2E-MOCKS-EXPANSION:** Расширен `api_mocks.ts` на 12 новых хелперов (mockStrategyDetail, mockBacktests, mockTradingSessions, mockTradingTrades, mockCircuitBreakerState, mockAIChat, mockNotifications, mockInstrumentSearch, mockCatchAllApi). Все 20 spec-файлов (105 тестов, 3 skip) переведены на `injectFakeAuth` + моки. 0 файлов требуют `E2E_PASSWORD`.
+- Создан `e2e/README.md` — документация паттернов моков.
+
+**Файлы:**
+- `Develop/frontend/e2e/fixtures/moex_iss_mock.ts` (создан)
+- `Develop/frontend/e2e/fixtures/api_mocks.ts` (расширен +12 хелперов, ~250 строк)
+- `Develop/frontend/e2e/s5-chart-timeframes.spec.ts` (переписан)
+- `Develop/frontend/e2e/*.spec.ts` (17 файлов мигрированы)
+- `Develop/frontend/e2e/README.md` (создан)
+
+**Тесты:** 20 spec-файлов, 105 test(), 3 test.skip(). TypeScript: tsc --noEmit OK.
+**Stack Gotchas применённые:** Gotcha 1 (Decimal→str в ISS моках), Gotcha 9 (strict mode — .first() + data-testid), Gotcha 10 (MOEX ISS flaky — ключевая мотивация)
+**Stack Gotchas новые:** нет
+**Результат:** ✅ Все 3 задачи реализованы. E2E полностью автономны от backend.
+
+---
+
+## 2026-04-18 — Волна 2: DEV-5 T-Invest Stream Multiplex (persistent gRPC)
+
+**Контекст:** `subscribe_candles` создавал отдельный gRPC stream + asyncio.Task на каждую подписку — антипаттерн Gotcha 4, ведущий к 429 Too Many Requests при 5+ торговых сессиях.
+
+**Что сделано:**
+- **Верификация multiplexer.py:** удалён мёртвый `_sandbox_mode` property; исправлен баг — backoff delay теперь сбрасывается только после первого успешного response (а не при входе в `async with AsyncClient`); вынесен `_sleep()` для тестируемости.
+- **Рефакторинг adapter.py:** удалён `_stream_candles()` inner function и task-per-subscription паттерн. `subscribe_candles` делегирует в `TInvestStreamMultiplexer.subscribe()` через lazy init `_ensure_multiplexer()`. `unsubscribe` делегирует в `multiplexer.unsubscribe()`. Удалены неиспользуемые `import asyncio, uuid`.
+- **Public API `subscribe_candles`/`unsubscribe` НЕ изменён** — `StreamManager` не затронут.
+- **10 тестов** (6 новых multiplexer + 4 обновлённых adapter): routing, unsubscribe, reconnect, single stream, exponential backoff, active_subscriptions, lazy init, delegation.
+
+**Файлы:**
+- `Develop/backend/app/broker/tinvest/multiplexer.py` (модифицирован)
+- `Develop/backend/app/broker/tinvest/adapter.py` (модифицирован)
+- `Develop/backend/tests/unit/test_broker/test_tinvest_multiplexer.py` (создан)
+- `Develop/backend/tests/unit/test_broker/test_tinvest_subscribe_candles.py` (переписан)
+
+**Тесты:** pytest 646 passed, 0 failed; ruff 0 errors
+**Stack Gotchas применённые:** Gotcha 4 (tinvest-stream), Gotcha 15 (tinvest-naive-datetime — не затронут)
+**Stack Gotchas новые:** нет
+**Результат:** ✅ Gotcha 4 устранена. Все подписки через один persistent gRPC stream.
+
+---
+
 ## Шаблон для будущих записей
 
 ```
