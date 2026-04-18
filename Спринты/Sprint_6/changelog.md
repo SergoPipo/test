@@ -5,6 +5,20 @@
 
 ---
 
+## 2026-04-18 — Фикс: бесконечный Loader на странице настроек уведомлений
+
+**Контекст:** При переходе на /notifications → вкладка «Настройки» — бесконечный spinner. Причина: API `GET /notifications/settings` возвращает `[]` для нового пользователя (нет записей UserNotificationSetting в БД), а компонент показывал Loader при `settings.length === 0`.
+
+**Что сделано:**
+- Добавлен флаг `settingsLoaded` в `notificationStore` — Loader показывается только до завершения запроса
+- При пустом ответе API — отображаются дефолтные настройки (in-app: вкл, telegram/email: выкл)
+
+**Файлы:** `stores/notificationStore.ts`, `pages/NotificationSettingsPage.tsx`
+**Тесты:** tsc 0 errors, vitest 250 passed
+**Результат:** ✅
+
+---
+
 ## 2026-04-18 — Исправление 4 замечаний ARCH-ревью
 
 **Контекст:** ARCH выдал вердикт PASS WITH NOTES — 4 замечания. Заказчик принял решение исправить все сейчас, не переносить в S7.
