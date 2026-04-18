@@ -390,21 +390,32 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 
 **⚠️ Предусловие:** Sprint_5_Review полностью завершён. Задачи 6.0 (Live Runtime Loop) и 6.9 (реальные позиции T-Invest) из предыдущей версии плана **перенесены в Sprint_5_Review** и **удалены из S6**.
 
-| # | Задача | Исполнитель | Ревьюер | Зависит от | || |
+| # | Задача | Исполнитель | Ревьюер | Зависит от | Статус |
 |---|---|---|---|---|---|
-| 6.1 | Telegram-бот: привязка, уведомления, команды (/positions, /status, /help) | BACK2 | ARCH, SEC | S5R | 6.2 |
-| 6.2 | Email-уведомления (SMTP через aiosmtplib) | BACK2 | ARCH | S5R | 6.1, 6.3 |
-| 6.3 | In-app уведомления (WebSocket) + Event Bus: интеграция всех событий из `SessionRuntime` (реализован в S5R), pending_events | BACK1 | ARCH | S5R (Live Runtime Loop) | 6.1, 6.4 |
-| 6.4 | Восстановление после перезапуска: сверка позиций с брокером (для real-сессий) + вызов `SessionRuntime.start()` (метод реализован в S5R) для всех active/paused сессий при старте backend | BACK1 | ARCH, SEC | S5R (Live Runtime Loop) | 6.5 |
-| 6.5 | Graceful Shutdown (сохранение состояния, уведомление, `SessionRuntime.stop()` для всех сессий) | OPS + BACK1 | ARCH | 6.4 | — |
-| 6.6 | UX: дизайн Notification Center + Telegram-сообщений | UX | FRONT2 | S5R | 6.7 |
-| 6.7 | Frontend: Notification Center (колокольчик, панель, критические баннеры, по дизайну 6.6) | FRONT2 | UX, ARCH | 6.3, 6.6 | — |
-| 6.8 | Frontend: доработки Trading Panel по результатам QA S5R (если остались) | FRONT1 | UX | S5R | 6.7 |
-| 6.9 | E2E-тесты S6: уведомления, Telegram (mock), восстановление, graceful shutdown | QA | ARCH | 6.1, 6.4, 6.5, 6.7 | — |
-| 6.10 | Security-тестирование: CSRF, rate limiting, sandbox escape, auth brute-force | QA + SEC | ARCH | S3 (3.7, 3.8) | 6.9 |
-| **6.R** | **Архитектурное ревью S6 + QA-приёмка:** Telegram, event bus, recovery, graceful shutdown, security tests | **ARCH + QA** | — | всё | — |
+| 6.1 | Telegram-бот: привязка, уведомления, команды (/positions, /status, /help) | BACK2 (DEV-2) | ARCH, SEC | S5R | ✅ S6 |
+| 6.2 | Email-уведомления (SMTP через aiosmtplib) | BACK2 (DEV-2) | ARCH | S5R | ✅ S6 |
+| 6.3 | In-app уведомления (WebSocket) + Event Bus + NotificationService | BACK1 (DEV-1) | ARCH | S5R | ✅ S6 |
+| 6.4 | Восстановление после перезапуска: real-сессии (сверка позиций) | BACK1 (DEV-1) | ARCH, SEC | S5R | ✅ S6 |
+| 6.5 | Graceful Shutdown (suspend + pending 30s + notify) | BACK1 (DEV-1) | ARCH | 6.4 | ✅ S6 |
+| 6.6 | UX: дизайн Notification Center + Telegram-сообщений | — | — | — | ⏭️ skip (inline design) |
+| 6.7 | Frontend: Notification Center (Bell, Drawer, Banner, Settings, /notifications) | FRONT2 (DEV-4) | UX, ARCH | 6.3 | ✅ S6 |
+| 6.8 | Frontend: доработки Trading Panel по результатам QA S5R | FRONT1 (DEV-4) | UX | S5R | ⏭️ skip (нет замечаний) |
+| 6.9 | E2E-тесты S6: уведомления, Telegram (mock), восстановление, graceful shutdown | QA (DEV-7) | ARCH | 6.1-6.7 | ⬜ pending |
+| 6.10 | Security-тестирование: CSRF, rate limiting, sandbox escape | QA + SEC (DEV-7) | ARCH | S3 | ⬜ pending |
+| **6.R** | **Архитектурное ревью S6 + QA-приёмка** | **ARCH** | — | всё | ✅ **PASS WITH NOTES** |
+
+**Дополнительные задачи S6 (не в исходном плане):**
+
+| # | Задача | DEV | Статус |
+|---|---|---|---|
+| 6.0 | S6-STRATEGY-UNDERSCORE-NAMES — багфикс code_generator.py | DEV-0 | ✅ |
+| 6.S3 | T-Invest SDK upgrade beta59→beta117 | DEV-3 | ✅ |
+| 6.S5 | T-Invest Stream Multiplex (persistent gRPC) | DEV-5 | ✅ |
+| 6.S6 | E2E Infrastructure (playwright-nightly, ISS moки, mocks expansion) | DEV-6 | ✅ |
 
 **Критерий завершения:** Уведомления работают (Telegram + email + in-app). Восстановление после рестарта подтверждено (сессии поднимают свои listener'ы заново через `SessionRuntime.start()`). Graceful shutdown корректно останавливает все runtime. Security-тесты пройдены. QA подтвердил E2E.
+
+**Факт (2026-04-17):** ARCH Review: **PASS WITH NOTES**. 6.1–6.7 ✅, 6.9–6.10 pending (DEV-7). Backend 662 passed (+39), Frontend 250 passed (+12). 3 канала уведомлений. Recovery для Real-сессий. Graceful Shutdown с pending orders 30s. SDK beta117. Persistent gRPC multiplexer. E2E полностью на моках. Stack Gotcha 17 (telegram frozen attrs).
 
 **Параллельность:**
 ```

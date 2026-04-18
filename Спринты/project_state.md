@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-04-17 (Sprint 6 открыт, промпты DEV-0..7 + ARCH созданы)
+> Последнее обновление: 2026-04-17 (Sprint 6 ARCH Review: PASS WITH NOTES, DEV-7 pending)
 
 ---
 
-## Текущий спринт: **S6 🔄 в процессе** (Уведомления + Recovery + Graceful Shutdown) + S5R-2 параллельно
+## Текущий спринт: **S6 ⚠️ PASS WITH NOTES** (Уведомления + Recovery + Graceful Shutdown) — DEV-7 pending
 
 ## Прогресс по спринтам
 
@@ -20,7 +20,7 @@
 | S5 | Торговля | ⚠️ завершён с замечаниями (весь долг устранён в S5R + closeout) | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E | Sprint_5/arch_review_s5.md |
 | **S5 Review** | **Внеплановое ревью + 3 волны closeout + wave 4 (chart bug-fixes): стабилизация перед S6** | **✅ закрыт полностью** | **CI зелёный впервые с 2026-04-03 на всех 5 ветках + develop. Live Runtime Loop замкнут, реальные позиции T-Invest (source через FIGI), 109 Playwright passed (моки, работают 24/7 без seed), **15** Stack Gotchas, 2 бизнес-бага починены, schema drift устранён, tinvest stream API исправлен, iss_tail_fetch timezone, кнопка Запустить торговлю из бэктеста подключена. **Wave 4 (фазы 3.3–3.7, 2026-04-16):** T-Invest naive→aware (gotcha-15), client-side `candlesCache` + persist в localStorage, race-guard в `fetchCandles`/`fetchOlderCandles`, фикс D-мигания в ChartPage. Крупные треки (backend prefetch, live-агрегация 1m→D, sequential-index mode, 401 debug) вынесены в **Sprint_5_Review_2** (S5R-2). Вердикт ARCH: PASS WITH NOTES, блокеров нет.** | **Sprint_5_Review/arch_review_s5r.md** + **Sprint_5_Review/changelog.md** разделы closeout + фазы 3.3–3.7 |
 | **Sprint_5_Review_2** | **Chart hardening — 5 треков патч-цикла** | **✅ закрыт (ARCH: ПРИНЯТ)** | **Трек 4:** 401 fix (cleanup+guard+gotcha-16). **Трек 5:** TF-aware upsertLiveCandle. **Трек 3:** sequential-index mode intraday. **Трек 1:** prefetch свечей при логине (warm cache). **Трек 2:** верификация агрегации 1m→D/1h/4h (12 тестов, багов нет). ARCH-ревью: 15 проверок, 14 OK, 1 minor. Тесты: 238 frontend + 623 backend = 861 total, 0 failures. | Sprint_5_Review_2/arch_review_s5r2.md |
-| **S6** | **Уведомления** | **🔄 в процессе** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade, Stream Multiplex, E2E infra + backlog задачи | Sprint_6/sprint_state.md |
+| **S6** | **Уведомления** | **⚠️ ARCH: PASS WITH NOTES (DEV-7 pending)** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade (beta117), Stream Multiplex, E2E infra. 662 backend + 250 frontend tests. DEV-7 (E2E S6 + Security) pending. | Sprint_6/arch_review_s6.md |
 | S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
 
@@ -29,30 +29,24 @@
 ## Что делать дальше
 
 ```
-ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 — Уведомления + Recovery + Graceful Shutdown
-  Волновая параллелизация: 4 волны, 8 DEV-агентов + ARCH.
-  Промпты DEV-0..7 + ARCH созданы 2026-04-17.
+ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 — ARCH Review завершён, DEV-7 pending
 
-  Волна 0 (blocker): DEV-0 — S6-STRATEGY-UNDERSCORE-NAMES
-  Волна 1 (3 параллельных):
-    DEV-1 — In-app WS + Recovery + Graceful Shutdown
-    DEV-2 — Telegram Bot + Email
-    DEV-3 — T-Invest SDK upgrade (beta59 → beta117+)
-  Волна 2 (3 параллельных):
-    DEV-4 — Frontend Notification Center
-    DEV-5 — T-Invest Stream Multiplex (persistent gRPC)
-    DEV-6 — E2E infra (playwright-nightly, ISS моки, mocks expansion)
-  Волна 3 (2 параллельных):
-    DEV-7 — E2E S6 + Security
-    ARCH  — финальное ревью + docs update
+  Волна 0: DEV-0 ✅ (багфикс _underscore → 625 passed)
+  Волна 1: DEV-1 ✅, DEV-2 ✅, DEV-3 ✅ (654 passed)
+  Волна 2: DEV-4 ✅, DEV-5 ✅, DEV-6 ✅ (662 backend + 250 frontend)
+  Волна 3: ARCH ✅ (PASS WITH NOTES), DEV-7 ⬜ PENDING
 
-S5R-2 ЗАКРЫТ ✅ (2026-04-17): все 5 треков, ARCH ПРИНЯТ.
-  Рекомендации для S6: channelTf split валидация, localStorage-prefetch, aggregator warm-up.
+  ARCH Review: 7/7 контрактов OK, 662+250 тестов, gotcha-17 добавлен.
+  DEV-7 (E2E S6 + Security) — не запущен/не завершён.
 
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ:
+  1. Завершить DEV-7 (E2E S6 + Security)
+  2. ARCH верификация DEV-7
+  3. Закрытие S6 → Sprint_6_Review или переход к S7
+
+ФАЙЛ РЕВЬЮ: Sprint_6/arch_review_s6.md
 ФАЙЛ СОСТОЯНИЯ: Sprint_6/sprint_state.md
 ФАЙЛ ПОРЯДКА: Sprint_6/execution_order.md
-ФАЙЛ BACKLOG: Sprint_6/backlog.md
-СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: запуск волны 0 (DEV-0 багфикс _underscore)
 ```
 
 ## Ключевые решения (кросс-спринтовые)

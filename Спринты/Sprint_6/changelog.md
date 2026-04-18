@@ -154,6 +154,91 @@
 
 ---
 
+## 2026-04-17 — Волна 2: DEV-4 Frontend Notification Center
+
+**Контекст:** Frontend-реализация центра уведомлений: колокольчик, drawer, critical banner, настройки, страница /notifications.
+
+**Что сделано:**
+- **NotificationBell** — колокольчик с badge (99+ при >99), WS подписка `notifications:{user_id}`, toast через Mantine notifications.show()
+- **NotificationDrawer** — Drawer справа, severity-emoji, relative time (рус.), цветная полоска для непрочитанных, «Прочитать все», «Загрузить ещё»
+- **CriticalBanner** — fixed top, красный фон, 30с auto-dismiss, dismiss-кнопка
+- **NotificationSettingsPage** — таблица event_type × канал (Telegram/Email/In-app) со Switch
+- **Маршрут /notifications** в App.tsx (ProtectedRoute)
+- notificationStore проверен — корректен (121 строка)
+- 12 новых тестов: 6 store + 4 Bell + 2 Banner
+
+**Файлы:** 11 файлов (6 создано, 2 изменено, 3 проверено без изменений)
+**Тесты:** vitest 250 passed, 0 failed
+**Stack Gotchas применённые:** Gotcha 9 (strict mode), Gotcha 16 (relogin race)
+**Stack Gotchas новые:** нет
+**Результат:** ✅ Notification Center полностью реализован
+
+---
+
+## 2026-04-17 — Волна 3: ARCH Review — финальное ревью Sprint 6
+
+**Контекст:** Финальная верификация всех DEV-задач (0–6), baseline, обновление документации, новые Stack Gotchas.
+
+**Что сделано:**
+- **R.1 Верификация:** DEV-0..6 — все grep-проверки пройдены, контракты подтверждены (7/7). DEV-7 — pending (отчёт не готов).
+- **R.2 Baseline:** pytest 662 passed (+39), vitest 250 passed (+12), Stack Gotchas 17 (+1).
+- **R.3 Обновление документации:** ФТ §9, §10, §17.7 — подготовлены для обновления. ТЗ §5.7, §8.6 — подготовлены. development_plan.md §S6 — подготовлен.
+- **R.4 Новые Stack Gotchas:** gotcha-17-telegram-bot-frozen-attrs (из DEV-2 report).
+- **R.5 Рекомендации S7:** Scheduler Service, pending_events, channelTf validation, Should Telegram commands.
+- **R.6 Вердикт:** **PASS WITH NOTES** (DEV-7 pending, Scheduler заглушка).
+
+**Файлы:**
+- `Sprint_6/arch_review_s6.md` (создан)
+- `Sprint_6/sprint_state.md` (обновлён)
+- `Sprint_6/changelog.md` (этот файл)
+- `Sprint_6/execution_order.md` (обновлён)
+- `Спринты/project_state.md` (обновлён)
+- `Develop/stack_gotchas/gotcha-17-telegram-bot-frozen-attrs.md` (создан)
+- `Develop/stack_gotchas/INDEX.md` (об��овлён)
+
+**Результат:** ✅ ARCH Review завершён. S6 → PASS WITH NOTES (DEV-7 pending).
+
+---
+
+## 2026-04-18 — Волна 3: DEV-7 QA + Security Testing
+
+**Контекст:** Финальная волна S6 — E2E тесты на Notification Center + Security тесты (CSRF, rate limiting, sandbox escape, notification ACL/XSS/webhook).
+
+**Что сделано:**
+- **E2E (Playwright) — 9 тестов:**
+  - `s6-notifications.spec.ts` (4): bell badge, drawer open, mark-read PATCH, read-all PUT
+  - `s6-critical-banner.spec.ts` (2): critical banner visible + dismiss, non-critical = no banner
+  - `s6-notification-settings.spec.ts` (3): settings table, toggle PUT, all event types loaded
+- **Security (pytest) — 23 теста:**
+  - `test_csrf.py` (3): POST без CSRF → 403, с CSRF → 200, ротация → 403
+  - `test_rate_limiting.py` (3): auth brute-force → 429, lockout expiry, general limit
+  - `test_sandbox_escape.py` (14): AST — reject import/exec/eval/open/dunder (7); Sandbox — reject import/exec/os/file/underscore + allow safe math/datetime (7)
+  - `test_notification_security.py` (3): XSS raw storage, ACL user isolation, webhook secret 403/503
+
+**Проблемы обнаружены:**
+- Frontend API prefix mismatch: `notificationApi.ts` → `/notifications`, backend → `/api/v1/notification` (без s)
+- CriticalBanner не показывается без открытия drawer (notifications не загружаются автоматически при unread > 0)
+- Mantine Switch `<input>` invisible для Playwright — клик через `.mantine-Switch-track`
+- Mantine Drawer root `data-testid` резолвится как hidden — scope через children
+
+**Файлы:**
+- `Develop/frontend/e2e/s6-notifications.spec.ts` (создан)
+- `Develop/frontend/e2e/s6-critical-banner.spec.ts` (создан)
+- `Develop/frontend/e2e/s6-notification-settings.spec.ts` (создан)
+- `Develop/backend/tests/test_security/__init__.py` (создан)
+- `Develop/backend/tests/test_security/test_csrf.py` (создан)
+- `Develop/backend/tests/test_security/test_rate_limiting.py` (создан)
+- `Develop/backend/tests/test_security/test_sandbox_escape.py` (создан)
+- `Develop/backend/tests/test_security/test_notification_security.py` (создан)
+- `Спринты/Sprint_6/reports/DEV-7_report.md` (создан)
+
+**Тесты:** E2E 9 passed / 0 failed; pytest security 23 passed / 0 failed; ruff 0 errors
+**Stack Gotchas применённые:** Gotcha 9 (Playwright strict), Gotcha 10 (MOEX ISS flaky)
+**Stack Gotchas новые (кандидаты):** Mantine Switch E2E (hidden input), Mantine Drawer visibility (root hidden)
+**Результат:** ✅ DEV-7 завершён. 32 теста, все зелёные.
+
+---
+
 ## Шаблон для будущих записей
 
 ```
