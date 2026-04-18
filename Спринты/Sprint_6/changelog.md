@@ -5,6 +5,21 @@
 
 ---
 
+## 2026-04-18 — Исправление 4 замечаний ARCH-ревью
+
+**Контекст:** ARCH выдал вердикт PASS WITH NOTES — 4 замечания. Заказчик принял решение исправить все сейчас, не переносить в S7.
+
+**Что сделано:**
+1. **API prefix mismatch:** `/api/v1/notification` → `/api/v1/notifications` (REST convention). Обновлены URL в тестах router и security.
+2. **CriticalBanner:** добавлен `fetchNotifications()` при mount в NotificationBell — баннер теперь появляется при первой загрузке.
+3. **SchedulerService:** полная реализация на APScheduler 3.x вместо заглушки. Jobs: sync_moex_calendar (cron 00:05 MSK), detect_corporate_actions (каждые 6ч), schedule_t1_unlock (one-shot). Интеграция в lifespan. 9 тестов. CLAUDE.md обновлён.
+4. **Telegram команды:** /balance (баланс счёта), /close <trade_id> (закрыть позицию), /closeall (закрыть все с confirmation). /help обновлён. 9 тестов.
+
+**Тесты:** pytest 703 passed (было 685), vitest 250 passed, ruff 0 errors.
+**Результат:** ✅ Все замечания закрыты. Sprint 6 — PASS (чистый, без notes).
+
+---
+
 ## 2026-04-17 — Открытие Sprint 6: планирование
 
 **Контекст:** S5R полностью закрыт, S5R-2 идёт параллельно. S6 — «Уведомления + восстановление».
