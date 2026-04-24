@@ -8,18 +8,23 @@
 
 | # | Приоритет | Модуль | Описание | Статус |
 |---|-----------|--------|----------|--------|
-| 1 | CRITICAL | trading/runtime.py | **NameError: datetime/timezone в _handle_candle (строка 839).** `session.last_signal_at = datetime.now(timezone.utc)` -- `datetime` и `timezone` не импортированы ни на уровне модуля, ни внутри метода _handle_candle(). Результат: NameError при каждой сделке, last_signal_at не обновляется, cooldown не работает. **Фикс:** добавить `from datetime import datetime, timezone` в начало _handle_candle или на уровне модуля | open |
-| 2 | WARNING | notification/service.py + email.py | **EMAIL_ALLOWED_EVENTS не проверяется.** Константа `EMAIL_ALLOWED_EVENTS` определена в email.py (frozenset из 5 типов), но `dispatch_external()` в service.py не фильтрует по ней. Email отправится для любого event_type если пользователь включил email_enabled. **Фикс:** добавить проверку `notification.event_type in EMAIL_ALLOWED_EVENTS` перед вызовом _email.send() | open |
-| 3 | WARNING | trading/*.py, notification/*.py, backtest/router.py, scheduler/service.py, market_data/price_alert_monitor.py | **Множественные инстансы NotificationService (9 мест).** Каждый вызов создаёт новый экземпляр + инициализирует TelegramNotifier и EmailNotifier. Рекомендация: singleton через app.state или DI | open |
-| 4 | WARNING | PauseConfirmModal.tsx:34-37 | **Side effect в render body.** Если нет открытых позиций, pauseSession() и onClose() вызываются прямо в теле render-функции (не в useEffect). В React StrictMode -- двойной вызов pauseSession(). **Фикс:** вынести в useEffect или обработать в родительском компоненте SessionCard | open |
-| 5 | WARNING | trading/service.py:336 | **Мёртвый SELECT.** `await self.db.execute(select(LiveTrade).where(LiveTrade.session_id == session_id))` -- результат не используется, следующая строка делает sa_delete. Удалить | open |
-| 6 | WARNING | notification/service.py (EVENT_MAP) | **5 event_type не подключены к runtime.** trade_opened, partial_fill, order_error, all_positions_closed, connection_lost/restored -- EVENT_MAP не содержит маппинг, runtime не публикует события. Запланировано для S7 (project_state.md) | open (S7) |
-| 7 | WARNING | telegram.py | **Inline-кнопки не обрабатываются.** callback_data "open_session:{id}" и "open_chart:{id}" генерируются, но CallbackQueryHandler не реализован. Кнопки отображаются в Telegram, клик ничего не делает | open (S7) |
-| 8 | INFO | circuit_breaker/engine.py:428 | **Docstring устарел.** Говорит "10:00-18:45 MSK", реальное значение DEFAULT_TRADING_END = time(23, 50) | open |
-| 9 | INFO | CandlestickChart.tsx:457,509 | **console.error в production.** "Chart live update failed" и "Chart setData failed". Допустимо для отладки, но в production лучше structlog/Sentry | open |
-| 10 | INFO | BlocklyWorkspace.tsx:198,200 | **console.log в production.** Отладочные логи загрузки блоков | open |
-| 11 | INFO | middleware/rate_limit.py | **In-memory state per-worker (из S4 backlog #19).** При N Uvicorn workers лимит = N x limit. Приемлемо для single-worker, при масштабировании нужен Redis | open (S8) |
-| 12 | INFO | StrategyEditPage.tsx | **935 строк, монолит (из S4 backlog #19).** Требует рефакторинга: разбить на подкомпоненты | open (S8) |
+| 1 | ~~CRITICAL~~ | trading/runtime.py | ~~**NameError: datetime/timezone в _handle_candle.**~~ **ЛОЖНОПОЛОЖИТЕЛЬНЫЙ** -- `from datetime import datetime, timezone` на строке 42 модуля, доступен во всех методах | closed (FP) |
+| 2 | WARNING | notification/service.py + email.py | **EMAIL_ALLOWED_EVENTS не проверяется.** Добавлена проверка `event_type in EMAIL_ALLOWED_EVENTS` в `dispatch_external()` | **FIXED** |
+| 3 | WARNING | trading/*.py, notification/*.py и др. | **Множественные инстансы NotificationService (9 мест).** Singleton уже создан в main.py:68, но не используется в остальных модулях. Требуется DI-рефакторинг | open (S7) |
+| 4 | WARNING | PauseConfirmModal.tsx | **Side effect в render body.** Вынесено в `useEffect([opened, session, hasPosition])` | **FIXED** |
+| 5 | WARNING | trading/service.py:336 | **Мёртвый SELECT.** Удалён | **FIXED** |
+| 6 | WARNING | notification/service.py (EVENT_MAP) | **5 event_type не подключены к runtime.** Запланировано для S7 | open (S7) |
+| 7 | WARNING | telegram.py | **Inline-кнопки не обрабатываются.** Запланировано для S7 | open (S7) |
+| 8 | INFO | circuit_breaker/engine.py:428 | **Docstring устарел.** Обновлён: "10:00-23:50 MSK" | **FIXED** |
+| 9 | INFO | CandlestickChart.tsx:457,509 | **console.error в production.** Заменены на silent-комментарии | **FIXED** |
+| 10 | INFO | BlocklyWorkspace.tsx:198,200 | **console.log в production.** Удалены | **FIXED** |
+| 11 | INFO | middleware/rate_limit.py | **In-memory state per-worker (из S4 backlog #19).** Приемлемо для single-worker | open (S8) |
+| 12 | INFO | StrategyEditPage.tsx | **935 строк, монолит (из S4 backlog #19).** Требует рефакторинга | open (S8) |
+| 13 | WARNING | AISettingsPage.tsx:131 | **Crash при `providers = undefined`** (API вернул `{}` без providers). Добавлен `?? []` | **FIXED** |
+| 14 | WARNING | AISettingsPage.tsx:381-382 | **Crash `undefined.toLocaleString()`** когда `prompt_tokens_limit` не задан. Заменено на `!p.prompt_tokens_limit ? '∞'` | **FIXED** |
+| 15 | WARNING | marketDataStore.ts:221,274 | **Crash при невалидном ответе API свечей** (`candles = undefined`). Добавлен default `= []` | **FIXED** |
+| 16 | WARNING | runtime.py + engine.py (8 publish-сайтов) | **EVENT_MAP шаблоны не подставляются** (`{strategy_name}`, `{ticker}`, `{direction}`, `{volume}`, `{pnl}`) — 5 из 7 event_type в `EVENT_MAP` публиковали неполные данные. Исправлены все publish в `trading/runtime.py` и `trading/engine.py`: `session.started`, `session.stopped`, `order.placed`, `trade.filled`, `trade.closed`. В `_SessionListener` добавлено поле `strategy_name`. | **FIXED** |
+| 17 | INFO | 10 E2E тестов | **Исправлены тесты, упавшие из-за pre-existing проблем моков/локаторов** (s4-review-full навигация, s6-notifications scroll, strategy редирект, Unicode в regex, CB crash на /settings и др.) | **FIXED** |
 
 ## Незакрытые задачи из Sprint_4_Review/backlog.md
 
@@ -51,9 +56,14 @@
 
 ## Статистика
 
-| Приоритет | Всего | open | open (S7/S8) |
-|-----------|-------|------|-------------|
-| CRITICAL | 1 | 1 | 0 |
-| WARNING | 6 | 4 | 2 |
-| INFO | 4 | 2 | 2 |
-| **Итого** | **12** (новых) + **5** (техдолг) | **7** | **4** |
+| Приоритет | Всего | FIXED | FP | open (S7/S8) |
+|-----------|-------|-------|-----|-------------|
+| CRITICAL | 1 | 0 | 1 | 0 |
+| WARNING | 9 | 7 | 0 | 2 |
+| INFO | 5 | 4 | 0 | 1 |
+| **Итого** | **17** (новых) + **5** (техдолг) | **11** | **1** | **3** |
+
+Дополнительно из визуальной верификации и E2E прогона:
+- 3 code fixes (AISettingsPage x2, marketDataStore)
+- 10 E2E тестов исправлены (с 107 passed / 12 failed → 119 passed / 0 failed)
+- Фикс шаблонов EVENT_MAP в 8 publish-сайтах (`trading/runtime.py`, `trading/engine.py`) — 5 event_type теперь корректно заполняют контекст для уведомлений

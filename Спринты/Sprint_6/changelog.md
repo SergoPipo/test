@@ -620,6 +620,134 @@
 
 ---
 
+## 2026-04-24 — Sprint 6 Review: фикс EVENT_MAP шаблонов в уведомлениях
+
+**Контекст:** При визуальной верификации обнаружено — в ленте уведомлений на session_stopped отображается буквально `{strategy_name}: {ticker}` вместо реальных значений. Анализ выявил систематическую проблему: **5 из 7 event_type в `EVENT_MAP`** публикуют в EventBus неполный `data`-dict, из-за чего `_SafeDict` оставляет плейсхолдеры как есть.
+
+**Несоответствия контракта EVENT_MAP ↔ publish (выявлено):**
+- `session.started` → шаблон `{strategy_name}: {ticker} ({timeframe})`; publish передавал `{session_id, ticker, mode}` (engine.py:186) или `{session_id, timeframe}` (runtime.py:293) — нет `strategy_name`, частично нет других полей.
+- `session.stopped` → шаблон `{strategy_name}: {ticker}`; publish передавал `{session_id}` (engine.py:324) или `{session_id, type}` (runtime.py:330).
+- `order.placed` → шаблон `{ticker}: {direction} {volume} лот(ов)`; publish в engine.py не передавал `ticker`, в runtime.py — `direction`, `volume`.
+- `trade.filled` → шаблон `{ticker}: {direction} по {price} ₽`; publish в engine.py не передавал `ticker`, `direction`, `price` (передавал `fill_price`), в runtime.py — `direction`.
+- `trade.closed` → шаблон `{ticker}: P&L {pnl} ₽`; publish в engine.py не передавал `ticker`, `pnl`, в runtime.py — `ticker`.
+
+**Что сделано:**
+
+*backend/app/trading/runtime.py:*
+1. В `_SessionListener.__init__` добавлено поле `strategy_name: str = ""`, передаётся при создании listener в `start()`.
+2. `session.started` publish: добавлены `ticker`, `strategy_name` (line 293).
+3. `session.stopped` publish: добавлены `ticker`, `strategy_name` из `listener` (line 330).
+4. `order.placed` publish: добавлены `direction`, `volume` (line 867).
+5. `trade.filled` publish: добавлен `direction` (line 886).
+6. `trade.closed` publish: добавлен `ticker` (line 905).
+
+*backend/app/trading/engine.py:*
+7. `session.started` publish в `start_session()`: добавлены `timeframe`, `strategy_name` (line 186).
+8. `session.stopped` publish в `stop_session()`: добавлены `ticker`, `strategy_name` (line 324).
+9. `order.placed` publish в `OrderManager.process_signal()`: добавлены `ticker`, `volume` (алиас `volume_lots`) (line 806).
+10. `trade.closed` publish в `close_position()`: добавлены `ticker` (через SELECT TradingSession), `pnl` (line 862).
+11. `trade.filled` publish в `on_order_filled()`: добавлены `ticker` (из `session` в scope), `direction`, `price` (алиас `fill_price`) (line 1096).
+
+**Файлы:**
+- `Develop/backend/app/trading/runtime.py` (4 изменения)
+- `Develop/backend/app/trading/engine.py` (5 изменений)
+- `Спринты/Sprint_6_Review/backlog.md` (обновлён #16 → FIXED, статистика)
+- `Спринты/Sprint_6_Review/code_review.md` (добавлен #10, обновлено «Перенесено в S7»)
+- `Спринты/Sprint_6/changelog.md` (этот файл)
+
+**Тесты:**
+- py_compile: 0 errors для обоих файлов.
+- pytest `test_trading/test_runtime.py` + `test_runtime_recovery.py` + `test_runtime_shutdown.py` + `test_notification/` + `unit/test_notification/`: **63 passed, 0 failed**.
+- pytest `test_trading/test_engine.py`: **12 passed, 0 failed**.
+- pytest `test_trading/test_order_manager.py::test_process_buy_signal`: pre-existing failure (assert `status == "pending"`, получает `"filled"`) — не связан с фиксом, был и до него.
+
+**Результат:** ✅ Шаблоны EVENT_MAP теперь корректно подставляются во всех event_type. Visual regression `{strategy_name}: {ticker}` устранён.
+
+---
+
+## 2026-04-24 — Sprint 6 Review: E2E регрессия + визуальная верификация
+
+**Контекст:** После применения 6 фиксов ревью (см. запись ниже) — полный прогон E2E + визуальная верификация нового функционала S6 через Playwright.
+
+**E2E (Playwright) — до:** 107 passed / 12 failed / 3 skipped.
+**E2E (Playwright) — после:** **119 passed / 0 failed / 3 skipped** ✅
+
+**3 реальных бага в коде обнаружены при E2E/визуальной верификации** (не замечены при чтении кода):
+
+1. **AISettingsPage.tsx:131** — `const providersList = Array.isArray(providersRes.data) ? providersRes.data : providersRes.data.providers;`. Когда API возвращает `{}` без `providers`, `providersList = undefined`, далее `providers.length === 0` → crash всей страницы `/settings` (все 4 вкладки пустые, body empty). Фикс: `?? []`.
+2. **AISettingsPage.tsx:381-382** — `p.prompt_tokens_limit.toLocaleString('ru')` крашится если `prompt_tokens_limit = undefined`. Фикс: `!p.prompt_tokens_limit ? '∞' : p.prompt_tokens_limit.toLocaleString('ru')`.
+3. **marketDataStore.ts:221,274** — `const { candles: newCandles, source } = response.data;` при `response.data = {}` → `newCandles = undefined`, store устанавливает `candles: undefined`, ChartPage делает `candles.length === 0` → crash. Фикс: `= []` default.
+
+**10 E2E тестов исправлены** (все падения — pre-existing проблемы моков/локаторов):
+- `s4-review-full.spec.ts:57,66` — клик по sidebar без предварительного `page.goto` → заменено на прямой goto.
+- `s4-review.spec.ts:214` — AI Settings crash (закрыт фиксами #1+#2 выше).
+- `s5-circuit-breaker.spec.ts:39,45,53,59` (4 теста) — `/settings` body empty (закрыт фиксом #1 выше).
+- `s5-paper-trading.spec.ts:178` — Unicode replacement chars `�` в regex `/запустит��/i` → заменено на `/запустить/i`.
+- `s5r-backtest-launch-trading.spec.ts:105` — option `'MA Crossover v1'` не совпадает с мок-стратегией `'Тестовая'` → обновлён.
+- `s6-notifications.spec.ts:111` — `click({force:true})` на элементе вне viewport → добавлен `scrollIntoViewIfNeeded`.
+- `strategy.spec.ts:60` — после save redirect на `/strategies/99` показывает `'Тестовая'` (mockStrategyDetail перекрывает) → добавлен специфичный мок для `/strategy/99`.
+- `auth.spec.ts:123` — re-login flow с моками ненадёжен (catch-all перекрывает login) → переделан на 401 race guard через navigation loop.
+
+**Визуальная верификация (Playwright MCP + браузер):**
+
+| Компонент | Статус | Скриншот |
+|-----------|--------|----------|
+| NotificationDrawer | ✅ OK | `s6r-notification-drawer.png` |
+| NotificationSettingsPage | ✅ OK | `s6r-notification-settings.png` |
+| Trading cards | ✅ OK | `s6r-trading-page.png` |
+| Лента уведомлений | ⚠️ WARNING | `s6r-notifications-page.png` |
+| AI-провайдеры | ✅ OK (после фиксов #1, #2) | `s6r-ai-settings.png` |
+| Chart trade markers | ✅ OK | `s6r-chart-markers.png` |
+
+**1 WARNING обнаружен визуально** — в Ленте уведомлений шаблон `{strategy_name}: {ticker}` не подставляется для уведомлений `session_stopped` от graceful shutdown. Добавлено в backlog #16, перенесено в Sprint 7.
+
+**Файлы:**
+- `Develop/frontend/src/pages/AISettingsPage.tsx` (2 фикса)
+- `Develop/frontend/src/stores/marketDataStore.ts` (1 фикс × 2 места)
+- `Develop/frontend/e2e/s4-review-full.spec.ts`, `s4-review.spec.ts`, `s5-paper-trading.spec.ts`, `s5r-backtest-launch-trading.spec.ts`, `s6-notifications.spec.ts`, `strategy.spec.ts`, `auth.spec.ts` (7 файлов — fixes тестов)
+- `Спринты/Sprint_6_Review/backlog.md` (добавлены #13-17)
+- `Спринты/Sprint_6_Review/code_review.md` (разделы «Визуальная верификация», «E2E регрессия», обновлён «Перенесено в S7»)
+- `s6r-*.png` (6 screenshot-артефактов в корне test-репо)
+
+**Тесты:** 119 passed / 0 failed / 3 skipped; tsc 0 errors.
+**Результат:** ✅ Sprint 6 Review — UI-проверки завершены полностью.
+
+---
+
+## 2026-04-24 — Sprint 6 Review: фиксы замечаний
+
+**Контекст:** Ревью кода S5+S6 выявило 1 CRITICAL (оказался ложноположительным), 6 WARNING и 4 INFO. Исправлены все, кроме масштабного DI-рефакторинга NotificationService (→ S7).
+
+**CRITICAL #1 — ЛОЖНОПОЛОЖИТЕЛЬНЫЙ:**
+- `runtime.py:839` `datetime.now(timezone.utc)` — ревью ошибочно заявило NameError. На самом деле `from datetime import datetime, timezone` есть на строке 42 модуля, доступен во всех методах
+
+**Что исправлено (6 фиксов):**
+1. **EMAIL_ALLOWED_EVENTS:** добавлена проверка `notification.event_type in EMAIL_ALLOWED_EVENTS` перед email-отправкой в `dispatch_external()` — email теперь шлётся только для 5 разрешённых типов событий (ФТ 10.1)
+2. **PauseConfirmModal side effect:** вызов `pauseSession()` из render body вынесен в `useEffect([opened, session, hasPosition])`. Добавлен `import { useEffect }`. В StrictMode больше не будет двойного вызова
+3. **Мёртвый SELECT:** удалён неиспользуемый `select(LiveTrade)` в `trading/service.py:delete_session()`
+4. **Docstring circuit_breaker:** "10:00-18:45 MSK" → "10:00-23:50 MSK"
+5. **console.error в CandlestickChart.tsx:** строки 457, 509 — заменены на silent-комментарии
+6. **console.log в BlocklyWorkspace.tsx:** строки 198, 200 — отладочные логи удалены
+
+**Перенесено в S7:**
+- NotificationService 9 инстансов → singleton через DI (singleton уже создаётся в main.py:68, но не переиспользуется)
+- 5 event_type не подключены к runtime
+- Telegram inline-кнопки без CallbackQueryHandler
+
+**Файлы:**
+- `Develop/backend/app/notification/service.py` (EMAIL_ALLOWED_EVENTS check)
+- `Develop/backend/app/trading/service.py` (dead SELECT removed)
+- `Develop/backend/app/circuit_breaker/engine.py` (docstring fix)
+- `Develop/frontend/src/components/trading/PauseConfirmModal.tsx` (useEffect refactor)
+- `Develop/frontend/src/components/charts/CandlestickChart.tsx` (console.error removed)
+- `Develop/frontend/src/components/strategy/BlocklyWorkspace.tsx` (console.log removed)
+- `Спринты/Sprint_6_Review/code_review.md` (статусы обновлены)
+- `Спринты/Sprint_6_Review/backlog.md` (статусы обновлены)
+
+**Результат:** ✅ 6 фиксов применены, 1 CRITICAL снят (FP), 3 WARNING перенесены в S7
+
+---
+
 ## Шаблон для будущих записей
 
 ```

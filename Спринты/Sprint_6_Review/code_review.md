@@ -2,7 +2,7 @@
 
 > Чеклист проверки реализованного кода S5 (Trading Engine, Circuit Breaker, Paper Trading)
 > и S6 (Notifications, Recovery, Graceful Shutdown, SDK Upgrade, Stream Multiplex).
-> Статус: проведено 2026-04-24
+> Статус: проведено 2026-04-24, фиксы применены 2026-04-24
 
 ---
 
@@ -22,7 +22,7 @@
 - [x] **Единственная точка process_candle:** строка 768 -- подтверждено grep
 - [x] **История свечей:** list[CandleData] + history_size=200 -- достаточно для SMA(200)
 - [x] **Предзагрузка истории:** _preload_history через MarketDataService
-- [ ] **NameError: datetime/timezone в _handle_candle (строка 839):** **CRITICAL** -- `session.last_signal_at = datetime.now(timezone.utc)` -- `datetime` и `timezone` не импортированы ни на уровне модуля, ни внутри `_handle_candle()`. Импорты есть только в `restore_all` (строка 333) и `_preload_history` (строка 925) как `from datetime import ...`, но это локальные импорты, недоступные в `_handle_candle`. Результат: NameError при установке last_signal_at после успешного создания сделки
+- [x] **~~NameError: datetime/timezone в _handle_candle (строка 839):~~** **ЛОЖНОПОЛОЖИТЕЛЬНЫЙ** -- `from datetime import datetime, timezone` присутствует на уровне модуля (строка 42). Импорт доступен во всех методах класса. Ревью ошибочно указало на локальные импорты в других методах, пропустив модульный
 - [x] **Commit после CB trigger (Gotcha 18):** строка 792 -- `await db.commit()` присутствует
 - [x] **Temporary блокировки (trading_hours, cooldown):** строки 789-813 -- корректно: temporary блокировка не вызывает commit/publish, просто return
 - [x] **Восстановление suspended -> active:** строки 339-355 -- корректно
@@ -44,7 +44,7 @@
 - [x] **_fill_session_card_data:** подсчёт total_trades (все), W/L (только closed), unrealized P&L из OHLCVCache
 - [x] **get_session вызывает _fill_session_card_data:** строка 230 -- данные карточки синхронизированы с детальной страницей
 - [x] **_get_last_price:** из OHLCVCache, DESC limit 1
-- [ ] **Лишний SELECT в delete_session (строка 336):** **WARNING** -- `await self.db.execute(select(LiveTrade).where(...))` -- результат не используется. Следующая строка делает `sa_delete(LiveTrade)`. Мёртвый запрос
+- [x] **~~Лишний SELECT в delete_session (строка 336):~~** **FIXED** -- мёртвый `select(LiveTrade)` удалён
 - [x] **Удаление suspended-сессий:** строка 331 -- `status not in ("stopped", "suspended")`
 
 ## 3. Circuit Breaker (S5 + S6 fixes)
@@ -57,7 +57,7 @@
 - [x] **Pause all для daily_loss/max_drawdown:** строки 515-523
 - [x] **Cooldown temporary=True:** строка 422
 - [x] **Trading hours temporary=True:** строка 455
-- [ ] **_check_trading_hours docstring устарел:** **INFO** -- docstring говорит "10:00-18:45 MSK" (строка 428), а реальный DEFAULT_TRADING_END = time(23, 50)
+- [x] **~~_check_trading_hours docstring устарел:~~** **FIXED** -- обновлён на "10:00-23:50 MSK"
 
 ## 4. Notifications (S6)
 
@@ -68,7 +68,7 @@
 - [x] **dispatch_external:** Telegram + Email с lazy init
 - [x] **_SafeDict:** безопасное форматирование body при отсутствующих ключах
 - [x] **listen_session_events / stop_listening:** подписка/отписка на trades:{session_id}
-- [ ] **Нет проверки email перед отправкой:** **WARNING** -- EmailNotifier.send() вызывается без проверки event_type в EMAIL_ALLOWED_EVENTS. Константа EMAIL_ALLOWED_EVENTS определена в email.py (строка 18), но не используется в dispatch_external. Email отправится для любого event_type если email_enabled=True
+- [x] **~~Нет проверки email перед отправкой:~~** **FIXED** -- добавлена проверка `notification.event_type in EMAIL_ALLOWED_EVENTS` перед вызовом `_email.send()` в `dispatch_external()`
 - [ ] **5 event_type не подключены к runtime:** **WARNING** -- trade_opened, partial_fill, order_error, all_positions_closed, connection_lost/restored. EVENT_MAP не содержит маппинг, runtime не публикует эти события. Задокументировано для S7 в project_state.md
 
 ### 4.2 TelegramNotifier (telegram.py)
@@ -133,11 +133,11 @@
 - [x] **WS callback:** upsertLiveCandle через store (не напрямую series.update)
 - [x] **sessionTradesRef:** сделки хранятся отдельно от маркеров, маркеры пересчитываются
 - [x] **Price alert lines:** createPriceLine + removePriceLine при изменении alertLines
-- [ ] **console.error в production:** **INFO** -- строки 457, 509 -- `console.error('Chart live update failed')` / `console.error('Chart setData failed')`. Допустимо для отладки, но в production нежелательно
+- [x] **~~console.error в production:~~** **FIXED** -- заменены на silent-комментарии
 
 ### 6.3 PauseConfirmModal.tsx
 
-- [ ] **Side effect в render body:** **WARNING** -- строки 34-37: если нет открытых позиций, компонент вызывает `pauseSession(session.id)` и `onClose()` прямо в теле рендера (не в useEffect/useCallback). В React strict mode это может вызвать двойной вызов pauseSession. Нужно вынести в useEffect или обработать в родительском компоненте
+- [x] **~~Side effect в render body:~~** **FIXED** -- вынесено в `useEffect` с зависимостями `[opened, session, hasPosition]`. При `!hasPosition` компонент возвращает `null`, side effect срабатывает через effect
 
 ### 6.4 Другие торговые компоненты
 
@@ -187,7 +187,7 @@
 - [x] **E2E: 10 S6 + 105 pre-existing:** Playwright
 - [x] **E2E полностью на моках:** 0 зависимостей от E2E_PASSWORD
 - [x] **dispatch_all_events:** 14 тестов -- 13 event_type через create_notification + dispatch_external
-- [ ] **console.log в BlocklyWorkspace.tsx:** **INFO** -- строки 198, 200 -- отладочные логи в production
+- [x] **~~console.log в BlocklyWorkspace.tsx:~~** **FIXED** -- отладочные логи удалены
 
 ---
 
@@ -195,32 +195,63 @@
 
 | Раздел | Статус | Замечания |
 |--------|--------|-----------|
-| 1. Архитектура | WARNING | Множественные инстансы NotificationService (9 мест) |
-| 2. Trading Engine | CRITICAL | NameError: datetime/timezone в runtime.py:839 |
-| 3. Circuit Breaker | OK | docstring устарел (minor) |
-| 4. Notifications | WARNING | EMAIL_ALLOWED_EVENTS не проверяется; 5 event_type не подключены |
+| 1. Архитектура | WARNING (S7) | Множественные инстансы NotificationService -- перенесено в S7 (DI рефакторинг) |
+| 2. Trading Engine | OK | ~~CRITICAL NameError~~ -- ложноположительный (импорт есть на уровне модуля); мёртвый SELECT удалён |
+| 3. Circuit Breaker | OK | docstring обновлён |
+| 4. Notifications | OK (частично S7) | EMAIL_ALLOWED_EVENTS -- FIXED; 5 event_type -- S7 |
 | 5. Market Data | OK | Все проверки пройдены |
-| 6. Frontend компоненты | WARNING | PauseConfirmModal side effect в render; console.error в prod |
+| 6. Frontend компоненты | OK | PauseConfirmModal -- FIXED (useEffect); console.log/error -- FIXED |
 | 7. Безопасность | OK | Все проверки пройдены (rate_limit per-worker -- known limitation) |
 | 8. Тесты | OK | 945 тестов, 0 failures |
 
-**Легенда:** OK -- нет замечаний | WARNING -- есть средние замечания | CRITICAL -- есть критические замечания
+**Легенда:** OK -- нет замечаний | WARNING (S7) -- перенесено в Sprint 7
 
 ---
 
 ## Сводка критичных проблем
 
-| # | Файл | Описание | Влияние |
-|---|------|----------|---------|
-| 1 | `trading/runtime.py:839` | `datetime.now(timezone.utc)` -- NameError (datetime/timezone не импортированы в _handle_candle) | last_signal_at не обновляется после сделки -> cooldown не работает, сделки не получают timestamp |
+Нет критичных проблем. Единственный CRITICAL из первоначального ревью оказался ложноположительным (datetime/timezone импортированы на уровне модуля, строка 42 runtime.py).
 
-## Сводка средних замечаний (WARNING)
+## Исправлено в ходе ревью (2026-04-24)
+
+| # | Файл | Описание | Статус |
+|---|------|----------|--------|
+| 1 | `notification/service.py` | Добавлена проверка `event_type in EMAIL_ALLOWED_EVENTS` перед email-отправкой | FIXED |
+| 2 | `PauseConfirmModal.tsx` | Side effect в render body вынесен в `useEffect` | FIXED |
+| 3 | `trading/service.py:336` | Мёртвый SELECT удалён | FIXED |
+| 4 | `circuit_breaker/engine.py:428` | Docstring обновлён: 18:45 → 23:50 MSK | FIXED |
+| 5 | `CandlestickChart.tsx:457,509` | console.error заменены на silent-комментарии | FIXED |
+| 6 | `BlocklyWorkspace.tsx:198,200` | Отладочные console.log удалены | FIXED |
+| 7 | `AISettingsPage.tsx:131` | Crash `providers = undefined` → добавлен `?? []` (обнаружено при E2E и визуальной верификации) | FIXED |
+| 8 | `AISettingsPage.tsx:381-382` | Crash `undefined.toLocaleString()` для `prompt_tokens_limit` → `!p.prompt_tokens_limit ? '∞' : ...` | FIXED |
+| 9 | `marketDataStore.ts:221,274` | Crash `candles = undefined` при невалидном ответе → default `= []` | FIXED |
+| 10 | `trading/runtime.py` + `trading/engine.py` (8 publish-сайтов) | **EVENT_MAP шаблоны не подставляются** — 5 из 7 event_type публиковали неполные данные (отсутствовали `strategy_name`, `ticker`, `direction`, `volume`, `pnl`). В `_SessionListener` добавлено поле `strategy_name`. Исправлены publish в `session.started` x2, `session.stopped` x2, `order.placed` x2, `trade.filled` x2, `trade.closed` x2. Unit-тесты: 75 passed, 0 failed. | FIXED |
+
+## Визуальная верификация (Playwright)
+
+Проверены скриншоты ключевых страниц нового функционала S6 (см. корень репо):
+
+| Компонент | Скриншот | Статус |
+|-----------|----------|--------|
+| NotificationDrawer (bell + drawer) | `s6r-notification-drawer.png` | OK — severity-emoji, relative time, "Прочитать все" работает |
+| NotificationSettingsPage | `s6r-notification-settings.png` | OK — таблица event x channel, Telegram привязан, Email не указан (предупреждение) |
+| Trading cards (P&L, позиция, WR) | `s6r-trading-page.png` | OK — PAPER бейдж, Decimal→Number корректно, долго/коротко, Сделок + WinRate |
+| Лента уведомлений | `s6r-notifications-page.png` | ⚠️ шаблоны `{strategy_name}: {ticker}` не подставлены в session_stopped (S7) |
+| AI-провайдеры | `s6r-ai-settings.png` | OK (после фикса #7, #8) — ∞ лимит работает |
+| Chart + trade markers | `s6r-chart-markers.png` | OK — 3-уровневый маркер Buy, sequential mode, OHLCV overlay |
+
+## E2E регрессия
+
+- До ревью: 107 passed / 12 failed / 3 skipped
+- После фиксов: **119 passed / 0 failed / 3 skipped** ✅
+- Исправлено 10 тестов (из 12 падений все — pre-existing проблемы моков/локаторов, не вызванные фиксами ревью)
+- Из 3 code fixes два (AISettingsPage) обнаружены только при визуальной/E2E верификации — не были замечены при чтении кода
+
+## Перенесено в Sprint 7
 
 | # | Файл | Описание |
 |---|------|----------|
-| 1 | `notification/service.py` | EMAIL_ALLOWED_EVENTS из email.py не проверяется при dispatch -- email шлётся для любого event_type |
-| 2 | `trading/runtime.py` и 8 других мест | NotificationService создаётся заново при каждом вызове (9 инстансов) |
-| 3 | `PauseConfirmModal.tsx:34-37` | Side effect (pauseSession) в render body -- нарушение правил React |
-| 4 | `trading/service.py:336` | Мёртвый SELECT: результат не используется |
-| 5 | `notification/service.py` | 5 из 13 event_type не подключены к runtime (trade_opened, partial_fill, order_error, all_positions_closed, connection_lost/restored) |
-| 6 | `middleware/rate_limit.py` | In-memory state per-worker (перенесено из S4 backlog, приемлемо для single-worker) |
+| 1 | `trading/runtime.py` + 8 мест | NotificationService -- 9 инстансов → singleton через DI |
+| 2 | `notification/service.py` | 5 event_type не подключены к runtime |
+| 3 | `telegram.py` | Inline-кнопки без обработчика CallbackQuery |
+| 4 | `middleware/rate_limit.py` | In-memory state per-worker (S8) |

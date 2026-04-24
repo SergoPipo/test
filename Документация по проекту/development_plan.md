@@ -316,27 +316,27 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 
 ---
 
-### СПРИНТ 5: Торговля + Bond/Corporate Actions (недели 9–10)
+### СПРИНТ 5: Торговля + Bond/Corporate Actions (недели 9–10) — ✅ завершено
 
 **Цель:** Paper Trading, Circuit Breaker, Must-функционал облигаций и корп. действий.
 
-| # | Задача | Исполнитель | Ревьюер | Зависит от | || |
+| # | Задача | Исполнитель | Ревьюер | Зависит от | Статус |
 |---|---|---|---|---|---|
-| 5.1 | Trading Engine: session manager, signal processor, order manager, position tracker | BACK1 | ARCH, SEC | S4, S2 | 5.2, 5.9 |
-| 5.2 | Paper Trading Engine (виртуальный портфель, эмуляция T+1) | BACK1 | ARCH | 5.1 | 5.3 |
-| 5.3 | Circuit Breaker (все лимиты: daily loss, drawdown, position size, trade count, cooldown, funds streak) | SEC | ARCH, BACK1 | 5.1 | 5.4 |
-| 5.4 | Broker Adapter: place_order, cancel_order, subscribe_candles (streaming) | BACK1 | ARCH, SEC | S2 (2.1) | 5.3, 5.5 |
-| 5.5 | Rate limiter для брокерского API (token bucket + персистентность) | BACK1 | ARCH | 5.4 | 5.6 |
-| 5.6 | UX: дизайн Trading Panel (карточки сессий, Paper vs Real визуализация) | UX | FRONT1 | S4 | 5.7 |
-| 5.7 | Frontend: Trading Panel (карточки сессий, форма запуска, позиции, P&L, по дизайну 5.6) | FRONT1 | UX, ARCH | 5.1, 5.6 | 5.8 |
-| 5.8 | Frontend: Real-time обновление графиков через WebSocket + индикаторы | FRONT1 | ARCH | S2 (2.6), 5.4 | 5.7 |
-| 5.9 | **Bond Service (расчёт НКД) + Corporate Action Handler** | BACK2 | ARCH | S2 | 5.10 |
-| 5.10 | **Налоговый экспорт (Tax Report Generator, FIFO, 3-НДФЛ)** | BACK2 | ARCH | 5.9 | — |
-| 5.11 | Frontend: экран «Счёт» (баланс, позиции, операции, налоговый отчёт) | FRONT2 | UX | S2 (2.7), 5.9 | 5.7 |
-| 5.12 | E2E-тесты S5: Paper Trading, Circuit Breaker, Bond P&L | QA | ARCH | 5.2, 5.3, 5.7 | — |
-| **5.R** | **Архитектурное ревью S5 + QA-приёмка:** Trading Engine, CB, Bond, latency < 500ms | **ARCH + QA** | — | всё | — |
+| 5.1 | Trading Engine: session manager, signal processor, order manager, position tracker | BACK1 | ARCH, SEC | S4, S2 | ✅ S5 |
+| 5.2 | Paper Trading Engine (виртуальный портфель, эмуляция T+1) | BACK1 | ARCH | 5.1 | ✅ S5 |
+| 5.3 | Circuit Breaker (все лимиты: daily loss, drawdown, position size, trade count, cooldown, funds streak) | SEC | ARCH, BACK1 | 5.1 | ✅ S5 |
+| 5.4 | Broker Adapter: place_order, cancel_order, subscribe_candles (streaming) | BACK1 | ARCH, SEC | S2 (2.1) | ✅ S5 |
+| 5.5 | Rate limiter для брокерского API (token bucket + персистентность) | BACK1 | ARCH | 5.4 | ✅ S5 |
+| 5.6 | UX: дизайн Trading Panel (карточки сессий, Paper vs Real визуализация) | UX | FRONT1 | S4 | ✅ S5 |
+| 5.7 | Frontend: Trading Panel (карточки сессий, форма запуска, позиции, P&L, по дизайну 5.6) | FRONT1 | UX, ARCH | 5.1, 5.6 | ✅ S5 |
+| 5.8 | Frontend: Real-time обновление графиков через WebSocket + индикаторы | FRONT1 | ARCH | S2 (2.6), 5.4 | ✅ S5 |
+| 5.9 | **Bond Service (расчёт НКД) + Corporate Action Handler** | BACK2 | ARCH | S2 | ✅ S5 |
+| 5.10 | **Налоговый экспорт (Tax Report Generator, FIFO, 3-НДФЛ)** | BACK2 | ARCH | 5.9 | ✅ S5 |
+| 5.11 | Frontend: экран «Счёт» (баланс, позиции, операции, налоговый отчёт) | FRONT2 | UX | S2 (2.7), 5.9 | ✅ S5 |
+| 5.12 | E2E-тесты S5: Paper Trading, Circuit Breaker, Bond P&L | QA | ARCH | 5.2, 5.3, 5.7 | ✅ S5 (23 E2E) |
+| **5.R** | **Архитектурное ревью S5 + QA-приёмка:** Trading Engine, CB, Bond, latency < 500ms | **ARCH + QA** | — | всё | ✅ PASS |
 
-**Критерий завершения:** Paper Trading запущен, сделки видны в реальном времени. Circuit Breaker активен. Расчёт НКД и корп. действия работают (Must). QA подтвердил E2E.
+**Критерий завершения:** ✅ Paper Trading запущен, сделки видны в реальном времени. Circuit Breaker активен. Расчёт НКД и корп. действия работают (Must). QA подтвердил E2E. 548 backend tests + 23 E2E. **Продолжено в S5R / S5R-2 (Live Runtime Loop, chart hardening).**
 
 **Параллельность:**
 ```
@@ -400,9 +400,9 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 | 6.6 | UX: дизайн Notification Center + Telegram-сообщений | — | — | — | ⏭️ skip (inline design) |
 | 6.7 | Frontend: Notification Center (Bell, Drawer, Banner, Settings, /notifications) | FRONT2 (DEV-4) | UX, ARCH | 6.3 | ✅ S6 |
 | 6.8 | Frontend: доработки Trading Panel по результатам QA S5R | FRONT1 (DEV-4) | UX | S5R | ⏭️ skip (нет замечаний) |
-| 6.9 | E2E-тесты S6: уведомления, Telegram (mock), восстановление, graceful shutdown | QA (DEV-7) | ARCH | 6.1-6.7 | ⬜ pending |
-| 6.10 | Security-тестирование: CSRF, rate limiting, sandbox escape | QA + SEC (DEV-7) | ARCH | S3 | ⬜ pending |
-| **6.R** | **Архитектурное ревью S6 + QA-приёмка** | **ARCH** | — | всё | ✅ **PASS WITH NOTES** |
+| 6.9 | E2E-тесты S6: уведомления, Telegram (mock), восстановление, graceful shutdown | QA (DEV-7) | ARCH | 6.1-6.7 | ✅ S6 (10 E2E) |
+| 6.10 | Security-тестирование: CSRF, rate limiting, sandbox escape | QA + SEC (DEV-7) | ARCH | S3 | ✅ S6 (23 тест) |
+| **6.R** | **Архитектурное ревью S6 + QA-приёмка** | **ARCH** | — | всё | ✅ **PASS** (чистый, 4 замечания ARCH исправлены) |
 
 **Дополнительные задачи S6 (не в исходном плане):**
 
@@ -412,10 +412,22 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 | 6.S3 | T-Invest SDK upgrade beta59→beta117 | DEV-3 | ✅ |
 | 6.S5 | T-Invest Stream Multiplex (persistent gRPC) | DEV-5 | ✅ |
 | 6.S6 | E2E Infrastructure (playwright-nightly, ISS moки, mocks expansion) | DEV-6 | ✅ |
+| 6.ARCH-1 | API prefix mismatch fix (notification → notifications) | BACK1 | ✅ |
+| 6.ARCH-2 | CriticalBanner — fetchNotifications при mount | FRONT2 | ✅ |
+| 6.ARCH-3 | SchedulerService (APScheduler 3.x, 3 cron + T+1 unlock) | BACK1 | ✅ |
+| 6.ARCH-4 | Telegram Should-команды /balance, /close, /closeall | BACK2 | ✅ |
+| 6.X1 | Расширенные карточки сессий (P&L + unrealized, W/L, маркеры графика) | BACK1 + FRONT1 | ✅ (2026-04-22) |
+| 6.X2 | CB fixes: trading_hours до 23:50 MSK, commit after trigger, temporary блокировки | BACK1 | ✅ (2026-04-22/23) |
+| 6.X3 | PauseConfirmModal (предупреждение при паузе с открытой позицией) | FRONT1 | ✅ (2026-04-22) |
+| 6.X4 | Маркеры сделок на графике (3-уровневый дизайн, sequential mode) | FRONT1 | ✅ (2026-04-22/24) |
+| 6.X5 | Price alerts: PriceAlertMonitor + deletion UI + MSK timestamps | BACK1 + FRONT1 | ✅ (2026-04-21) |
+| 6.X6 | Фикс downtime calculation в восстановлении session_recovered | BACK1 | ✅ (2026-04-23) |
 
 **Критерий завершения:** Уведомления работают (Telegram + email + in-app). Восстановление после рестарта подтверждено (сессии поднимают свои listener'ы заново через `SessionRuntime.start()`). Graceful shutdown корректно останавливает все runtime. Security-тесты пройдены. QA подтвердил E2E.
 
 **Факт (2026-04-17):** ARCH Review: **PASS WITH NOTES**. 6.1–6.7 ✅, 6.9–6.10 pending (DEV-7). Backend 662 passed (+39), Frontend 250 passed (+12). 3 канала уведомлений. Recovery для Real-сессий. Graceful Shutdown с pending orders 30s. SDK beta117. Persistent gRPC multiplexer. E2E полностью на моках. Stack Gotcha 17 (telegram frozen attrs).
+
+**Факт (2026-04-24, Sprint 6 closeout):** ARCH Review notes исправлены (4/4). DEV-7 завершён (10 E2E + 23 security). Доп. работы 22-24.04: карточки сессий (Decimal→Number, unrealized P&L), CB fixes (commit, trading hours 23:50, downtime), маркеры графика (3-level), правила плагинов в CLAUDE.md, Playwright автологин, gotcha-18. **Итог:** 685 backend + 250 frontend + 10 E2E = **945 тестов, 0 failures**. 18 Stack Gotchas. **PASS (чистый)**.
 
 **Параллельность:**
 ```
@@ -432,6 +444,35 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 
 ---
 
+### SPRINT 6 REVIEW: Промежуточное ревью M3 (после S5 + S5R + S5R-2 + S6)
+
+**Когда:** 2026-04-24, между S6 и S7.
+**Цель:** итоговая проверка Milestone M3 (Торговля + Уведомления) перед переходом к M4 (Production).
+**Статус:** ✅ завершено 2026-04-24.
+**Файлы:** `Спринты/Sprint_6_Review/` — `README.md`, `code_review.md`, `backlog.md`.
+
+| # | Задача | Исполнитель | Статус |
+|---|---|---|---|
+| SR6.1 | Code review 8 разделов (архитектура, Trading Engine, CB, Notifications, Market Data, Frontend, Security, Tests) | ARCH | ✅ |
+| SR6.2 | Применение 6 фиксов code review (EMAIL_ALLOWED_EVENTS, PauseConfirmModal useEffect, dead SELECT, docstring CB, console.error/log) | DEV + ARCH | ✅ |
+| SR6.3 | E2E Playwright полный прогон + исправление pre-existing падений (12 тестов) | ARCH + DEV | ✅ (107→119 passed) |
+| SR6.4 | Визуальная верификация нового S6-функционала через Playwright MCP (Notification Drawer/Settings, Trading cards, Feed, AI, Chart markers) | ARCH | ✅ |
+| SR6.5 | 3 code fixes, обнаруженных при E2E/визуальной верификации (AISettingsPage crash providers/toLocaleString, marketDataStore crash candles=undefined) | DEV + ARCH | ✅ |
+| SR6.6 | Фикс EVENT_MAP шаблонов (8 publish-сайтов в runtime.py/engine.py — добавлены strategy_name, ticker, direction, volume, pnl для 5 event_type) | ARCH | ✅ |
+| SR6.7 | Актуализация ФТ/ТЗ/development_plan за S5+S6 | ARCH | ✅ |
+| **SR6.R** | **Финальный вердикт ревью** | ARCH | ✅ **PASS** |
+
+**Статистика:** 11 FIXED, 1 FP (CRITICAL → FP), 3 WARNING перенесены в S7, 1 INFO перенесён в S8.
+
+**Перенесено в Sprint 7:**
+- NotificationService 9 инстансов → singleton через DI
+- 5 event_type подключить к runtime (`trade_opened`, `partial_fill`, `order_error`, `all_positions_closed`, `connection_lost/restored`)
+- Telegram inline-кнопки без CallbackQueryHandler
+
+**Критерий завершения Sprint_6_Review:** ✅ E2E зелёные (119/0/3), визуальная верификация пройдена (6/6), все CRITICAL закрыты, ФТ/ТЗ/development_plan актуализированы.
+
+---
+
 ### СПРИНТ 7: Полировка + Should-фичи (недели 13–14)
 
 **Цель:** Should-функции и финальная полировка UI.
@@ -443,14 +484,20 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 | 7.1 | Версионирование стратегий (история версий, откат) | BACK1 + FRONT2 | ARCH | S3 | 7.2 |
 | 7.2 | Grid Search оптимизация параметров (multiprocessing) | BACK1 + FRONT2 | ARCH | S4 | 7.1, 7.3 |
 | 7.3 | Экспорт CSV/PDF бэктеста (WeasyPrint + openpyxl) | BACK2 | ARCH | S4 | 7.2 |
-| 7.4 | Telegram-команды: /close, /closeall, /balance (inline-подтверждение) | BACK2 | ARCH, SEC | S6 (6.1) | 7.5 |
-| 7.5 | Ценовые алерты (создание, мониторинг, уведомления) | BACK1 + FRONT2 | ARCH | S5, S6 | 7.4, 7.6 |
+| ~~7.4~~ | ~~Telegram-команды /close, /closeall, /balance~~ → ✅ сделано в S6 (ARCH follow-up) | — | — | — | — |
+| ~~7.5~~ | ~~Ценовые алерты~~ → ✅ сделано в S6 | — | — | — | — |
 | 7.6 | Инструменты рисования на графике (тренды, уровни, зоны) | FRONT1 | UX, ARCH | S2 (2.6) | 7.7 |
 | 7.7 | Дашборд: виджет баланса, health indicator, sparklines, мини-графики | FRONT1 + FRONT2 | UX, ARCH | S5, S6 | 7.6 |
 | 7.8 | Дисклеймер (first-run wizard, 5 шагов) | FRONT2 + BACK2 | UX, ARCH | S1, S2 | 7.9 |
 | 7.9 | Backup/restore: автоматический бэкап, ротация, CLI восстановление | OPS + BACK1 | ARCH | S1 | 7.8 |
 | 7.10 | UX: финальная полировка UI, консистентность, юзабилити-тест | UX | FRONT1, FRONT2 | S6 | все |
 | 7.11 | E2E-тесты S7: версионирование, экспорт, алерты, wizard | QA | ARCH | 7.1–7.9 | — |
+| **7.12** | **NotificationService singleton через DI** (перенос из S6 Review) — убрать 9 инстансов, использовать `app.state.notification_service` | BACK1 | ARCH | S6 | — |
+| **7.13** | **Подключение 5 event_type к runtime** (перенос из S6): `trade_opened`, `partial_fill`, `order_error`, `all_positions_closed`, `connection_lost/restored` | BACK1 | ARCH, SEC | S6 | — |
+| **7.14** | **Telegram inline-кнопки** (перенос из S6): CallbackQueryHandler для `open_session:{id}` / `open_chart:{id}` | BACK2 | ARCH, SEC | S6 | — |
+| **7.15** | **WS-обновление карточек сессий** (плановая задача): заменить polling 10s на WS-канал | BACK1 + FRONT1 | ARCH | S6 | — |
+| **7.16** | **Интерактивные зоны бэктеста + аналитика** (hover/клик зон + гистограмма P&L + donut Win/Loss) | FRONT1 | ARCH, UX | S4 | — |
+| **7.17** | **Фоновый запуск бэктеста** (кнопка «в фоне», параллельные бэктесты, индикатор в шапке) | BACK1 + FRONT1 | ARCH | S4 | — |
 | **7.R** | **Архитектурное ревью S7 + QA-приёмка + UX-приёмка** | **ARCH + QA + UX** | — | всё | — |
 
 **Критерий завершения:** Phase 1 feature-complete. Все Must + реализованные Should функции работают. UX утвердил финальный вид интерфейса.
@@ -535,12 +582,12 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 
 ## 5. КОНТРОЛЬНЫЕ ТОЧКИ (MILESTONES)
 
-| # | Milestone | Неделя | Критерии прохождения |
-|---|---|---|---|
-| **M1** | **Каркас + wireframes** | 2 (S1) | Auth работает, дашборд по wireframes, CI проходит, wireframes утверждены UX. QA подтвердил тест-кейсы auth |
-| **M2** | **Полный цикл бэктеста** | 8 (S4) | Стратегия → бэктест → результаты. AI через UI. CSRF+Rate Limiting активны. QA прошёл E2E |
-| **M3** | **Paper Trading + Bond** | 10 (S5) | Paper Trading + Circuit Breaker + НКД + корп. действия. Latency < 500мс. QA E2E пройден |
-| **M4** | **Production-ready** | 16 (S8) | Coverage ≥ 80%, регрессия, security audit, performance, юзабилити-тест. Все sign-off (ARCH + QA + UX) |
+| # | Milestone | Неделя | Критерии прохождения | Статус |
+|---|---|---|---|---|
+| **M1** | **Каркас + wireframes** | 2 (S1) | Auth работает, дашборд по wireframes, CI проходит, wireframes утверждены UX. QA подтвердил тест-кейсы auth | ✅ завершён |
+| **M2** | **Полный цикл бэктеста** | 8 (S4) | Стратегия → бэктест → результаты. AI через UI. CSRF+Rate Limiting активны. QA прошёл E2E | ✅ завершён |
+| **M3** | **Paper Trading + Notifications** | 12 (S5+S6) | Paper+Real Trading + Circuit Breaker + НКД + корп. действия + Notifications (Telegram/Email/In-app) + Recovery + Graceful Shutdown. 945 тестов. QA E2E пройден (119/0/3) | ✅ завершён (Sprint_6_Review, 2026-04-24) |
+| **M4** | **Production-ready** | 16 (S8) | Coverage ≥ 80%, регрессия, security audit, performance, юзабилити-тест. Все sign-off (ARCH + QA + UX) | ⬜ не начат |
 
 ```
 Неделя:  2        8        10       16

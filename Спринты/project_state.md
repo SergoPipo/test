@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-04-17 (Sprint 6 ARCH Review: PASS WITH NOTES, DEV-7 pending)
+> Последнее обновление: 2026-04-24 (Sprint 6 Review: ✅ PASS, M3 достигнут)
 
 ---
 
-## Текущий спринт: **S6 ✅ ЗАВЕРШЁН** (Уведомления + Recovery + Graceful Shutdown + E2E + Security)
+## Текущий спринт: **Sprint_6_Review ✅ ЗАВЕРШЁН** (UI-проверки + ФТ/ТЗ актуализированы + 4 дополнительных code fixes)
 
 ## Прогресс по спринтам
 
@@ -21,7 +21,8 @@
 | **S5 Review** | **Внеплановое ревью + 3 волны closeout + wave 4 (chart bug-fixes): стабилизация перед S6** | **✅ закрыт полностью** | **CI зелёный впервые с 2026-04-03 на всех 5 ветках + develop. Live Runtime Loop замкнут, реальные позиции T-Invest (source через FIGI), 109 Playwright passed (моки, работают 24/7 без seed), **15** Stack Gotchas, 2 бизнес-бага починены, schema drift устранён, tinvest stream API исправлен, iss_tail_fetch timezone, кнопка Запустить торговлю из бэктеста подключена. **Wave 4 (фазы 3.3–3.7, 2026-04-16):** T-Invest naive→aware (gotcha-15), client-side `candlesCache` + persist в localStorage, race-guard в `fetchCandles`/`fetchOlderCandles`, фикс D-мигания в ChartPage. Крупные треки (backend prefetch, live-агрегация 1m→D, sequential-index mode, 401 debug) вынесены в **Sprint_5_Review_2** (S5R-2). Вердикт ARCH: PASS WITH NOTES, блокеров нет.** | **Sprint_5_Review/arch_review_s5r.md** + **Sprint_5_Review/changelog.md** разделы closeout + фазы 3.3–3.7 |
 | **Sprint_5_Review_2** | **Chart hardening — 5 треков патч-цикла** | **✅ закрыт (ARCH: ПРИНЯТ)** | **Трек 4:** 401 fix (cleanup+guard+gotcha-16). **Трек 5:** TF-aware upsertLiveCandle. **Трек 3:** sequential-index mode intraday. **Трек 1:** prefetch свечей при логине (warm cache). **Трек 2:** верификация агрегации 1m→D/1h/4h (12 тестов, багов нет). ARCH-ревью: 15 проверок, 14 OK, 1 minor. Тесты: 238 frontend + 623 backend = 861 total, 0 failures. | Sprint_5_Review_2/arch_review_s5r2.md |
 | **S6** | **Уведомления + Security** | **✅ завершён** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade (beta117), Stream Multiplex, E2E infra, Security tests. 685 backend + 250 frontend + 10 E2E S6 = **945 тестов**. Доп. работы сессий 22-24.04: карточки сессий (Decimal, unrealized P&L), CB fixes (commit, trading hours, downtime), маркеры сделок на графике, правила плагинов в CLAUDE.md, Playwright автологин. | Sprint_6/arch_review_s6.md |
-| S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
+| **Sprint_6_Review** | **Промежуточное ревью M3: code review + UI-проверки + документация** | **✅ завершён (PASS, 2026-04-24)** | **Code review (8 разделов, 6 fixes).** **E2E регрессия:** 107→119 passed (0 failed). **3 code fixes** обнаружены только при E2E/визуальной верификации: AISettingsPage (`providers??[]` + `toLocaleString` guard), marketDataStore (`candles=[]` default). **Визуальная верификация S6:** 6 скриншотов, 5/6 OK. **EVENT_MAP фикс:** 8 publish-сайтов (runtime.py + engine.py) — 5 event_type теперь корректно подставляют `{strategy_name}`/`{ticker}`/`{direction}`/`{volume}`/`{pnl}`. **Документация:** ФТ/ТЗ/development_plan актуализированы за S5+S6. Итого: **11 FIXED + 1 FP + 3 перенесены в S7** (NS singleton, 5 event_type, inline-кнопки Telegram). **Milestone M3 достигнут.** | Sprint_6_Review/code_review.md, backlog.md |
+| S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт, + переносы (NS singleton, 5 event_type, inline-кнопки, WS карточки, интерактивные зоны, фоновый бэктест) | Sprint_7/sprint_report.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
 
 **Легенда:** ⬜ не начат · 🔄 в процессе · ✅ завершён · ⚠️ завершён с замечаниями
@@ -29,24 +30,36 @@
 ## Что делать дальше
 
 ```
-ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 — ЗАВЕРШЁН ✅
+ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 Review — ЗАВЕРШЁН ✅ (2026-04-24)
 
-  Волна 0: DEV-0 ✅ (багфикс _underscore)
-  Волна 1: DEV-1 ✅, DEV-2 ✅, DEV-3 ✅ (notifications, telegram, SDK)
-  Волна 2: DEV-4 ✅, DEV-5 ✅, DEV-6 ✅ (frontend, stream, E2E infra)
-  Волна 3: DEV-7 ✅ (10 E2E + 23 security), ARCH ✅ (PASS)
+  Шаг 1. UI-проверки (Playwright) ✅
+    - E2E full run: 107 → 119 passed / 0 failed / 3 skipped
+    - 10 тестов исправлены (pre-existing проблемы моков/локаторов)
+    - 3 code fixes обнаружены только E2E (AISettingsPage x2, marketDataStore)
 
-  Итого: 945 тестов, 0 failures.
-  Доп. работы 22-24.04: карточки сессий, CB fixes, маркеры графика,
-  правила плагинов, Playwright автологин, gotcha-18.
+  Шаг 2. Визуальная верификация S6 ✅
+    - 6 скриншотов (Bell/Drawer, Settings, Trading cards, Feed, AI, Chart)
+    - 1 WARNING: шаблоны `{strategy_name}: {ticker}` в graceful shutdown
+    - ФИКС: 8 EVENT_MAP publish-сайтов в runtime.py + engine.py
+
+  Шаг 3. Актуализация ФТ/ТЗ/development_plan ✅
+    - functional_requirements.md v2.3 (S5+S6 пометки, Bond, CB, Scheduler, 
+      маркеры, price alerts, Tax FIFO)
+    - technical_specification.md v1.3 (S5/S6 ✅ в фазах, S7 актуализирован)
+    - development_plan.md (S5 ✅, S6 ✅ + ARCH follow-up + закрытие, 
+      Sprint_6_Review раздел, S7 с переносами, M3 ✅)
+
+  Milestone M3 (Paper Trading + Notifications) — достигнут ✅
+  Итого S5+S5R+S5R-2+S6+Sprint_6_Review: закрыто.
 
 СЛЕДУЮЩЕЕ ДЕЙСТВИЕ:
-  1. Sprint_6_Review (опционально — если нужно ревью перед S7)
-  2. Планирование Sprint 7 (Should-фичи)
+  1. Планирование Sprint 7 (Should-фичи + переносы из S6)
+  2. Коммит/мерж изменений ревью (по запросу заказчика)
 
-ФАЙЛ РЕВЬЮ: Sprint_6/arch_review_s6.md
-ФАЙЛ СОСТОЯНИЯ: Sprint_6/sprint_state.md
-ФАЙЛ ОТЧЁТА DEV-7: Sprint_6/reports/DEV-7_report.md
+ФАЙЛЫ РЕВЬЮ: 
+  - Sprint_6_Review/code_review.md
+  - Sprint_6_Review/backlog.md (17 задач: 11 FIXED, 1 FP, 3 в S7, 1 в S8)
+  - Sprint_6/changelog.md (записи 2026-04-24 × 3 про Sprint 6 Review)
 ```
 
 ## Ключевые решения (кросс-спринтовые)
@@ -127,7 +140,7 @@ _Все 4 перенесённые задачи из S4/S5 закрыты в Spr
 | Sprint_2_Review | S1 + S2 | M1: Каркас | ✅ завершён | Sprint_2_Review/backlog.md |
 | Sprint_4_Review | S3 + S4 | M2: Бэктест | ✅ завершён | Sprint_4_Review/backlog.md |
 | **Sprint_5_Review** | S5 (внеплановое) | — (стабилизация M3) | **✅ завершён (PASS WITH NOTES)** | **Sprint_5_Review/arch_review_s5r.md** |
-| Sprint_6_Review | S5 + S6 | M3: Торговля | ⬜ не начат | Sprint_6_Review/backlog.md |
+| **Sprint_6_Review** | S5 + S6 | **M3: Торговля + Notifications** | **✅ завершён (PASS, 2026-04-24)** | **Sprint_6_Review/code_review.md** |
 | Sprint_8_Review | S7 + S8 | M4: Production | ⬜ не начат | Sprint_8_Review/backlog.md |
 
 ## Milestones
@@ -136,7 +149,7 @@ _Все 4 перенесённые задачи из S4/S5 закрыты в Spr
 |-----------|--------|--------|----------|
 | M1: Каркас | S1 | ✅ | Auth, дашборд, CI, 68 тестов |
 | M2: Бэктест | S4 | ✅ | Стратегия → бэктест → результаты. Ревью: 21/28 задач исправлено, 7 отложено |
-| M3: Paper Trading | S5 | ✅ | Paper Trading + Circuit Breaker + Bond НКД + Tax FIFO + 23 E2E. ARCH: PASS |
+| M3: Paper Trading + Notifications | S5 + S6 + Sprint_6_Review | ✅ (2026-04-24) | Paper+Real Trading + Circuit Breaker + Bond НКД + Tax FIFO + Notifications (Telegram/Email/In-app) + Recovery + Graceful Shutdown. 945 тестов + 119 E2E. ARCH: PASS |
 | M4: Production-ready | S8 | ⬜ | Coverage 80%, security, performance |
 
 ---

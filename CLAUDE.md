@@ -4,6 +4,35 @@
 Торговый терминал для рынка ценных бумаг РФ (MOEX).
 Подробное описание: Документация по проекту/idea.md
 
+## ⛔ СТОП — Обязательная проверка плагинов перед любым изменением кода
+
+> **Правило обязательно для основного агента И для всех субагентов (DEV, ARCH, UX).**
+> Нарушение = блокер приёмки. Hook `plugin-check.sh` автоматически напомнит, но ты обязан следовать правилам и без напоминания.
+
+### Изменяешь .py файл в Develop/backend/?
+- **pyright-lsp**: вызови diagnostic после каждого Edit/Write
+- Fallback (если MCP недоступен): `cd Develop/backend && .venv/bin/python -m py_compile app/<module>/<file>.py`
+- Если файл в `app/trading/`, `app/circuit_breaker/`, `app/broker/`: после блока изменений выполни `/code-review`
+
+### Изменяешь .ts/.tsx файл в Develop/frontend/?
+- **typescript-lsp**: вызови diagnostic после каждого Edit/Write
+- Fallback: `cd Develop/frontend && npx tsc --noEmit`
+- Если UI-компонент (`components/`): после завершения блока — **playwright** скриншот
+
+### Используешь API внешней библиотеки?
+lightweight-charts, Mantine, Blockly, Pydantic, SQLAlchemy, tinkoff-investments, APScheduler
+- **context7**: запроси документацию ПЕРЕД написанием кода
+
+### Создаёшь новый UI-компонент или страницу?
+- **frontend-design**: вызови `/frontend-design` перед реализацией
+
+### Задача затрагивает 3+ модуля или критический путь (trading/broker/circuit_breaker)?
+- **superpowers brainstorm**: планирование перед кодированием
+- **superpowers TDD**: Red-Green-Refactor для trading/circuit_breaker/sandbox
+
+### Полная документация плагинов
+Каталог, матрица «файл → плагины», fallback-команды: `Develop/CLAUDE.md` секция "Правила использования плагинов"
+
 ## Структура репозитория
 
 ├── Документация по проекту/   — ТЗ, план разработки, API-документация
