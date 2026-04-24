@@ -5,6 +5,209 @@
 
 ---
 
+## 2026-04-24 — DEV-7: E2E S6 + Security testing — Sprint 6 ЗАВЕРШЁН ✅
+
+**Контекст:** Последняя задача Sprint 6 — E2E тесты на новый функционал уведомлений + security тестирование.
+
+**Что сделано:**
+
+*E2E тесты (Playwright) — 10 passed:*
+- `s6-notifications.spec.ts` (4): bell counter, drawer, mark-read PATCH, read-all PUT
+- `s6-critical-banner.spec.ts` (2): banner visible + dismiss, no banner for non-critical
+- `s6-notification-settings.spec.ts` (2): settings table, toggle PUT
+- `s6-chart-stability.spec.ts` (2): overlay OHLC stability, D no WS updates
+
+*Security тесты (pytest) — 23 passed:*
+- `test_csrf.py` (3): double-submit cookie validation
+- `test_rate_limiting.py` (3): brute-force 429, lockout, general limit
+- `test_sandbox_escape.py` (14): AST + runtime sandbox restrictions
+- `test_notification_security.py` (3): XSS, user isolation, webhook auth
+
+**Файлы:** `frontend/e2e/s6-*.spec.ts`, `backend/tests/test_security/*.py`, `Sprint_6/reports/DEV-7_report.md`
+**Итого Sprint 6:** 685 backend + 250 frontend + 10 E2E = **945 тестов, 0 failures**
+**Результат:** ✅ Sprint 6 ЗАВЕРШЁН
+
+---
+
+## 2026-04-24 — Фикс: маркеры сделок прыгают при скролле/зуме/смене таймфрейма
+
+**Контекст:** Маркер входа в сделку перескакивал на другую свечу при скролле или зуме графика. Причина: маркер привязывался к sequential индексу (номер в массиве), а при загрузке новых свечей или перестроении mapping индексы менялись.
+
+**Что сделано:**
+1. Сделки хранятся в `sessionTradesRef` (timestamps), маркеры пересчитываются из них
+2. `rebuildMarkers()` вызывается после каждого `setData()` — позиции пересчитываются по актуальному mapping
+3. WS-callback обновляет хранилище сделок и вызывает `rebuildMarkers()`
+4. При смене таймфрейма: данные перезагружаются → `setData()` → `rebuildMarkers()` → маркер на правильной свече
+
+**Файлы:** `frontend/src/components/charts/CandlestickChart.tsx`
+**Тесты:** tsc 0 errors, Playwright: 0 console errors
+**Результат:** ✅
+
+---
+
+## 2026-04-24 — Фикс: маркеры сделок на графике — 3-уровневый дизайн + дедупликация
+
+**Контекст:** Маркеры сделок отображались одной строкой, были мелкими, дублировались на текущем баре из-за WS callback.
+
+**Что сделано:**
+1. 3-уровневый маркер: стрелка (цветная, size 3) → Buy/Sell (белый текст) → цена (белый текст)
+2. Единый метод `tradeToMarkers()` с `id` на каждом маркере (`entry-{tradeId}-arrow/label/price`)
+3. Исторические и WS-маркеры используют одну функцию
+4. WS callback — дедупликация по `id`, исключает дубли при повторных событиях
+
+**Файлы:** `frontend/src/components/charts/CandlestickChart.tsx`
+**Тесты:** tsc 0 errors
+**Результат:** ✅
+
+---
+
+## 2026-04-23 — Docs: секция «Правила использования плагинов» в Develop/CLAUDE.md
+
+**Контекст:** В сессии 22-23.04 ряд ошибок (setMarkers v5, NameError LiveTrade, Decimal→строка, fixedtotal_sum) мог быть предотвращён плагинами Claude Code, но правила их использования не были прописаны.
+
+**Что сделано:**
+- Добавлена секция `## 🔌 Правила использования плагинов` в `Develop/CLAUDE.md` (~150 строк)
+- Каталог 7 плагинов (typescript-lsp, pyright-lsp, context7, playwright, code-review, frontend-design, superpowers)
+- 4 фазы использования: перед кодированием, во время, после (перед коммитом), UI-дизайн
+- Матрица «файл → обязательные плагины» для всех модулей проекта
+- Fallback-команды при недоступности LSP
+
+**Файлы:** `Develop/CLAUDE.md`
+**Результат:** ✅
+
+---
+
+## 2026-04-23 — Фикс: уведомление «восстановлена» показывает неверное время простоя
+
+**Контекст:** При восстановлении сессии уведомление «Время простоя: 22 ч.» считалось от `last_signal_at` или `started_at` — даты запуска сессии, а не реальной остановки. Если сигналов не было — downtime = время жизни сессии.
+
+**Что сделано:**
+- Добавлен метод `_get_last_active_time()` — ищет реальный момент последней активности из 4 источников: CB-event, последняя сделка, last_signal_at, started_at (в порядке приоритета, берёт max)
+- `restore_all()` использует его вместо `session.last_signal_at or session.started_at`
+
+**Файлы:** `backend/app/trading/runtime.py`
+**Результат:** ✅
+
+---
+
+## 2026-04-23 — Фикс: CB trading_hours ставит сессию на постоянную паузу вместо тихого пропуска
+
+**Контекст:** Ночью (06:59 МСК) стратегия генерирует сигнал, CB `_check_trading_hours()` блокирует — но при этом ставит сессию на паузу (`session.status = "paused"`). Утром в 10:00 МСК торги открываются, а сессия остаётся на паузе навсегда. Аналогичная проблема с `cooldown`.
+
+**Что сделано:**
+1. Добавлено поле `temporary: bool = False` в `CheckResult` — помечает временные блокировки
+2. `_check_trading_hours()` и `_check_cooldown()` возвращают `temporary=True`
+3. `check_before_order()`: для temporary — только логирует, НЕ вызывает `_trigger()` (без паузы, без записи CB-события)
+4. `_handle_candle()` (runtime): для temporary — НЕ коммитит, НЕ шлёт уведомление в Telegram
+5. Сессии восстановлены в `active`
+
+**Файлы:** `backend/app/circuit_breaker/engine.py`, `backend/app/trading/runtime.py`
+**Результат:** ✅
+
+---
+
+## 2026-04-22 — График: фильтрация аукционных свечей + маркеры входов/выходов сделок
+
+**Контекст:** 1) Часовой график SBER содержал аукционные свечи (O=H=L=C в 06:00 МСК) — TradingView их не показывает. 2) Маркеры входов/выходов сделок на графике, привязанном к сессии, не загружались из истории — только через WebSocket в реальном времени. 3) Маркеры не имели MSK-смещения, смещаясь на 3 часа от свечей.
+
+**Что сделано:**
+
+*Backend:*
+1. Фильтрация аукционных свечей (O=H=L=C) для таймфреймов 1h/4h в `market_data/service.py`
+
+*Frontend (CandlestickChart.tsx):*
+2. Загрузка исторических сделок сессии при mount (`tradingApi.getTrades`) — маркеры видны сразу при открытии графика
+3. MSK-смещение маркеров (`+3ч`) для соответствия свечам
+4. Поддержка sequential mode — поиск ближайшего индекса по timestamp
+5. Маркеры входа (▲ Buy / ▼ Sell) с ценой, маркеры выхода (обратная стрелка) для закрытых сделок
+6. Реалтайм-обновление маркеров через WebSocket сохранено
+
+**Файлы:** `backend/app/market_data/service.py`, `frontend/src/components/charts/CandlestickChart.tsx`
+**Тесты:** tsc 0 errors, service.py syntax OK
+**Результат:** ✅
+
+---
+
+## 2026-04-22 — UX: предупреждение при паузе сессии с открытой позицией
+
+**Контекст:** При ручной паузе сессии с открытой позицией пользователь не получал предупреждения о рисках. Позиция оставалась без защиты (стоп-лосс/тейк-профит не мониторятся).
+
+**Что сделано:**
+- Создан `PauseConfirmModal` — диалог с тремя вариантами: «Отмена», «Пауза, позицию оставить», «Закрыть позицию и пауза»
+- Показывает текущую позицию (тикер, направление, лоты) и предупреждение о рисках
+- Если открытых позиций нет — пауза выполняется сразу, без диалога
+- Подключён в `SessionCard` и `SessionDashboard`
+
+**Файлы:** `PauseConfirmModal.tsx` (новый), `SessionCard.tsx`, `SessionDashboard.tsx`
+**Тесты:** tsc 0 errors
+**Результат:** ✅
+
+---
+
+## 2026-04-22 — Фикс: карточка сессии — P&L без unrealized, trades=0, entry 8 знаков
+
+**Контекст:** Карточка показывала P&L=0 при открытой позиции с нереализованным P&L 8.37 ₽, «Сделок: 0» при наличии 1 сделки, entry_price с 8 знаками после запятой.
+
+**Что сделано:**
+1. `_fill_session_card_data()` — `total_trades` теперь считает ВСЕ сделки (не только closed), W/L по-прежнему только closed
+2. `_fill_session_card_data()` — добавлен расчёт нереализованного P&L: `current_price - entry_price` × lots, добавляется к realized P&L
+3. `_fill_session_card_data()` — `entry_price` округляется до 2 знаков (как в `get_positions`)
+4. Вынесен метод `_get_last_price()` — получает последнюю цену тикера из OHLCV кеша
+
+**Файлы:** `backend/app/trading/service.py`
+**Результат:** ✅ Данные карточки и детальной страницы совпадают
+
+---
+
+## 2026-04-22 — Фикс: торговые часы CB не учитывают вечернюю сессию MOEX
+
+**Контекст:** CB проверка `_check_trading_hours()` блокировала сделки после 18:45 МСК, хотя MOEX имеет вечернюю сессию 19:00-23:50.
+
+**Что сделано:**
+- `DEFAULT_TRADING_END` изменён с `time(18, 45)` на `time(23, 50)` в `circuit_breaker/engine.py`
+
+**Файлы:** `backend/app/circuit_breaker/engine.py`
+**Результат:** ✅
+
+---
+
+## 2026-04-22 — Фикс: CB-уведомления спамят в Telegram (missing commit)
+
+**Контекст:** Circuit Breaker при срабатывании ставит сессию на паузу (`session.status = "paused"`) через `_trigger()` + `flush()`, но `_handle_candle()` выходит без `commit()`. `async with session_factory()` при выходе делает rollback → сессия остаётся `active` в БД → следующая свеча снова генерирует сигнал → CB снова блокирует → ещё одно Telegram-уведомление. Результат: бесконечный поток `🚨 Circuit Breaker сработал` на каждой свече.
+
+**Что сделано:**
+- Добавлен `await db.commit()` в ветке `cb_result.blocked` перед `return` в `_handle_candle()`, чтобы CB-пауза персистилась в БД и прекращала цикл обработки сигналов
+
+**Файлы:** `backend/app/trading/runtime.py`
+**Результат:** ✅
+
+---
+
+## 2026-04-22 — Фикс: Decimal-форматирование во всех trading-компонентах + синхронизация данных карточка↔детали
+
+**Контекст:** Pydantic v2 сериализует `Decimal` как строку (`"324.33000000"`), а `String.toLocaleString()` в JS не форматирует числа — возвращает строку как есть. Проблема затрагивала все компоненты торговых сессий: карточки, детальную страницу, таблицы позиций/сделок, статистику. Дополнительно: данные на детальной странице сессии отличались от карточки — `get_session()` не заполнял расширенные поля (trades, position).
+
+**Что сделано:**
+
+*Frontend — Decimal→Number во всех format-функциях и сравнениях:*
+1. `SessionCard.tsx` — `formatPnl()`, `formatPrice()`, `pnlColor`, P&L%
+2. `SessionDashboard.tsx` — `formatPnl()`, `pnlColor`, `isStopped` (+ suspended)
+3. `PositionsTable.tsx` — `formatPrice()`, `unrealized_pnl` сравнение
+4. `TradesTable.tsx` — `formatPrice()`, `formatPct()`, `pnl`/`pnl_pct` сравнения
+5. `PnLSummary.tsx` — `formatRub()`, `net_pnl` сравнения (цвет линии + метрика)
+
+*Backend — синхронизация данных:*
+6. `service.py: get_session()` — добавлен вызов `_fill_session_card_data()` для `SessionResponse` внутри `SessionDetailResponse`, чтобы данные детальной страницы совпадали с карточкой
+
+*Backend — баг:*
+7. `engine.py` — опечатка `"fixedtotal_sum"` → `"fixed_sum"` в двух местах
+
+**Файлы:** `SessionCard.tsx`, `SessionDashboard.tsx`, `PositionsTable.tsx`, `TradesTable.tsx`, `PnLSummary.tsx`, `backend/app/trading/service.py`, `backend/app/trading/engine.py`
+**Тесты:** tsc 0 errors, service.py syntax OK
+**Результат:** ✅
+
+---
+
 ## 2026-04-18 — Фикс: бесконечный Loader на странице настроек уведомлений
 
 **Контекст:** При переходе на /notifications → вкладка «Настройки» — бесконечный spinner. Причина: API `GET /notifications/settings` возвращает `[]` для нового пользователя (нет записей UserNotificationSetting в БД), а компонент показывал Loader при `settings.length === 0`.
@@ -265,6 +468,155 @@
 **Stack Gotchas применённые:** Gotcha 9 (Playwright strict), Gotcha 10 (MOEX ISS flaky)
 **Stack Gotchas новые (кандидаты):** Mantine Switch E2E (hidden input), Mantine Drawer visibility (root hidden)
 **Результат:** ✅ DEV-7 завершён. 32 теста, все зелёные.
+
+---
+
+## 2026-04-22 — Расширенные карточки торговых сессий + фикс live-торговли
+
+**Контекст:** Торговые сессии не открывали сделок (backtrader-код не исполняется в sandbox, CB cooldown блокировал, стрим свечей не запускался). Карточки сессий показывали только тикер и 0₽.
+
+**Что сделано:**
+
+1. **Sandbox-конвертер backtrader→sandbox (engine.py):** `_blocks_to_sandbox` парсит Blockly-дерево, извлекает индикаторы (RSI/SMA/EMA) и условия (condition_compare), генерирует sandbox-скрипт с `print("buy"/"sell"/"hold")`. RestrictedPython-совместимый (без sum/max/min/list).
+
+2. **Запуск стрима свечей при старте сессии (runtime.py):** `stream_manager.subscribe()` вызывается при `runtime.start()` — свечи поступают в EventBus канал `market:TICKER:TF` без необходимости открывать график.
+
+3. **Фикс CB cooldown (engine.py + runtime.py):** `last_signal_at` обновляется **после** успешного создания сделки (не до CB-проверки). Первый сигнал больше не блокируется cooldown-ом.
+
+4. **Восстановление suspended-сессий (main.py + runtime.py):** `suspended` → `active` при рестарте. Lifespan запрашивает сессии с status IN (active, paused, suspended).
+
+5. **Расширенные карточки сессий (SessionCard.tsx + service.py + schemas.py):**
+   - Позиция: Long/Short + лоты + цена входа
+   - P&L с знаком (+/-)
+   - Сделок: N (WW / LL), Win Rate %
+   - Последний сигнал: ЧЧ:ММ
+   - Polling 10 сек (TradingPage.tsx)
+
+6. **Фикс _-prefix в сохранённых стратегиях:** 23 версии обновлены в БД (`_size` → `position_size`).
+
+7. **Удаление suspended-сессий (service.py):** `delete_session` принимает status `stopped` и `suspended`.
+
+8. **Планы на развитие:** создан `005_realtime_trading_session_updates.md` — WS-обновление карточек сессий (вместо polling).
+
+**Файлы:**
+- `Develop/backend/app/trading/engine.py` (_blocks_to_sandbox, _condition_to_expr, last_signal_at fix)
+- `Develop/backend/app/trading/runtime.py` (stream_manager.subscribe, _resolve_broker_credentials, suspended→active)
+- `Develop/backend/app/trading/service.py` (_fill_session_card_data, delete suspended)
+- `Develop/backend/app/trading/schemas.py` (новые поля SessionResponse)
+- `Develop/backend/app/main.py` (suspended в lifespan query)
+- `Develop/frontend/src/api/types.ts` (новые поля TradingSession)
+- `Develop/frontend/src/components/trading/SessionCard.tsx` (расширенная карточка)
+- `Develop/frontend/src/pages/TradingPage.tsx` (polling 10 сек)
+- `Спринты/Планы на развитие/005_realtime_trading_session_updates.md` (создан)
+
+**Результат:** ✅ Сделки создаются, карточки отображают позиции и статистику.
+
+---
+
+## 2026-04-21 — Удалена кнопка gap/без gap, фикс дёргающейся D-свечи
+
+**Контекст:** Кнопка переключения sequential/real-time режима запутывала пользователя, показывала некорректные метки. Дневная свеча дёргалась из-за пересборки из 1m-данных при каждом запросе.
+
+**Что сделано:**
+1. **Кнопка gap/без gap удалена (ChartPage.tsx):** sequential mode теперь всегда включён для intraday (1h/4h/5m/15m/1m) — бары идут подряд без ночных разрывов. Для D/W/M — обычный режим.
+2. **Дёргающаяся D-свеча (service.py):** `_build_current_candle` из 1m-агрегации теперь вызывается только для 1h и 4h. Для D/W/M — T-Invest отдаёт актуальную свечу напрямую, 1m-агрегация не используется (устраняет дрожание OHLC).
+3. **Метки времени (CandlestickChart.tsx):** `regularFormatter` с `timeZone: 'UTC'` — корректное отображение MSK-времени без двойного сдвига.
+
+**Файлы:**
+- `Develop/frontend/src/pages/ChartPage.tsx` (удалена кнопка, удалён state sequentialPref)
+- `Develop/backend/app/market_data/service.py` (_build_current_candle только для 1h/4h)
+- `Develop/frontend/src/components/charts/CandlestickChart.tsx` (regularFormatter timeZone UTC)
+
+**Результат:** ✅
+
+---
+
+## 2026-04-21 — PriceAlertMonitor подключён + метки времени + удаление алертов
+
+**Контекст:** Ценовые оповещения не срабатывали — PriceAlertMonitor существовал, но не был подключён ни к одному процессу. Также: метки времени на графике показывали Unix-числа; не было UI для удаления алертов.
+
+**Что сделано:**
+1. **PriceAlertMonitor подключён (market_data/router.py):** при каждом запросе GET /candles проверяется последняя свеча против активных алертов. При срабатывании: `is_active=False`, создаётся notification через NotificationService (in-app + Telegram + Email).
+2. **PriceAlertMonitor → NotificationService (price_alert_monitor.py):** `_create_notification` теперь использует `NotificationService.create_notification()` вместо прямого INSERT — уведомления отправляются во все каналы.
+3. **Метки времени (CandlestickChart.tsx):** явный `regularFormatter` для обычного режима — ДД.ММ ЧЧ:ММ для intraday, ДД.ММ для daily+.
+4. **Удаление алертов (ChartPage.tsx):** оранжевые бейджи с ценой и кнопкой удаления (IconBellOff) рядом с кнопкой создания.
+
+**Файлы:**
+- `Develop/backend/app/market_data/router.py` (alert check на GET /candles)
+- `Develop/backend/app/market_data/price_alert_monitor.py` (NotificationService вместо прямого INSERT)
+- `Develop/frontend/src/components/charts/CandlestickChart.tsx` (regularFormatter)
+- `Develop/frontend/src/pages/ChartPage.tsx` (alert badges + deleteAlert)
+
+**Результат:** ✅
+
+---
+
+## 2026-04-21 — Фикс: intraday gap detection, suspended sessions, failed backtest в дашборде
+
+**Контекст:** Три бага обнаружены при ручном тестировании.
+
+**Что сделано:**
+
+1. **Intraday gap detection (market_data/service.py):** `_find_gaps()` для 1h/4h/1m/5m/15m использовал `mid_tolerance = 1.5 × duration` — каждый ночной перерыв MOEX (~12ч) детектировался как "пропуск" и запускал запрос к T-Invest API. Для 6 месяцев на 1h это ~175 лишних API-вызовов, бэктест загружал данные 7+ минут вместо секунд. Исправлено: tolerance учитывает ночной/выходной перерыв MOEX (1h → 65ч, 4h → 16ч, 1m/5m/15m → 14ч).
+
+2. **Suspended sessions (trading/runtime.py + frontend):** Graceful Shutdown ставил сессии в статус `suspended`, но при рестарте backend они не переводились в `stopped`. Результат: кнопка "Стоп" видна для остановленных сессий, фильтр "Остановленные" не находит их. Исправлено: `restore_all()` переводит `suspended` → `stopped`; frontend трактует `suspended` как `stopped` для кнопок и фильтров; вкладка "Завершённые" → "Остановленные" (соответствует бейджу "Остановлена").
+
+3. **Failed backtest в дашборде (strategy/service.py):** `latest_bt_by_ticker` брал самый свежий бэктест по дате, включая failed. LKOH показывал "20.04" без PF/DD (из failed бэктеста). Исправлено: фильтр `bt_row.status == "completed"`.
+
+**Файлы:**
+- `Develop/backend/app/market_data/service.py` (intraday tolerance)
+- `Develop/backend/app/trading/runtime.py` (suspended → stopped)
+- `Develop/backend/app/strategy/service.py` (only completed backtests)
+- `Develop/frontend/src/components/trading/SessionCard.tsx` (isStopped logic)
+- `Develop/frontend/src/components/trading/SessionList.tsx` (фильтр + название вкладки)
+
+**Результат:** ✅
+
+---
+
+## 2026-04-21 — Уведомление backtest_completed + зависимости + Playwright CI fix
+
+**Контекст:** При завершении бэктеста не создавалось уведомление (Telegram/Email/In-app). Также backtrader и pandas были потеряны из venv (не были в pyproject.toml). Playwright nightly CI падал из-за отсутствия версии pnpm.
+
+**Что сделано:**
+1. **backtest_completed notification:** в `backtest/router.py` добавлен вызов `NotificationService.create_notification()` после успешного завершения бэктеста. Текст: тикер, таймфрейм, P&L%, кол-во сделок, Sharpe. Severity: success (P&L ≥ 0) или warning (P&L < 0). Related entity: backtest.
+2. **pyproject.toml — 6 зависимостей:** backtrader, pandas, TA-Lib, apscheduler, python-telegram-bot, aiosmtplib — больше не теряются при переустановке venv.
+3. **Playwright nightly:** добавлен `version: 9` в `pnpm/action-setup@v4` (ошибка "No pnpm version is specified").
+4. **Develop/CLAUDE.md:** секция «Зависимости НЕ в pyproject.toml» заменена на «Системные зависимости» (только libta-lib и особенности tinkoff-investments).
+5. **Тест dispatch_all_events:** 14 тестов — каждый из 13 event_type проходит через create_notification → dispatch_external (Telegram + Email). Подтверждает, что механизм доставки работает для всех типов.
+
+**Файлы:**
+- `Develop/backend/app/backtest/router.py` (notification при backtest completed)
+- `Develop/backend/pyproject.toml` (+6 зависимостей)
+- `Develop/backend/app/config.py` (дефолт SMTP_PORT 465)
+- `Develop/.github/workflows/playwright-nightly.yml` (pnpm version: 9)
+- `Develop/CLAUDE.md` (обновлена секция зависимостей)
+- `Develop/backend/tests/unit/test_notification/test_dispatch_all_events.py` (создан, 14 тестов)
+
+**Карта покрытия event_type (8/13 подключены к runtime):**
+- ✅ trade_closed, cb_triggered, session_recovered, backtest_completed, daily_stats, corporate_action, price_alert, system_shutdown
+- ⚠️ trade_opened, partial_fill, order_error, all_positions_closed, connection_lost/restored — EVENT_MAP не содержит маппинг или runtime не публикует событие → задача S7
+
+**Тесты:** pytest 14 passed (dispatch_all_events)
+**Результат:** ✅
+
+---
+
+## 2026-04-20 — Фикс: SMTP email-уведомления не отправлялись
+
+**Контекст:** Кнопка «Отправить тестовое письмо» зависала бесконечно. Диагностика: ISP блокирует SMTP на портах 587 (STARTTLS) и 465 (SSL) для Gmail через DPI. При этом Yandex SMTP (587) работает, а Gmail SMTP на порту 465 — работает без VPN (ISP блокирует выборочно, не все серверы/порты одинаково). Порт 465 с прямым SSL оказался рабочим.
+
+**Что сделано:**
+1. **Таймаут aiosmtplib:** добавлен `timeout=15` в `aiosmtplib.send()` — запрос больше не зависает бесконечно, возвращает ошибку через 15 сек
+2. **Авто-выбор TLS-режима:** `use_tls=True` для порта 465 (прямой SSL), `start_tls=True` для остальных портов — один код работает с обоими вариантами
+3. **Дефолт порта:** `config.py` `SMTP_PORT` изменён с 587 → 465
+4. **`.env`:** обновлён `SMTP_PORT=465`
+
+**Файлы:**
+- `Develop/backend/app/notification/email.py` (таймаут + авто TLS)
+- `Develop/backend/app/config.py` (дефолт 465)
+
+**Результат:** ✅ Тестовое письмо отправлено и получено на почту.
 
 ---
 

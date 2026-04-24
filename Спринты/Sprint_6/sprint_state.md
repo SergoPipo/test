@@ -9,7 +9,7 @@
 | 0 (Preflight + багфикс) | ✅ завершена | DEV-0 | 207 passed, 0 failed; blocker устранён |
 | 1 (Backend ядро) | ✅ завершена | DEV-1, DEV-2, DEV-3 | 654 passed, 0 failed; ruff 0 errors |
 | 2 (Frontend + Infra) | ✅ завершена | DEV-4, DEV-5, DEV-6 | pytest 662=0f, vitest 250=0f, ruff 0 errors |
-| 3 (E2E + ARCH) | ⚠️ частично | DEV-7 (pending), ARCH ✅ | ARCH: PASS WITH NOTES, DEV-7 pending |
+| 3 (E2E + ARCH) | ✅ завершена | DEV-7 ✅, ARCH ✅ | 10 E2E + 23 security = 33 passed |
 
 **Легенда:** ⬜ не начата · 🔄 в процессе · ✅ завершена · ⚠️ завершена с замечаниями
 
@@ -24,7 +24,7 @@
 | DEV-4 | 6.7 Notification Center + 6.8 Trading Panel | 2 | ✅ | reports/DEV-4_report.md |
 | DEV-5 | S6-TINVEST-STREAM-MULTIPLEX | 2 | ✅ | reports/DEV-5_report.md |
 | DEV-6 | PLAYWRIGHT-NIGHTLY + E2E-MOCK-ISS + MOCKS | 2 | ✅ | reports/DEV-6_report.md |
-| DEV-7 | 6.9 E2E S6 + 6.10 Security | 3 | ⬜ pending | — |
+| DEV-7 | 6.9 E2E S6 + 6.10 Security | 3 | ✅ | reports/DEV-7_report.md |
 | ARCH | Финальное ревью | 3 | ✅ | arch_review_s6.md |
 
 ## Merge Gates

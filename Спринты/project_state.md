@@ -7,7 +7,7 @@
 
 ---
 
-## Текущий спринт: **S6 ⚠️ PASS WITH NOTES** (Уведомления + Recovery + Graceful Shutdown) — DEV-7 pending
+## Текущий спринт: **S6 ✅ ЗАВЕРШЁН** (Уведомления + Recovery + Graceful Shutdown + E2E + Security)
 
 ## Прогресс по спринтам
 
@@ -20,7 +20,7 @@
 | S5 | Торговля | ⚠️ завершён с замечаниями (весь долг устранён в S5R + closeout) | Trading Engine, Paper Trading, Circuit Breaker, Bond/Tax, 548 тестов + 23 E2E | Sprint_5/arch_review_s5.md |
 | **S5 Review** | **Внеплановое ревью + 3 волны closeout + wave 4 (chart bug-fixes): стабилизация перед S6** | **✅ закрыт полностью** | **CI зелёный впервые с 2026-04-03 на всех 5 ветках + develop. Live Runtime Loop замкнут, реальные позиции T-Invest (source через FIGI), 109 Playwright passed (моки, работают 24/7 без seed), **15** Stack Gotchas, 2 бизнес-бага починены, schema drift устранён, tinvest stream API исправлен, iss_tail_fetch timezone, кнопка Запустить торговлю из бэктеста подключена. **Wave 4 (фазы 3.3–3.7, 2026-04-16):** T-Invest naive→aware (gotcha-15), client-side `candlesCache` + persist в localStorage, race-guard в `fetchCandles`/`fetchOlderCandles`, фикс D-мигания в ChartPage. Крупные треки (backend prefetch, live-агрегация 1m→D, sequential-index mode, 401 debug) вынесены в **Sprint_5_Review_2** (S5R-2). Вердикт ARCH: PASS WITH NOTES, блокеров нет.** | **Sprint_5_Review/arch_review_s5r.md** + **Sprint_5_Review/changelog.md** разделы closeout + фазы 3.3–3.7 |
 | **Sprint_5_Review_2** | **Chart hardening — 5 треков патч-цикла** | **✅ закрыт (ARCH: ПРИНЯТ)** | **Трек 4:** 401 fix (cleanup+guard+gotcha-16). **Трек 5:** TF-aware upsertLiveCandle. **Трек 3:** sequential-index mode intraday. **Трек 1:** prefetch свечей при логине (warm cache). **Трек 2:** верификация агрегации 1m→D/1h/4h (12 тестов, багов нет). ARCH-ревью: 15 проверок, 14 OK, 1 minor. Тесты: 238 frontend + 623 backend = 861 total, 0 failures. | Sprint_5_Review_2/arch_review_s5r2.md |
-| **S6** | **Уведомления** | **⚠️ ARCH: PASS WITH NOTES (DEV-7 pending)** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade (beta117), Stream Multiplex, E2E infra. 662 backend + 250 frontend tests. DEV-7 (E2E S6 + Security) pending. | Sprint_6/arch_review_s6.md |
+| **S6** | **Уведомления + Security** | **✅ завершён** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade (beta117), Stream Multiplex, E2E infra, Security tests. 685 backend + 250 frontend + 10 E2E S6 = **945 тестов**. Доп. работы сессий 22-24.04: карточки сессий (Decimal, unrealized P&L), CB fixes (commit, trading hours, downtime), маркеры сделок на графике, правила плагинов в CLAUDE.md, Playwright автологин. | Sprint_6/arch_review_s6.md |
 | S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт | Sprint_7/sprint_report.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
 
@@ -29,24 +29,24 @@
 ## Что делать дальше
 
 ```
-ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 — ARCH Review завершён, DEV-7 pending
+ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 — ЗАВЕРШЁН ✅
 
-  Волна 0: DEV-0 ✅ (багфикс _underscore → 625 passed)
-  Волна 1: DEV-1 ✅, DEV-2 ✅, DEV-3 ✅ (654 passed)
-  Волна 2: DEV-4 ✅, DEV-5 ✅, DEV-6 ✅ (662 backend + 250 frontend)
-  Волна 3: ARCH ✅ (PASS WITH NOTES), DEV-7 ⬜ PENDING
+  Волна 0: DEV-0 ✅ (багфикс _underscore)
+  Волна 1: DEV-1 ✅, DEV-2 ✅, DEV-3 ✅ (notifications, telegram, SDK)
+  Волна 2: DEV-4 ✅, DEV-5 ✅, DEV-6 ✅ (frontend, stream, E2E infra)
+  Волна 3: DEV-7 ✅ (10 E2E + 23 security), ARCH ✅ (PASS)
 
-  ARCH Review: 7/7 контрактов OK, 662+250 тестов, gotcha-17 добавлен.
-  DEV-7 (E2E S6 + Security) — не запущен/не завершён.
+  Итого: 945 тестов, 0 failures.
+  Доп. работы 22-24.04: карточки сессий, CB fixes, маркеры графика,
+  правила плагинов, Playwright автологин, gotcha-18.
 
 СЛЕДУЮЩЕЕ ДЕЙСТВИЕ:
-  1. Завершить DEV-7 (E2E S6 + Security)
-  2. ARCH верификация DEV-7
-  3. Закрытие S6 → Sprint_6_Review или переход к S7
+  1. Sprint_6_Review (опционально — если нужно ревью перед S7)
+  2. Планирование Sprint 7 (Should-фичи)
 
 ФАЙЛ РЕВЬЮ: Sprint_6/arch_review_s6.md
 ФАЙЛ СОСТОЯНИЯ: Sprint_6/sprint_state.md
-ФАЙЛ ПОРЯДКА: Sprint_6/execution_order.md
+ФАЙЛ ОТЧЁТА DEV-7: Sprint_6/reports/DEV-7_report.md
 ```
 
 ## Ключевые решения (кросс-спринтовые)
@@ -60,6 +60,35 @@ _Решения, влияющие на несколько спринтов:_
 | 3 | 2026-03-24 | Таблица с раскрываемыми строками (Вариант Б) | S1-S3 | Заказчик |
 | 4 | 2026-03-24 | Тикеры с цветными иконками | S1 | Заказчик |
 | 5 | 2026-03-27 | Бэктест нельзя запустить если: код устарел (блоки ≠ код) ИЛИ код содержит ошибки. Кнопка «Запустить бэктест» disabled + tooltip с причиной | S4-S5 | Заказчик |
+
+## Обязательные проверки будущих спринтов
+
+### S7 — ARCH-задача: подключение оставшихся event_type к runtime
+
+После завершения всех DEV-задач S7 архитектор **обязан** проверить, что следующие 5 типов уведомлений подключены к реальным runtime-событиям через `create_notification`:
+
+| event_type | Что нужно | Источник события |
+|------------|-----------|-----------------|
+| `trade_opened` | EVENT_MAP: маппинг на открытие позиции | `trading/runtime.py` или `engine.py` |
+| `partial_fill` | Частичное исполнение ордера | `trading/engine.py` → OrderManager |
+| `order_error` | Ошибка выставления ордера | `trading/engine.py` → OrderManager |
+| `all_positions_closed` | Все позиции закрыты | `trading/engine.py:681` (event уже есть, нет `create_notification`) |
+| `connection_lost` / `connection_restored` | Потеря/восстановление gRPC-соединения | `broker/tinvest/multiplexer.py` (reconnect loop) |
+
+Механизм доставки (in-app + Telegram + Email) работает для всех 13 типов — подтверждено тестом `test_dispatch_all_events.py` (14 passed). Нужно только подключить источники.
+
+### S8 Review — обязательный чеклист: верификация всех обработчиков событий
+
+В рамках Sprint_8_Review (M4: Production) **включить** следующую проверку:
+
+- [ ] Все 13 event_type из `NotificationSettingsPage` реально генерируют уведомления при соответствующих runtime-событиях
+- [ ] Для каждого event_type: включить Telegram + Email в настройках → вызвать событие → проверить доставку во все 3 канала
+- [ ] Тест `test_dispatch_all_events.py` проходит (unit — механизм доставки)
+- [ ] E2E или интеграционный тест: реальный сценарий (бэктест → notification → Telegram/Email) работает
+
+### Post-Sprint — планы на развитие
+
+Подробные описания вынесены в `Спринты/Планы на развитие/`. Краткий реестр: [README.md](Планы на развитие/README.md).
 
 ## Технический долг
 

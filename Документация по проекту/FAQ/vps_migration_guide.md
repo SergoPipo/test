@@ -169,15 +169,20 @@ Webhook фиксированный — не нужно обновлять при
 
 ## 8. SMTP
 
-На VPS исходящие SMTP-соединения обычно не заблокированы (в отличие от sandbox-среды). Настройки в `.env` остаются те же:
+На VPS исходящие SMTP-соединения обычно не заблокированы (в отличие от домашнего ISP). Настройки в `.env`:
 
 ```env
 SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
+SMTP_PORT=465
 SMTP_USER=nazarychev.s@gmail.com
 SMTP_PASS=<app-password>
 SMTP_FROM=nazarychev.s@gmail.com
 ```
+
+**Примечание о портах:**
+- Порт 465 (прямой SSL) — рекомендуется, работает через большинство ISP
+- Порт 587 (STARTTLS) — стандартный, но может блокироваться некоторыми ISP через DPI
+- Код автоматически выбирает `use_tls` (465) или `start_tls` (587) по значению `SMTP_PORT`
 
 **Примечание:** Gmail подставит адрес отправителя `nazarychev.s@gmail.com` независимо от SMTP_FROM. Чтобы использовать `noreply@moex-terminal.ru` — нужно настроить свой почтовый сервер или использовать сервис типа SendGrid/Mailgun.
 
