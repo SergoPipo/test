@@ -201,6 +201,7 @@ ARCH, UX, QA выполняют параллельно за 1–2 дня.
 | C6 | 7.8 | BACK2 | FRONT2 | `POST /api/v1/users/me/wizard/complete`; `GET /api/v1/users/me` отдаёт `wizard_completed_at:datetime\|null` |
 | C7 | 7.12 | BACK2 | BACK1, OPS | `request.app.state.notification_service` (FastAPI Depends pattern). Все `NotificationService()` в коде заменяются. Проверка: `grep -rn "NotificationService()" app/` = 0 вне `main.py` |
 | C8 | 7.14 | BACK2 | (deep link) | CallbackData scheme: `open_session:{session_id}`, `open_chart:{ticker}`. Deep link → `/sessions/{id}` или `/chart?ticker=...` |
+| C9 | 7.7 | BACK1 | FRONT2 | `GET /api/v1/account/balance/history?days=30` → `[{ts:datetime, total_value:float, currency:'RUB'}]` для sparkline в виджете «Баланс». Источник — агрегированные снимки баланса (см. `arch_design_s7.md` §8). Добавлен после ARCH W0 review. |
 
 ### Правила гонки и приёмки контрактов
 
@@ -255,7 +256,7 @@ ARCH, UX, QA выполняют параллельно за 1–2 дня.
 
 | DEV | Задачи | Зависит от | Блокирует |
 |-----|--------|-----------|-----------|
-| BACK1 (DEV-1) | 7.2-be, 7.9 | W1 завершён, OPS саппорт для 7.9 | C5 для FRONT2 |
+| BACK1 (DEV-1) | 7.2-be, 7.7-be (C9 balance/history), 7.9 | W1 завершён, OPS саппорт для 7.9 | C5, C9 для FRONT2 |
 | BACK2 (DEV-2) | 7.1-be, 7.3, 7.8-be, 7.18 | W1 завершён, ARCH design (для 7.18) | C3 для FRONT1, C4 для FRONT2, C6 для FRONT2 |
 | FRONT1 (DEV-3) | 7.6, 7.19 + саппорт 7.7 | W0 UX (`drawing_tools.md`, `ai_commands_dropdown.md`), C3 от BACK2 | — |
 | FRONT2 (DEV-4) | 7.1-fe, 7.7, 7.8-fe, 7.2-fe | W0 UX (`dashboard_widgets.md`, `wizard_5steps.md`), C4 от BACK2, C5 от BACK1, C6 от BACK2 | — |
@@ -266,6 +267,7 @@ ARCH, UX, QA выполняют параллельно за 1–2 дня.
 - BACK2 публикует C4 (Alembic миграция `strategy_versions`) ПЕРВЫМ в треке — FRONT2 не стартует пока schema не закоммичена.
 - BACK2 публикует C3 (расширение ChatRequest.context) до того, как FRONT1 пишет dropdown.
 - BACK1 публикует C5 (POST /backtest/grid) — FRONT2 пишет UI.
+- BACK1 публикует C9 (GET /account/balance/history) до старта FRONT2 7.7 (sparkline в виджете «Баланс»).
 
 **Финиш W2:** все 9 фич W2 закрыты с integration verification → W3.
 
