@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-04-24 (Sprint 6 Review: ✅ PASS, M3 достигнут)
+> Последнее обновление: 2026-04-25 (Sprint 7 — планирование завершено, готов к старту W0)
 
 ---
 
-## Текущий спринт: **Sprint_6_Review ✅ ЗАВЕРШЁН** (UI-проверки + ФТ/ТЗ актуализированы + 4 дополнительных code fixes)
+## Текущий спринт: **Sprint 7 — ПЛАНИРОВАНИЕ ЗАВЕРШЕНО** ✅ (готов к старту W0, ждём команду заказчика)
 
 ## Прогресс по спринтам
 
@@ -22,7 +22,7 @@
 | **Sprint_5_Review_2** | **Chart hardening — 5 треков патч-цикла** | **✅ закрыт (ARCH: ПРИНЯТ)** | **Трек 4:** 401 fix (cleanup+guard+gotcha-16). **Трек 5:** TF-aware upsertLiveCandle. **Трек 3:** sequential-index mode intraday. **Трек 1:** prefetch свечей при логине (warm cache). **Трек 2:** верификация агрегации 1m→D/1h/4h (12 тестов, багов нет). ARCH-ревью: 15 проверок, 14 OK, 1 minor. Тесты: 238 frontend + 623 backend = 861 total, 0 failures. | Sprint_5_Review_2/arch_review_s5r2.md |
 | **S6** | **Уведомления + Security** | **✅ завершён** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade (beta117), Stream Multiplex, E2E infra, Security tests. 685 backend + 250 frontend + 10 E2E S6 = **945 тестов**. Доп. работы сессий 22-24.04: карточки сессий (Decimal, unrealized P&L), CB fixes (commit, trading hours, downtime), маркеры сделок на графике, правила плагинов в CLAUDE.md, Playwright автологин. | Sprint_6/arch_review_s6.md |
 | **Sprint_6_Review** | **Промежуточное ревью M3: code review + UI-проверки + документация** | **✅ завершён (PASS, 2026-04-24)** | **Code review (8 разделов, 6 fixes).** **E2E регрессия:** 107→119 passed (0 failed). **3 code fixes** обнаружены только при E2E/визуальной верификации: AISettingsPage (`providers??[]` + `toLocaleString` guard), marketDataStore (`candles=[]` default). **Визуальная верификация S6:** 6 скриншотов, 5/6 OK. **EVENT_MAP фикс:** 8 publish-сайтов (runtime.py + engine.py) — 5 event_type теперь корректно подставляют `{strategy_name}`/`{ticker}`/`{direction}`/`{volume}`/`{pnl}`. **Документация:** ФТ/ТЗ/development_plan актуализированы за S5+S6. Итого: **11 FIXED + 1 FP + 3 перенесены в S7** (NS singleton, 5 event_type, inline-кнопки Telegram). **Milestone M3 достигнут.** | Sprint_6_Review/code_review.md, backlog.md |
-| S7 | Should-фичи | ⬜ не начат | Версионирование, экспорт, + переносы (NS singleton, 5 event_type, inline-кнопки, WS карточки, интерактивные зоны, фоновый бэктест) | Sprint_7/sprint_report.md |
+| **S7** | **Should-фичи + переносы + AI-команды** | 🔄 **планирование завершено** | 17 задач + 7.R готовы к запуску W0. Spec: `Sprint_7/sprint_design.md`. План: `Sprint_7/sprint_implementation_plan.md`. Промпты: 9 файлов (ARCH design, ARCH review, UX, QA, DEV-1..5). UX-плейсхолдеры: 6 файлов в `ux/`. | Sprint_7/sprint_design.md |
 | S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
 
 **Легенда:** ⬜ не начат · 🔄 в процессе · ✅ завершён · ⚠️ завершён с замечаниями
@@ -30,36 +30,46 @@
 ## Что делать дальше
 
 ```
-ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 6 Review — ЗАВЕРШЁН ✅ (2026-04-24)
+ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 7 — ПЛАНИРОВАНИЕ ЗАВЕРШЕНО ✅ (2026-04-25)
 
-  Шаг 1. UI-проверки (Playwright) ✅
-    - E2E full run: 107 → 119 passed / 0 failed / 3 skipped
-    - 10 тестов исправлены (pre-existing проблемы моков/локаторов)
-    - 3 code fixes обнаружены только E2E (AISettingsPage x2, marketDataStore)
+  Все файлы спринта подготовлены:
+    - sprint_design.md (spec, утверждён 2026-04-25)
+    - sprint_implementation_plan.md (21 задача, выполнена inline)
+    - 9 промптов агентов:
+      * prompt_ARCH_design.md (W0)
+      * prompt_ARCH_review.md (W3, задача 7.R)
+      * prompt_UX.md (W0 + W3)
+      * prompt_QA.md (W0 + W1 + W3, задача 7.11)
+      * prompt_DEV-1..5.md (BACK1, BACK2, FRONT1, FRONT2, OPS)
+    - execution_order.md (W0/W1/midsprint/W2/W3 + Cross-DEV contracts C1–C8)
+    - preflight_checklist.md (окружение, инфра E2E, two-repo branching)
+    - e2e_test_plan_s7.md (каркас для QA на W0)
+    - 6 UX-плейсхолдеров в ux/ (заполнит UX в W0)
+    - reports/ (директория для отчётов)
+  
+  Состав S7: 17 задач + 7.R
+    - Блок A (7 Should-фич): 7.1, 7.2, 7.3, 7.6, 7.7, 7.8, 7.9
+    - Блок B (6 переносов из S6): 7.12, 7.13, 7.14, 7.15, 7.16, 7.17
+    - Блок C (AI-команды, новый): 7.18, 7.19
+    - 7.10 UX полировка, 7.11 E2E, 7.R ARCH ревью
 
-  Шаг 2. Визуальная верификация S6 ✅
-    - 6 скриншотов (Bell/Drawer, Settings, Trading cards, Feed, AI, Chart)
-    - 1 WARNING: шаблоны `{strategy_name}: {ticker}` в graceful shutdown
-    - ФИКС: 8 EVENT_MAP publish-сайтов в runtime.py + engine.py
+  Подход: параллельные треки + W0 pre-sprint design
+  Calendar: ~14 рабочих дней (W0=2, W1=4, midsprint=1, W2=5, W3=2)
+  Гибкое продление: «делаем всё, время гибкое» (заказчик 2026-04-25)
 
-  Шаг 3. Актуализация ФТ/ТЗ/development_plan ✅
-    - functional_requirements.md v2.3 (S5+S6 пометки, Bond, CB, Scheduler, 
-      маркеры, price alerts, Tax FIFO)
-    - technical_specification.md v1.3 (S5/S6 ✅ в фазах, S7 актуализирован)
-    - development_plan.md (S5 ✅, S6 ✅ + ARCH follow-up + закрытие, 
-      Sprint_6_Review раздел, S7 с переносами, M3 ✅)
-
-  Milestone M3 (Paper Trading + Notifications) — достигнут ✅
-  Итого S5+S5R+S5R-2+S6+Sprint_6_Review: закрыто.
+  Указатели:
+    - docs/superpowers/specs/2026-04-25-sprint-7-design.md
+    - docs/superpowers/plans/2026-04-25-sprint-7-implementation.md
 
 СЛЕДУЮЩЕЕ ДЕЙСТВИЕ:
-  1. Планирование Sprint 7 (Should-фичи + переносы из S6)
-  2. Коммит/мерж изменений ревью (по запросу заказчика)
+  1. Заказчик команда «start W0»
+  2. Запустить ARCH (prompt_ARCH_design.md), UX (prompt_UX.md), QA (prompt_QA.md)
+     в W0 параллельно
+  3. После W0 завершён → старт W1 (DEV-1, DEV-2, DEV-3 параллельно)
+  4. Midsprint check после W1 → старт W2
+  5. W3 → 7.R PASS → S7 закрыт → S8 feature freeze
 
-ФАЙЛЫ РЕВЬЮ: 
-  - Sprint_6_Review/code_review.md
-  - Sprint_6_Review/backlog.md (17 задач: 11 FIXED, 1 FP, 3 в S7, 1 в S8)
-  - Sprint_6/changelog.md (записи 2026-04-24 × 3 про Sprint 6 Review)
+ВЕТКА ПЛАНИРОВАНИЯ: docs/sprint-7-plan (от main, имя подтверждено заказчиком)
 ```
 
 ## Ключевые решения (кросс-спринтовые)
