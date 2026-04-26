@@ -1,9 +1,9 @@
 # Функциональные требования
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия документа:** 2.2
-**Дата:** 2026-04-17
-**Статус:** Актуализирован по результатам Sprint 6 ARCH Review
+**Версия документа:** 2.4
+**Дата:** 2026-04-26
+**Статус:** Актуализирован по результатам Sprint 7 ARCH Review (7.R) — feature-complete Phase 1
 
 > **Примечание:** Данный документ описывает функциональные требования — *что* должна делать система. Технические детали реализации (стек, архитектура, API-контракты, структура БД) будут раскрыты в отдельном техническом задании на основе этого документа. Там, где функциональные требования затрагивают технические аспекты, они вынесены в блоки «Примечание для ТЗ».
 
@@ -965,6 +965,130 @@ AI-чат (режим A) — выдвижной sidebar справа. Кнопк
 
 ---
 
+## 19. Sprint 7 — Should-фичи и завершение Phase 1 — ✅ реализовано S7 (2026-04-26)
+
+> Данный раздел описывает функциональность, добавленную в Sprint 7 для закрытия Phase 1 (M3 Phase 1 feature-complete). 17 задач + 7.R, см. `Спринты/Sprint_7/`.
+
+### 19.1 Версионирование стратегий [Should] — ✅ S7.7.1
+
+- При каждом сохранении стратегии backend автоматически создаёт новую запись `strategy_versions` (snapshot полного `blocks_json` + `generated_code`).
+- Защита от спама: если последняя версия моложе **5 минут** И блоки/код идентичны — версия не создаётся (idempotency).
+- Пользователь может создать **именованную версию** через кнопку «Сохранить именованную версию» (с полем `comment`).
+- В UI редактора стратегии — кнопка «История» открывает Drawer со списком всех версий (бейдж «текущая», действия Просмотреть / Diff / Восстановить).
+- **History-preserving откат:** «Восстановить» создаёт **новую** версию-копию с пометкой «Откат к v{N}»; старые версии остаются в истории (нельзя случайно потерять текущее состояние).
+- Diff между версиями — line-by-line (без внешних зависимостей).
+- Все endpoints проверяют ownership (стратегия принадлежит пользователю).
+
+### 19.2 Grid Search оптимизация параметров [Should] — ✅ S7.7.2
+
+- Запуск из редактора стратегии: «Grid Search» открывает модалку с динамическим списком параметров (1–5).
+- Real-time счётчик `total = product(len(values))` с цветовой индикацией: ≤200 зелёный, 201–1000 жёлтый, >1000 красный (запуск заблокирован).
+- Hard cap: 1000 комбинаций / ≤5 параметров (защита от 10⁶).
+- Backend выполняет каждую комбинацию через `multiprocessing.Pool` (workers = `os.cpu_count() - 1`), pickle-friendly worker.
+- Результат — матрица `[{params, sharpe, pnl, win_rate, drawdown, trades_count}]`, сортировка по убыванию Sharpe.
+- **Overfitting-предупреждение:** если разброс топ-5 по Sharpe > 50% — флаг в финальном payload.
+- Визуализация в UI: bar (1 параметр) / 2D heatmap (2 параметра) / sortable table (3+ параметра).
+- Результаты доступны через тот же канал, что фоновые бэктесты (см. §19.10).
+
+### 19.3 Экспорт CSV/PDF бэктеста [Should] — ✅ S7.7.3
+
+- На странице результата бэктеста — кнопки «Экспорт CSV» и «Экспорт PDF».
+- Endpoint `GET /api/v1/backtest/{id}/export?format=csv|pdf`.
+- CSV: два блока — `#metric` (метрики) и `#trades` (детальный список сделок), нативный `csv.DictWriter`.
+- PDF: WeasyPrint, фирменный layout (метрики → таблица сделок → futures чарты — опционально).
+- При отсутствии WeasyPrint в окружении endpoint отвечает 503 со ссылкой на инструкцию установки (`Develop/backend/INSTALL.md`).
+
+### 19.4 Инструменты рисования на графике [Should] — ✅ S7.7.6
+
+- На странице `/chart/{ticker}` — вертикальный тулбар (48px слева) с 9 кнопками: курсор / трендовая линия / горизонтальная линия / вертикальная линия / прямоугольник (зона) / метка (label) / список рисунков / удалить выделенное / очистить всё.
+- Hotkeys: `V` (cursor), `T` (trendline), `H` (hline), `R` (rect), `L` (label), `Esc` (отмена), `Delete/Backspace` (удалить выделенное).
+- ARIA: `role="toolbar"`, `aria-label`, `aria-pressed`, Mantine Tooltip с подсказкой клавиш.
+- Persist: REST `/api/v1/charts/{ticker}/{tf}/drawings` (CRUD), fallback на localStorage (квота 100 рисунков на ключ).
+- Изоляция per-user / per-ticker / per-timeframe.
+- **Ограничения S7 (на S8):** drag/перенос/изменение углов выделенной фигуры (UX §4 «editing»); intraday TF (sequential mode) — координаты могут уезжать (gotcha-кандидат).
+
+### 19.5 Дашборд-виджеты [Should] — ✅ S7.7.7
+
+- На странице `/dashboard` — `<SimpleGrid>` (1/2/3 колонки в зависимости от ширины) с тремя виджетами:
+  - **BalanceWidget:** текущий total_value (валюта RUB), %-diff за день (зелёный/красный), sparkline 30 дней (через `GET /api/v1/account/balance/history?days=30`).
+  - **HealthWidget:** 3 строки светофора — Circuit Breaker / T-Invest connection / Scheduler. Источник: `/health` endpoint. Graceful degrade на жёлтый «нет данных» если backend не отдал расширенные поля.
+  - **ActivePositionsWidget:** top-5 активных торговых сессий по abs(P&L), мини-sparkline 24h (placeholder), клик → `/chart/{ticker}`.
+
+### 19.6 First-run wizard (5 шагов) [Should] — ✅ S7.7.8
+
+- При первом входе после регистрации — fullscreen-модалка `<Stepper>` 5 шагов:
+  1. **Старт** — приветствие.
+  2. **Риски** — текст дисклеймера + чекбокс-gate (без галки «Далее» disabled).
+  3. **Брокер** — выбор Paper / Real (только T-Invest в фазе 1).
+  4. **Уведомления** — настройка Telegram (token+chatID) / Email / in-app.
+  5. **Финиш** — `POST /api/v1/users/me/wizard/complete`.
+- Esc / click outside заблокированы (нельзя закрыть пока wizard не пройден).
+- `users.wizard_completed_at` сохраняется в БД; повторно wizard не показывается.
+- Источник правды: `GET /api/v1/users/me` (поле `wizard_completed_at`).
+
+### 19.7 Backup/restore [Should] — ✅ S7.7.9
+
+- **Автоматический backup:** APScheduler-job `backup_db_daily` запускается в 03:00 UTC (настраивается через `settings.BACKUP_CRON`).
+- **Ротация:** хранятся последние N (по умолчанию 7) snapshot'ов; старые удаляются по mtime.
+- **CLI:** `python -m app.cli.backup {create,list,restore,rotate}` — argparse-интерфейс.
+- **SQLite WAL-aware copy:** `BEGIN IMMEDIATE` → `PRAGMA wal_checkpoint(FULL)` → `copy2` + копирование `*.db-wal`/`*.db-shm` (см. gotcha-19).
+- **Postgres-ветка:** `pg_dump --no-owner --format=custom` → `pg_restore --single-transaction` (готова, активируется по схеме URL).
+- После restore автоматически запускается `alembic upgrade head` (схема может быть старее).
+
+### 19.8 AI слэш-команды [Should] — ✅ S7.7.18 / S7.7.19
+
+- В чате AI-ассистента ввод `/` открывает dropdown с 5 командами: `/chart TICKER [TF]`, `/backtest ID`, `/strategy ID`, `/session ID`, `/portfolio`.
+- ↑/↓/Enter/Tab/Esc навигация, фильтрация по префиксу, IME composition guard (не открывается во время русского ввода с диакритикой).
+- Множественный контекст: `/chart SBER /backtest 42` → два отдельных контекстных блока в одном сообщении.
+- В сообщении пользователя команда заменяется на «контекстный chip» с иконкой и навигацией.
+- Backend подгружает данные по id, проверяет ownership (404 на чужой ресурс — без leak'ов о существовании), sanitизирует control-chars, обрезает до 2 КБ на context-item, оборачивает в `[CONTEXT type=... id=...]...[/CONTEXT]` (защита от prompt injection).
+- Защита: rate-limit 10 enriched-запросов/минуту на user.
+
+### 19.9 Аналитика бэктеста (расширенная) [Should] — ✅ S7.7.16
+
+- Новая вкладка «Обзор» на странице результата бэктеста — два графика:
+  - **Гистограмма распределения P&L** (бакеты по 0.5%, цвета red/green/yellow по знаку, пунктирные средние линии «средний убыток» / «средняя прибыль»).
+  - **Donut Win/Loss/BE** (3 сегмента, центр с total trades, легенда справа).
+- На основном ценовом графике — **интерактивные зоны** входа/выхода трейдов: hover → подсветка зоны (alpha 0.18→0.40 + белый контур), click → `TradeDetailsPanel` (entry/exit time, price, reason, pnl, duration). Esc и × закрывают.
+
+### 19.10 Фоновые бэктесты [Should] — ✅ S7.7.17
+
+- В модалке запуска бэктеста — кнопка «Запустить в фоне» (модалка не закрывается).
+- Per-user cap: **3 параллельных** фоновых job (включая Grid Search).
+- **Бейдж в шапке:** `Indicator` с цветом по приоритету (red error > green done > blue running) + число активных.
+- **Dropdown по клику:** список jobs с прогресс-барами, кнопками «Открыть результат» / «Отменить» / «Очистить завершённые».
+- Toast «бэктест запущен в фоне» при запуске.
+- Persist в `localStorage` (`backgroundBacktestsStore`), restore на reload, cleanup на logout.
+
+### 19.11 WS-обновление карточек торговых сессий [Should] — ✅ S7.7.15
+
+- WebSocket endpoint `/ws/trading-sessions/{user_id}`: auth первым сообщением (`{action:"auth", token:"<jwt>"}`, JWT не в URL — gotcha-16).
+- После auth_ok backend отправляет `snapshot` всех активных сессий пользователя; далее delta-events: `position_update`, `trade_filled`, `pnl_update`, `session_state`.
+- Динамическая подписка на новые сессии через канал `system:{user_id}` (`session.added`).
+- Frontend: `setInterval(fetchSessions, 10000)` polling **полностью удалён**, заменён на WS-клиент с exponential backoff reconnect и ping/pong.
+- Badge статуса соединения (online / reconnecting / auth_error) виден на TradingPage.
+
+### 19.12 Пять новых event_type [Should] — ✅ S7.7.13 (MR.5)
+
+- К существующим 8 типам уведомлений (S6) добавлены 5:
+  - `trade_opened` — открытие позиции (publish в paper-mode после instant fill, в real-mode параллельно с `trade.filled`).
+  - `partial_fill` — частичное исполнение ордера (real-mode, при `filled_lots < volume_lots`).
+  - `order_error` — ошибка выставления ордера (helper `_publish_order_error`, ловит exceptions в `process_signal` и `on_order_filled`).
+  - `all_positions_closed` — все позиции закрыты (event уже был, в S7 подключён через `EVENT_MAP`).
+  - `connection_lost` / `connection_restored` — потеря/восстановление T-Invest gRPC-стрима (с анти-спам флагом — один publish на disconnect-цикл).
+- Все 5 типов идут в EVENT_MAP, доставляются через 3 канала (in-app + Telegram + Email) согласно настройкам пользователя.
+- NotificationService подписан на новый канал `broker:status` (фан-аут по активным сессиям через `_session_user_map`).
+
+### 19.13 Telegram inline-кнопки (CallbackQuery) [Should] — ✅ S7.7.14
+
+- В уведомлениях `trade_opened`, `session.started` и др. — добавлены inline-кнопки:
+  - **Открыть сессию** → callback `open_session:{session_id}` → ownership-check (JOIN `Strategy.user_id`) → deep link `{FRONTEND_URL}/trading?session={id}`.
+  - **Открыть график** → callback `open_chart:{TICKER}` → sanitize ticker → deep link `{FRONTEND_URL}/chart/{TICKER}`.
+- Если пользователь не привязан к боту → ответ «Telegram не привязан».
+- Если сессия не принадлежит — «Сессия не найдена» (без leak'ов).
+
+---
+
 ## Приложение A. Шаблон описания торговой стратегии
 
 Используется в Режиме B (раздел 8.2) для ручного или внешнего ввода стратегии.
@@ -1041,6 +1165,7 @@ Inline-кнопки под сообщением об открытой позиц
 | 2.1 | 2026-04-07 | Sprint_4_Review | §3.2: Strategy Editor — 2 вкладки (Содержание + Редактор), Blockly + AI fullscreen режим, SharedDescriptionPanel. §4.5: Backtest Results — 4 вкладки (+ Показатели), цветовая кодировка метрик, маркеры/зоны. §8.3: AI — 9 типов провайдеров, хранение ключей в БД (AES-256-GCM), SSE streaming, лимиты per-провайдер |
 | 2.2 | 2026-04-17 | Sprint_6_ARCH | §9.1: Привязка Telegram — 6-digit token TTL 5min, webhook handler. §9.2: Уведомления — severity→emoji, HTML parse_mode. §9.3: Команды Must реализованы (/start, /positions, /status, /help). §10.1: 3 канала уведомлений (Telegram+Email+In-app), NotificationService. §10.2: In-app — Bell+badge, Drawer, CriticalBanner, /notifications page. §17.7: Recovery для Real-сессий, Graceful Shutdown с pending orders 30s |
 | 2.3 | 2026-04-24 | Sprint_6_Review | §3.1: фильтр по статусам (completed-only для latest_bt). §4.7: Bond Service реализован S5. §5.5: маркеры сделок (3-уровневые), overlay OHLC, sequential mode, фильтрация аукционных свечей. §5.8: Price alerts подключены к `/candles` endpoint. §6 (шапка): статус реализации S5/S5R/S6 (Trading Engine, Paper, CB, Bond НКД, Tax FIFO, Recovery, Graceful Shutdown, Stream Multiplex, карточки сессий, PauseConfirmModal). §9.3: Should-команды Telegram реализованы (/close, /closeall, /balance). §12.4: CB — постоянные/временные блокировки (trading_hours, cooldown), PauseConfirmModal. §17.8: Scheduler Service (APScheduler, 3 cron + T+1 unlock). §18.2: Tax FIFO + 3-НДФЛ экспорт реализованы S5. |
+| 2.4 | 2026-04-26 | Sprint_7_ARCH (7.R) | **Phase 1 feature-complete (M3 Phase 1).** Добавлен раздел §19 «Sprint 7 — Should-фичи и завершение Phase 1»: версионирование стратегий (история, именованные snapshots, history-preserving откат — §19.1); Grid Search оптимизация параметров (1–5 параметров, hard cap 1000 комбинаций, multiprocessing.Pool, heatmap — §19.2); экспорт CSV/PDF бэктеста (WeasyPrint — §19.3); инструменты рисования (5 типов: trendline/hline/vline/rect/label, hotkeys, persist через REST — §19.4); дашборд-виджеты (баланс + sparkline / health / активные позиции — §19.5); first-run wizard (5 шагов, gate на дисклеймере, нельзя пропустить — §19.6); backup/restore (CLI + APScheduler 03:00 UTC, WAL-aware SQLite — §19.7); AI слэш-команды (5 команд: /chart /backtest /strategy /session /portfolio + контекстные блоки в чате — §19.8); аналитика бэктеста (гистограмма P&L, donut Win/Loss, интерактивные зоны — §19.9); фоновые бэктесты (cap=3 на пользователя, бейдж в шапке, dropdown с прогрессом — §19.10); WS-обновление карточек сессий (без polling — §19.11); 5 новых event_type (trade_opened, partial_fill, order_error, all_positions_closed, connection_lost/restored — §19.12); Telegram inline-кнопки (open_session, open_chart deep links — §19.13). |
 
 ---
 

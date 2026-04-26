@@ -219,10 +219,12 @@
 9. Переключение между двумя бэктестами — графики корректно очищаются (без утечки lightweight-charts).
 10. Mobile <1024 — графики стекуются (1 колонка).
 
-`data-testid`:
-- `backtest-overview-tab`, `backtest-pnl-histogram`, `backtest-winloss-donut`.
-- `backtest-trade-zone-{trade_id}`, `backtest-trade-details-panel`.
-- `backtest-trade-detail-entry-reason`, `backtest-trade-detail-exit-reason`.
+`data-testid` (актуализировано ARCH 7.R 2026-04-26 — закреплены имена из реализации):
+- `backtest-overview-tab`, **`pnl-histogram`** (было `backtest-pnl-histogram` — переименовано в код), **`win-loss-donut`** (было `backtest-winloss-donut`), **`trade-detail-panel`** (было `backtest-trade-details-panel`).
+- Зоны трейдов на ценовом графике рисуются на canvas без DOM-элемента (отказ от `backtest-trade-zone-{trade_id}` — тестируется через клик по координатам).
+- `backtest-trade-detail-entry-reason`, `backtest-trade-detail-exit-reason` — оставлены как есть (детали панели).
+
+> Решение 7.R по delta data-testid (UX W3 §2 / QA W3 §3): код становится source of truth, UX-макет приведён к коду. E2E-spec'ы уже используют код, переименование не требуется.
 
 ---
 

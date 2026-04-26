@@ -15,7 +15,9 @@
 
 ## Текущий шаг
 
-**W2 sub-wave 2 ✅ ЗАВЕРШЕНА (FRONT2 + FRONT1 PHASE2 параллельно, координация по MiniSparkline). Готовы к W3 (UX полировка 7.10 + финальный E2E 7.11 + ARCH-ревью 7.R).**
+**Sprint 7 ✅ ЗАВЕРШЁН (PASS WITH NOTES, 2026-04-26). M3 Phase 1 feature-complete.**
+
+ARCH 7.R вердикт: **PASS WITH NOTES** (см. `arch_review_s7.md`). 17 задач + 7.R закрыты. 11 DEFERRED-S8 карточек в `Sprint_8_Review/backlog.md` (1 medium-high, 5 medium, 5 low — не блокеры). Готов к S8.
 
 Предыдущие шаги (для контекста сохранены ниже):
 
@@ -152,7 +154,7 @@
 | W2 sub-wave 1 — backend контракты + drawing tools + backup | ✅ завершено | reports/DEV-1_BACK1_W2.md (✅ 7.2-be C5, 7.7-be C9), reports/DEV-2_BACK2_W2.md (✅ 7.1-be C4, 7.3, 7.8-be C6, 7.18 C3), reports/DEV-3_FRONT1_W2_PHASE1.md (✅ 7.6), reports/DEV-5_OPS_W2.md (✅ 7.9). Backend 866/0, Frontend 316/0. |
 | W2 fix-волна — 5 решений заказчика | ✅ завершено | 4 W2_FIX отчёта. Backend 885/0, Frontend 316/0 + 8 PNG drawing tools. |
 | W2 sub-wave 2 — FRONT2 фичи + FRONT1 7.19 + sparkline | ✅ завершено | reports/DEV-3_FRONT1_W2_PHASE2.md (✅ MiniSparkline + 7.19), reports/DEV-4_FRONT2_W2.md (✅ 7.7, 7.8-fe, 7.1-fe, 7.2-fe). Frontend 394/0, Playwright +9 (5 AI + 4 FRONT2). |
-| W3 — UX полировка 7.10 + финальный E2E 7.11 + ARCH 7.R | ⬜ не начат | arch_review_s7.md, ui_checklist_s7.md |
+| W3 — UX полировка 7.10 + финальный E2E 7.11 + ARCH 7.R | ✅ завершено | UX_W3_polish.md, ui_checklist_s7.md, QA_W3_final.md (136/0/3), arch_review_s7.md (PASS WITH NOTES), reports/ARCH_S7_review.md, gotcha-22 + INDEX v5, ФТ v2.4 / ТЗ v1.4 / development_plan, +11 DEFERRED-S8 карточек |
 
 ## Прогресс по задачам
 

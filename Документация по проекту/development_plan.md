@@ -473,34 +473,45 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 
 ---
 
-### СПРИНТ 7: Полировка + Should-фичи (недели 13–14)
+### СПРИНТ 7: Полировка + Should-фичи + AI слэш-команды (недели 13–14) — ✅ ЗАВЕРШЁН (2026-04-26)
 
-**Цель:** Should-функции и финальная полировка UI.
+**Цель:** Should-функции, переносы из S6, AI-команды и финальная полировка UI. **Phase 1 feature-complete.**
 
 > **Примечание v2:** Must-задачи (Bond Service, Corporate Actions, налоговый экспорт) перенесены в S5. В S7 остаются только Should-фичи, приоритизированные по ценности.
+> **Примечание v3 (Sprint_7_ARCH 7.R):** в S7 фактически реализовано 17 рабочих задач + 7.R = 18 задач. Добавлены 7.18 / 7.19 (AI слэш-команды) — отсутствовали в плане v2, добавлены по решению заказчика 2026-04-25.
+> **Корректировка RACI:** 7.1 и 7.12 переназначены с BACK1 на BACK2 (соответствие RACI: Strategy Engine = BACK2 R, Notification Service = BACK2 R).
 
-| # | Задача | Исполнитель | Ревьюер | Зависит от | || |
-|---|---|---|---|---|---|
-| 7.1 | Версионирование стратегий (история версий, откат) | BACK1 + FRONT2 | ARCH | S3 | 7.2 |
-| 7.2 | Grid Search оптимизация параметров (multiprocessing) | BACK1 + FRONT2 | ARCH | S4 | 7.1, 7.3 |
-| 7.3 | Экспорт CSV/PDF бэктеста (WeasyPrint + openpyxl) | BACK2 | ARCH | S4 | 7.2 |
-| ~~7.4~~ | ~~Telegram-команды /close, /closeall, /balance~~ → ✅ сделано в S6 (ARCH follow-up) | — | — | — | — |
-| ~~7.5~~ | ~~Ценовые алерты~~ → ✅ сделано в S6 | — | — | — | — |
-| 7.6 | Инструменты рисования на графике (тренды, уровни, зоны) | FRONT1 | UX, ARCH | S2 (2.6) | 7.7 |
-| 7.7 | Дашборд: виджет баланса, health indicator, sparklines, мини-графики | FRONT1 + FRONT2 | UX, ARCH | S5, S6 | 7.6 |
-| 7.8 | Дисклеймер (first-run wizard, 5 шагов) | FRONT2 + BACK2 | UX, ARCH | S1, S2 | 7.9 |
-| 7.9 | Backup/restore: автоматический бэкап, ротация, CLI восстановление | OPS + BACK1 | ARCH | S1 | 7.8 |
-| 7.10 | UX: финальная полировка UI, консистентность, юзабилити-тест | UX | FRONT1, FRONT2 | S6 | все |
-| 7.11 | E2E-тесты S7: версионирование, экспорт, алерты, wizard | QA | ARCH | 7.1–7.9 | — |
-| **7.12** | **NotificationService singleton через DI** (перенос из S6 Review) — убрать 9 инстансов, использовать `app.state.notification_service` | BACK1 | ARCH | S6 | — |
-| **7.13** | **Подключение 5 event_type к runtime** (перенос из S6): `trade_opened`, `partial_fill`, `order_error`, `all_positions_closed`, `connection_lost/restored` | BACK1 | ARCH, SEC | S6 | — |
-| **7.14** | **Telegram inline-кнопки** (перенос из S6): CallbackQueryHandler для `open_session:{id}` / `open_chart:{id}` | BACK2 | ARCH, SEC | S6 | — |
-| **7.15** | **WS-обновление карточек сессий** (плановая задача): заменить polling 10s на WS-канал | BACK1 + FRONT1 | ARCH | S6 | — |
-| **7.16** | **Интерактивные зоны бэктеста + аналитика** (hover/клик зон + гистограмма P&L + donut Win/Loss) | FRONT1 | ARCH, UX | S4 | — |
-| **7.17** | **Фоновый запуск бэктеста** (кнопка «в фоне», параллельные бэктесты, индикатор в шапке) | BACK1 + FRONT1 | ARCH | S4 | — |
-| **7.R** | **Архитектурное ревью S7 + QA-приёмка + UX-приёмка** | **ARCH + QA + UX** | — | всё | — |
+| # | Задача | Исполнитель (факт) | Ревьюер | Статус |
+|---|--------|--------------------|---------|--------|
+| 7.1 | Версионирование стратегий (история, snapshot, history-preserving откат) | BACK2 + FRONT2 | ARCH | ✅ |
+| 7.2 | Grid Search (multiprocessing.Pool, hard cap 1000, heatmap) | BACK1 + FRONT2 | ARCH | ✅ |
+| 7.3 | Экспорт CSV/PDF бэктеста (WeasyPrint) | BACK2 + OPS | ARCH | ✅ |
+| ~~7.4~~ | ~~Telegram-команды~~ → ✅ сделано в S6 | — | — | — |
+| ~~7.5~~ | ~~Ценовые алерты~~ → ✅ сделано в S6 | — | — | — |
+| 7.6 | Инструменты рисования (5 типов, hotkeys, REST persist) | FRONT1 | UX, ARCH | ✅ |
+| 7.7 | Дашборд-виджеты (Balance + sparkline / Health / ActivePositions) | FRONT2 (+ FRONT1 MiniSparkline, BACK1 C9) | UX, ARCH | ✅ |
+| 7.8 | First-run wizard (5 шагов, gate на дисклеймере) | FRONT2 + BACK2 | UX, ARCH | ✅ |
+| 7.9 | Backup/restore (CLI + APScheduler 03:00 UTC, WAL-aware SQLite) | OPS | ARCH | ✅ |
+| 7.10 | UX финальная полировка + ui_checklist_s7.md | UX | ARCH | ✅ |
+| 7.11 | E2E финальный регресс (136 passed / 0 failed / 3 skipped) | QA | ARCH | ✅ |
+| **7.12** | **NotificationService singleton через DI** (перенос из S6) | BACK2 | ARCH | ✅ |
+| **7.13** | **Подключение 5 event_type к runtime** (MR.5): trade_opened, partial_fill, order_error, connection_lost/restored | BACK1 | ARCH, SEC | ✅ |
+| **7.14** | **Telegram inline-кнопки** (CallbackQueryHandler) | BACK2 | ARCH, SEC | ✅ |
+| **7.15** | **WS-обновление карточек сессий** (`/ws/trading-sessions/{user_id}`) | BACK1 + FRONT1 | ARCH | ✅ |
+| **7.16** | **Интерактивные зоны бэктеста + аналитика** (гистограмма P&L + donut Win/Loss) | FRONT1 | ARCH, UX | ✅ |
+| **7.17** | **Фоновый запуск бэктеста** (cap=3, бейдж, dropdown, WS) | BACK1 + FRONT1 | ARCH | ✅ |
+| **7.18** | **AI слэш-команды backend** (расширение `ChatRequest.context_items`, защита от prompt injection) | BACK2 | ARCH, SEC | ✅ |
+| **7.19** | **AI слэш-команды frontend** (Mantine Combobox dropdown, 5 команд, ContextChip) | FRONT1 | UX, ARCH | ✅ |
+| **7.R** | **Архитектурное ревью S7 + QA-приёмка + UX-приёмка** | **ARCH + QA + UX** | — | ✅ PASS WITH NOTES (2026-04-26) |
 
-**Критерий завершения:** Phase 1 feature-complete. Все Must + реализованные Should функции работают. UX утвердил финальный вид интерфейса.
+**Критерий завершения:** Phase 1 feature-complete. Все Must + реализованные Should функции работают. **M3 Phase 1 достигнут.**
+
+**Финальные тесты S7 (2026-04-26):**
+- Backend pytest: **885 passed / 0 failed**
+- Frontend vitest: **394 passed / 0 failed**, tsc 0 errors
+- Frontend Playwright: **136 passed / 0 failed / 3 skipped** (baseline 119 + 17 новых)
+
+**Stack Gotchas созданы в S7:** #19 (SQLite WAL backup), #20 (FastAPI route ordering), #21 (Grid Search multiprocessing.Pool — UPDATE финальный), #22 (Mantine Combobox.Target testid clone).
 
 > **Приоритизация Should-фич (при нехватке времени отбрасывать снизу):**
 > 1. Версионирование стратегий (7.1)

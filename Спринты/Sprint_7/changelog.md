@@ -10,6 +10,96 @@
 
 ---
 
+## 2026-04-26 — ARCH 7.R — финальное ревью S7 (PASS WITH NOTES)
+
+- **Что:** ARCH-агент завершил финальное ревью Sprint 7 (задача 7.R). Code review всех 17 задач по 8 разделам как в `Sprint_6_Review/code_review.md`. MR.5 (5 event_type → runtime) проверен через grep + чтение кода — все 5 publish-сайтов в production (`engine.py:846/885/1171/1201`, `multiplexer.py:221/244`). C1–C9 контракты подтверждены через grep. Регрессия E2E: 136 passed / 0 failed / 3 skipped (+17 vs S6 baseline 119, 0 failures). Documentация (ФТ v2.4 / ТЗ v1.4 / development_plan) синхронизирована за S7 (правило `feedback_review_docs.md`).
+- **Финальный вердикт:** **PASS WITH NOTES**. M3 Phase 1 feature-complete достигнут.
+- **13 открытых вопросов решены:** 3 FIXED-NOW (gotcha-22 создан, 7.16 testid drift синхронизирован с кодом, документация обновлена), 10 DEFERRED-S8 (карточки в `Sprint_8_Review/backlog.md`). MR.5 — ✅ FIXED (не DEFERRED, не ACCEPT).
+- **Stack Gotchas финал:** создан `gotcha-22-mantine-combobox-target-testid-clone.md` (Mantine `Combobox.Target` через `cloneElement` переписывает `data-testid` дочернего input/textarea). `INDEX.md` обновлён до v5 (last_updated 2026-04-26). Решение — production-код не трогаем (тесты уже адаптированы, e2e-фикс одной строкой сделан в pre-7.R fix-волне).
+- **DEFERRED-S8 (11 новых карточек) в `Sprint_8_Review/backlog.md`:**
+  - medium-high: `S7R-DRAWING-EDITING` (drag/перенос фигур).
+  - medium: `S7R-GRID-HEATMAP-ENTRYPOINT` (≤1 час), `S7R-ORDER-MANAGER-REAL-MODE-COVERAGE`, `S7R-DRAWING-INTRADAY-COORDS`, `S7R-WIDGET-SPARKLINE-24H`, `S7R-WIZARD-TELEGRAM-TEST-BUTTON`.
+  - low: `S7R-FE-LINT-PRE-EXISTING-6`, `S7R-WIDGETS-UNIT-COVERAGE`, `S7R-HEALTH-WS-MIGRATION`, `S7R-MULTICURRENCY-TOGGLE`, `S7R-BG-BACKTEST-AUTOCOLLAPSE`, `S7R-HISTOGRAM-MANTINE-TOOLTIP`.
+  - Ни один не блокирует приёмку Phase 1 / запуск S8.
+- **Документация обновлена:**
+  - **ФТ v2.4** (`functional_requirements.md`): добавлен §19 «Sprint 7 — Should-фичи и завершение Phase 1» с 13 подсекциями (19.1–19.13), запись в истории изменений.
+  - **ТЗ v1.4** (`technical_specification.md`): добавлен §11 «Sprint 7 — реализация Should-фич» с 16 подразделами (11.1–11.16), включая Cross-DEV контракты C1–C9, запись в истории изменений.
+  - **development_plan.md**: Спринт 7 → ✅ ЗАВЕРШЁН, добавлены 7.18 / 7.19, RACI-корректировка (7.1/7.12 → BACK2), указаны финальные тесты и Stack Gotchas S7.
+- **UX-макет 7.16 синхронизирован:** `Sprint_7/ux/backtest_overview_analytics.md` §13 — `data-testid` приведены к коду (`pnl-histogram`, `win-loss-donut`, `trade-detail-panel`); код становится source of truth.
+- **`ui_checklist_s7.md`** (создан UX W3, 193 строки, 9 секций по задачам S7 + общие проверки) — верифицирован, дополнения не потребовались.
+- **`Спринты/project_state.md`** обновлён: S7 → ✅ завершён, M3 Phase 1 feature-complete, новая строка в Promежуточные ревью (Sprint_7_ARCH (7.R) — PASS WITH NOTES), новая строка в Milestones (M3 Phase 1).
+- **Файлы (NEW):** `Sprint_7/arch_review_s7.md` (15 секций, ~440 строк), `Sprint_7/reports/ARCH_S7_review.md` (8-секционная сводка ≤400 слов), `Develop/stack_gotchas/gotcha-22-mantine-combobox-target-testid-clone.md`.
+- **Файлы (MOD):** `Развелop/stack_gotchas/INDEX.md` (v4→v5), `Документация по проекту/{functional_requirements,technical_specification,development_plan}.md`, `Спринты/{project_state,Sprint_7/sprint_state,Sprint_7/changelog}.md`, `Спринты/Sprint_7/ux/backtest_overview_analytics.md`, `Спринты/Sprint_8_Review/backlog.md`.
+- **Production-код в `Develop/backend/app/` или `Develop/frontend/src/` НЕ менялся** ARCH-ом в 7.R — единственная правка в `Develop/` это новый Stack Gotcha файл и обновление INDEX.md (это документация, не runtime-код).
+- **Git:** НЕ коммитил, НЕ пушил (правило `feedback_two_repos.md`). Заказчик коммитит сам в обеих репах (Test и Develop/) по подтверждённым именам веток.
+- **Следующее действие:** Sprint 8 — feature freeze + стабилизация (M4 Production-ready). Целевые работы — Coverage 80%, security audit, performance, регрессия, закрытие 11 DEFERRED-S8 карточек.
+
+---
+
+## 2026-04-26 — Fix-волна перед 7.R: ai-chat.spec.ts data-testid drift
+
+- **Что:** оркестратор устранил единственный failing E2E из QA W3 (7.11) ДО запуска ARCH 7.R.
+- **Root cause:** Mantine `<Combobox.Target>` через `cloneElement` переписывает `data-testid` дочерней `<Textarea>` (gotcha-22 кандидат от FRONT1 PHASE2). Селектор `[data-testid="chat-input"] textarea` в `ai-chat.spec.ts:81` перестал находить textarea после задачи 7.19 (AI слэш-команды).
+- **Правка (1 строка):** `Develop/frontend/e2e/ai-chat.spec.ts:81` — селектор изменён на `[data-testid="ai-chat"] textarea` (внешняя обёртка AIChat хранит `data-testid="ai-chat"`, см. `AIChat.tsx:276`). Production-код НЕ тронут.
+- **Перепрогон:** `npx playwright test e2e/ai-chat.spec.ts` → **4 passed / 1 skipped** (skipped — pre-existing `S6R-AICHAT-APPLY-MOCK`). Было: 3 passed / 1 failed / 1 skipped.
+- **Финальный регресс по Sprint 7:** 135 passed → **136 passed / 0 failed / 3 skipped** (passed +17 vs baseline 119 S6 Review). Теперь регресс чист — ARCH 7.R получает PASS-картину.
+- **gotcha-22 решение:** для ARCH в 7.R остаётся либо создать `Develop/stack_gotchas/gotcha-22-mantine-combobox-target-testid-clone.md`, либо зафиксировать как тестовый паттерн в `e2e/README.md`. Также можно вернуть `data-testid="chat-input"` на корневой `<Combobox>` (не на textarea) — тогда оригинальный селектор будет работать.
+
+---
+
+## 2026-04-26 — QA W3 (7.11) — финальный E2E регресс
+
+- **Что:** QA-агент завершил W3 финальный E2E прогон Sprint 7 (задача 7.11). Полный регресс
+  без фильтров: `cd Develop/frontend && npx playwright test --reporter=line`
+  на свежеподнятом dev-окружении (backend :8000 / frontend :5173 через `restart_dev.sh`).
+  Длительность ~4 мин 54 с.
+- **Результат:** **139 / 135 passed / 1 failed / 3 skipped**. Diff vs baseline 119: **+16 passed**
+  (новые S7-spec'ы: drawing tools 8 + AI commands 5 + FRONT2 4 = 17, минус 1 failing legacy).
+- **Failing (1):** `e2e/ai-chat.spec.ts:68` — regression от 7.19 (Mantine `<Combobox.Target>`
+  через `cloneElement` теряет `data-testid="chat-input"` на дочерней `<Textarea>`).
+  **gotcha-22 кандидат подтверждён в проде**, передан ARCH в 7.R fix-волну.
+  **НЕ лечил production-код** (правило промпта). Spec тоже НЕ правил —
+  оставлено для 7.R вместе с решением по gotcha-22.
+- **Skipped (3):** все pre-existing baseline (`ai-chat.spec.ts:97`, `blockly.spec.ts:86`, `:90`),
+  карточки заведены: `S6R-AICHAT-APPLY-MOCK`, `S5R-BLOCKLY-MODE-B-MODAL`, `S5R-BLOCKLY-MODE-B-CHECK`.
+- **Покрытие S7-задач:** 7.6/7.19 — full; 7.1/7.2/7.7/7.8 — partial smoke;
+  7.12/7.15/7.18 — via S6 baseline regression. **9 задач без новых E2E spec'ов** —
+  карточки `S7R-E2E-7.{3,9,13,14,16,17}-MISSING` + `S7R-AI-CHAT-TESTID-DRIFT`
+  заведены в `Sprint_8_Review/backlog.md`.
+- **Файлы (NEW):** `Спринты/Sprint_7/reports/QA_W3_final.md` (8-секционный отчёт).
+- **Файлы (MOD):** `Спринты/Sprint_8_Review/backlog.md` (+9 карточек),
+  `Спринты/Sprint_7/changelog.md` (эта запись).
+- **Frontend/backend production-код НЕ тронут.** E2E spec'ы НЕ правились.
+- **Передаётся на 7.R fix-волну:** (1) фикс `ai-chat.spec.ts:81` selector,
+  (2) решение по `gotcha-22` (создавать или README-паттерн),
+  (3) приоритезация 9 «NOT COVERED» задач (создавать spec'ы или принять как backend-only).
+
+---
+
+## 2026-04-26 — UX W3 (7.10) — полировка + ui_checklist_s7
+
+- **Что:** UX-агент завершил W3 финальную полировку (задача 7.10): аудит 6 UX-макетов W0
+  vs фактическая реализация фронта по 4 отчётам W1+W2 (DEV-3 W1, W2 PHASE1, PHASE2, DEV-4 W2);
+  зафиксированы deltas (соответствие 80–100% по макетам, ни одного блокера); создан расширенный
+  UI-чеклист `ui_checklist_s7.md` поверх `ui_checklist_s5r.md` с 9 секциями (7.7 / 7.8 / 7.6 /
+  7.16 / 7.17 / 7.19 / 7.1 / 7.2 / 7.15) и общими проверками. Скриншот-сравнение через
+  3 ключевых PNG из `e2e/screenshots/s7/` подтвердило визуальное совпадение с ASCII-mockup'ами
+  (dashboard, drawing toolbar, AI dropdown).
+- **Файлы (NEW):** `Спринты/ui_checklist_s7.md` (расширение S5R чеклиста),
+  `Спринты/Sprint_7/reports/UX_W3_polish.md` (8-секционный отчёт).
+- **Файлы (MOD):** `Спринты/Sprint_7/changelog.md` (эта запись).
+- **Frontend/backend код НЕ тронут** (UX W3 = read-only по коду + write только в Sprint_7/).
+- **Передаётся на 7.R fix-волну** (приоритезированный список из 11 deltas, см. секцию 6 отчёта):
+  HIGH — drawing tools editing/drag (UX §4); MEDIUM — drawing tools intraday TF координаты,
+  ActivePositions sparkline 24h, wizard Telegram test-кнопка, синхронизация data-testid
+  `backtest-pnl-histogram` ↔ `pnl-histogram`, подключение `GridSearchHeatmap` к BackgroundBacktestsBadge;
+  LOW — Health WS migration, multi-currency, auto-collapse done, unit-тесты Health/ActivePositions widgets.
+- **Open вопросы W2** (#6–11) сохраняются для 7.R / S8 (не разрешены UX-агентом).
+- **Результат:** UI-чеклист готов к QA-приёмке S7; deltas задокументированы,
+  ничего блокирующего приёмку не обнаружено.
+
+---
+
 ## 2026-04-26 — DEV-4 (FRONT2) W2 sub-wave 2: задачи 7.7, 7.8-fe, 7.1-fe, 7.2-fe
 
 ### 7.7 — Dashboard widgets (Баланс / Health / Активные позиции)
