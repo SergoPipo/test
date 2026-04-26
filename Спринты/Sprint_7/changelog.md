@@ -10,6 +10,213 @@
 
 ---
 
+## 2026-04-26 — DEV-4 (FRONT2) W2 sub-wave 2: задачи 7.7, 7.8-fe, 7.1-fe, 7.2-fe
+
+### 7.7 — Dashboard widgets (Баланс / Health / Активные позиции)
+- **Что:** на `/dashboard` добавлен `<SimpleGrid cols={{base:1,sm:2,lg:3}}>`
+  с тремя виджетами: BalanceWidget (контракт C9 = `/api/v1/account/balance/history?days=30`,
+  MiniSparkline 30 точек от FRONT1, %-diff за день), HealthWidget (3 строки
+  светофора CB / T-Invest / Scheduler через `/api/v1/health` с graceful
+  degrade на yellow «нет данных» если backend не отдал расширенные поля),
+  ActivePositionsWidget (top-5 сессий по abs(P&L) через
+  `/api/v1/trading/sessions?status=active`, sparkline-плейсхолдер 24h).
+- **Файлы (NEW):** `src/components/dashboard/{BalanceWidget,HealthWidget,
+  ActivePositionsWidget}.tsx`; `src/api/accountApi.ts` (+`getBalanceHistory`).
+- **Файлы (MOD):** `src/pages/DashboardPage.tsx` (виджеты выше списка стратегий).
+- **Тесты:** `BalanceWidget.test.tsx` (4 теста: empty/error/success/days=30).
+- **Результат:** tsc 0 errors, vitest 394 passed (baseline 357 + 37 новых
+  кумулятивно); playwright скриншот `s7-7.7-dashboard.png`.
+
+### 7.8-fe — First-run wizard (5 шагов)
+- **Что:** Mantine `<Modal fullScreen>` с `<Stepper active={n}
+  allowNextStepsSelect={false}>`. Шаги: Старт / Риски / Брокер / Уведомления /
+  Финиш. Шаг 2 — checkbox-gate, без галки «Далее» disabled. Шаг 3 — выбор
+  paper/real (T-Invest disabled, единственная опция S7). Шаг 4 — Telegram
+  (token+chatID), Email (validation), in-app (всегда вкл, disabled).
+  Шаг 5 — `POST /api/v1/users/me/wizard/complete` (контракт C6 fix-волна
+  2026-04-26 = `/users/me/...`, не `/auth/me/...`). Esc/click outside
+  заблокированы.
+- **Файлы (NEW):** `src/api/usersApi.ts` (`getMe`, `completeWizard`),
+  `src/components/wizard/FirstRunWizard.tsx`,
+  `src/components/wizard/FirstRunWizardGate.tsx` (проверяет
+  `wizard_completed_at` через `/users/me`, монтирует модалку при null).
+- **Файлы (MOD):** `src/App.tsx` (`<FirstRunWizardGate />` внутри
+  ProtectedRoute, перед `<AppLayout />`).
+- **Тесты:** `FirstRunWizard.test.tsx` (4: рендер, шаг 2 gate, finish→complete).
+- **Результат:** tsc 0 errors, playwright скриншоты `s7-7.8-wizard-step1.png`,
+  `s7-7.8-wizard-step2-disclaimer.png`. Wizard не показывается повторно
+  после complete (проверено е2е через mock `wizardCompleted: true`).
+
+### 7.1-fe — Versions history drawer (контракт C4)
+- **Что:** на `StrategyEditPage` добавлена кнопка «История» (рядом с
+  «Сохранить»), открывающая `<VersionsHistoryDrawer size="lg" position="right">`.
+  Список версий через `GET /strategy/{id}/versions/list`; per-row бейдж
+  «текущая», кнопки Просмотреть / Diff / Восстановить. Diff делается на
+  фронте через простой line-by-line алгоритм (без `react-diff-viewer-continued`
+  — экономия зависимости). Restore через confirm-modal → `POST /versions/{ver_id}/restore`.
+  Также «Сохранить именованную версию» через `POST /versions/snapshot {comment}`.
+- **Файлы (NEW):** `src/components/strategy/VersionsHistoryDrawer.tsx`.
+- **Файлы (MOD):** `src/api/strategyApi.ts` (+`listVersions`, `getVersionById`,
+  `createNamedSnapshot`, `restoreVersion`, +interfaces `VersionListItem`,
+  `VersionRestoreResponse`); `src/pages/StrategyEditPage.tsx` (кнопка + Drawer).
+- **Тесты:** `VersionsHistoryDrawer.test.tsx` (5: load list, badge «текущая»,
+  diff disabled у current, restore disabled у current, restore→confirm→POST).
+- **Результат:** tsc 0 errors; playwright скриншот `s7-7.1-versions-drawer.png`.
+
+### 7.2-fe — Grid Search modal (контракт C5)
+- **Что:** на `StrategyEditPage` кнопка «Grid Search» открывает
+  `<GridSearchModal>` → `<GridSearchForm>`. Поля: тикер, таймфрейм,
+  даты, начальный капитал; динамические параметры (1–5) с
+  comma-separated values. Real-time `total = product(len(values))`:
+  green ≤200, yellow 201–1000, red >1000 (submit disabled).
+  POST `/api/v1/backtest/grid` → `{job_id, total}` → push в общий
+  `backgroundBacktestsStore` от FRONT1 (job в badge подхватывается
+  WS `/ws/backtest/{job_id}` через `useBackgroundBacktestsBootstrap`).
+  Heatmap: 1 параметр → bar chart, 2 → 2D heatmap (gradient red→white→green
+  по выбранной метрике), 3+ → таблица с sortable columns + heatmap по
+  первым 2. Tooltip ячейки: P&L / Win Rate / Drawdown / Trades.
+  При `overfitting_warning=true` — alert «Возможный overfitting».
+- **Файлы (NEW):** `src/components/backtest/{GridSearchForm,GridSearchModal,
+  GridSearchHeatmap}.tsx`; `src/api/backtestApi.ts` (+`startGridSearch`,
+  +interfaces `GridSearchRequest`, `GridJobResponse`, `GridMatrixCell`,
+  `GridResult`).
+- **Файлы (MOD):** `src/pages/StrategyEditPage.tsx` (кнопка + modal).
+- **Тесты:** `GridSearchForm.test.tsx` (12 тестов: parseRangeValues,
+  calcTotal, totalSeverity hard cap).
+- **Результат:** tsc 0 errors; playwright скриншот `s7-7.2-grid-search.png`.
+
+### Общие итоги W2 sub-wave 2 (DEV-4)
+- **tsc:** `npx tsc --noEmit` → 0 errors.
+- **vitest:** `pnpm test` → **394 passed** (baseline 357 + 37 новых).
+- **playwright:** `npx playwright test e2e/s7-front2.spec.ts` → **4/4 passed**,
+  6 скриншотов в `e2e/screenshots/s7/`.
+- **Контракты подтверждены:** C4 (versions), C5 (grid), C6 (wizard через
+  `/users/me`), C9 (balance/history) — все URL grep'нуты по backend
+  и совпадают с реализованным фронтом.
+- **Координация с FRONT1:** `MiniSparkline.tsx` уже был опубликован к
+  моменту BalanceWidget — переиспользован 1:1 (props `data`, `color`,
+  `width`, `height`, `ariaLabel`, `data-testid`).
+- **Pre-existing 6 lint errors** (`CandlestickChart`, `SessionDashboard`,
+  `ChartPage`, `ProfileSettingsPage`, `priceAlertStore`) НЕ ТРОГАЛИСЬ.
+
+---
+
+## 2026-04-26 — FRONT1 PHASE2 (Блок 2): задача 7.19 AI слэш-команды
+
+- **Что:** реализован полный фронтенд-стек AI слэш-команд (контракт C3
+  потребитель). 5 команд: `/chart TICKER [TF]`, `/backtest ID`,
+  `/strategy ID`, `/session ID`, `/portfolio` (без аргумента). Парсинг
+  локально на фронте, в backend отправляется `context_items: list[ChatContextItem]`
+  (новое поле, см. `Develop/backend/app/ai/chat_schemas.py`); legacy
+  `context: dict | None` сохранён без изменений (используется блок-режимом
+  стратегии).
+- **Компоненты:**
+  - `parseCommand` — парсер с поддержкой множественного контекста
+    (`/chart SBER /backtest 42 сравни...` → 2 contextItems + remainder),
+    валидацией id (int positive для backtest/strategy/session, ticker regex
+    для chart), фильтрацией невалидных аргументов в remainder.
+  - `CommandsDropdown` (Mantine `<Combobox>`) — открывается при `/`
+    в начале строки или после whitespace; фильтрация по префиксу
+    (`/cha` → только `/chart`); ↑/↓/Enter/Tab/Esc keyboard; **IME
+    composition guard** (compositionstart/end) — НЕ открывает dropdown
+    во время русского ввода с диакритикой (UX §12).
+  - `ContextChip` — Mantine `<Badge variant="light"
+    leftSection={<icon />}>` с навигацией react-router; статусы
+    `ok|forbidden|not_found` (UX §6) — красный chip с tooltip при
+    ownership-ошибке backend'а.
+  - Render `[CONTEXT]...[/CONTEXT]` в assistant-ответе → collapsible
+    «Контекст» (default closed) с monospace-блоком (defense-in-depth
+    от echo backend'а).
+- **Файлы (NEW):**
+  - `Develop/frontend/src/components/ai/parseCommand.ts`
+  - `Develop/frontend/src/components/ai/CommandsDropdown.tsx`
+  - `Develop/frontend/src/components/ai/commandsDropdownHelpers.ts`
+    (вынесено: `useCaretAndComposition` + `dropdownKeyAction` —
+    react-refresh требует чисто-компонентных файлов)
+  - `Develop/frontend/src/components/ai/ContextChip.tsx`
+  - Tests: `parseCommand.test.ts` (34), `CommandsDropdown.test.tsx` (6),
+    `ContextChip.test.tsx` (8)
+  - E2E: `Develop/frontend/e2e/s7-ai-commands.spec.ts` (5 кейсов) +
+    5 PNG в `e2e/screenshots/s7/s7-7.19-*.png`.
+- **Файлы (MOD):**
+  - `Develop/frontend/src/components/ai/ChatInput.tsx` — обёрнут в
+    `CommandsDropdown`, добавлен IME composition handling.
+  - `Develop/frontend/src/components/ai/AIChat.tsx` — рендер
+    `ContextChip` в user-сообщениях, `splitContextBlocks` + `Collapse`
+    для assistant-ответа.
+  - `Develop/frontend/src/api/aiApi.ts` — новое поле
+    `context_items?: ChatContextItem[]` в `ChatMessagePayload` (legacy
+    `context?: object` сохранён).
+  - `Develop/frontend/src/services/aiStreamClient.ts` — параметр
+    `contextItems` в `streamChat()`, прокинут в SSE body как
+    `context_items`.
+  - `Develop/frontend/src/stores/aiChatStore.ts` — `parseCommand`
+    в `sendMessage` и `sendMessageStream`, `ChatMessage.contextItems`
+    для рендера chip'ов в истории.
+  - `Develop/frontend/src/components/ai/__tests__/ChatInput.test.tsx` —
+    адаптирован: `getTextarea()` через `document.querySelector('textarea')`
+    (Combobox.Target переписывает data-testid на dropdown).
+- **Тесты:** `pnpm test --run` → **371 passed / 0 failed (65 files)**
+  (baseline 316, +55 новых: 7 MiniSparkline + 34 parseCommand + 6
+  CommandsDropdown + 8 ContextChip + переадаптация ChatInput).
+- **Type-check:** `npx tsc --noEmit` → **0 errors**.
+- **Lint:** проходит на новых файлах; 10 pre-existing baseline ошибок
+  (S7.R) не тронуты.
+- **Playwright E2E:** `npx playwright test e2e/s7-ai-commands.spec.ts`
+  → **5 passed / 0 failed (7.3s)**. Скриншоты:
+  - `s7-7.19-dropdown-open.png` — dropdown с 5 командами.
+  - `s7-7.19-filter-chart.png` — фильтрация `/cha` → /chart.
+  - `s7-7.19-chip-in-message.png` — `/chart SBER` → chip в чате.
+  - `s7-7.19-multi-chips.png` — два контекста в одном сообщении.
+  - `s7-7.19-portfolio-chip.png` — `/portfolio` без аргумента.
+- **Stack Gotcha кандидат (новая):** Mantine `Combobox.Target`
+  `cloneElement` переписывает `data-testid` дочернего input'а на
+  `data-testid` самого popover (`ai-chat-slash-popover`). В тестах
+  это ловится `getByTestId('chat-input')` → undefined. Workaround:
+  получать textarea через `document.querySelector('textarea')`.
+  Будет вынесено в `gotcha-22-mantine-combobox-target-clone.md`
+  при ARCH-ревью.
+- **Контракт C3 (потребитель):** payload `POST /api/v1/ai/chat`
+  и `POST /api/v1/ai/chat/stream` теперь содержит
+  `context_items: [{type, id}, ...]` (точное имя поля; backend
+  `chat_schemas.py:48`). Legacy `context: dict` оставлен без изменений.
+- **Координация с FRONT2:** FRONT2 успел подцепить `MiniSparkline`
+  в `dashboard/BalanceWidget.tsx` ещё до старта Блока 2 — параллельная
+  работа без конфликтов.
+
+---
+
+## 2026-04-26 — FRONT1 PHASE2 (Блок 1): MiniSparkline опубликован для FRONT2
+
+- **Что:** создан компонент `MiniSparkline` для виджетов дашборда S7 7.7
+  (саппорт FRONT2). Чистый SVG, без зависимости от lightweight-charts.
+- **Контракт компонента:**
+  ```ts
+  export interface MiniSparklineProps {
+    data: number[];
+    color?: 'green' | 'red' | string;  // default — var(--mantine-color-blue-6)
+    width?: number;   // default 120
+    height?: number;  // default 40
+    ariaLabel?: string;  // обязательно для prod
+    'data-testid'?: string;
+  }
+  ```
+- **Поведение:** пустой data → пустой SVG (no crash); 1 элемент →
+  горизонтальная линия; ≥2 элементов → polyline с нормализацией min..max →
+  0..height; все одинаковые значения → горизонтальная линия (range=0 fallback).
+- **Файлы (NEW):**
+  - `Develop/frontend/src/components/charts/MiniSparkline.tsx`
+  - `Develop/frontend/src/components/charts/__tests__/MiniSparkline.test.tsx`
+    (7 тестов: empty / 1 point / multi-points / range=0 / colors / a11y / size)
+- **Тесты:** `pnpm test src/components/charts/__tests__/MiniSparkline.test.tsx
+  --run` → **7 passed / 0 failed**.
+- **Type-check:** `npx tsc --noEmit` → 0 errors.
+- **Координация с FRONT2:** компонент опубликован в начале PHASE2, FRONT2
+  может импортировать `import { MiniSparkline } from
+  '../charts/MiniSparkline'` для виджета «Баланс» и «Активные позиции» (7.7).
+
+---
+
 ## 2026-04-26 — Fix-волна BACK1: Grid Search → multiprocessing.Pool
 
 - **Что:** заказчик потребовал переделать Grid Search с
