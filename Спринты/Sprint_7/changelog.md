@@ -10,6 +10,18 @@
 
 ---
 
+## 2026-04-26 — Hotfix после S7 closeout: ActivePositionsWidget runtime crash
+
+- **Симптом:** заказчик открыл `http://localhost:5173` после `restart_dev.sh` — пустой экран («что-то мигает и потом просто пустой»). frontend.log показал `TypeError: sessions.filter is not a function (in ActivePositionsWidget.tsx:42)` — крашит весь дашборд (нет ErrorBoundary вокруг виджетов).
+- **Root cause:** type/runtime mismatch. Backend `GET /api/v1/trading/sessions` возвращает `PaginatedResponse {items: [...], total, ...}` (см. `app/trading/router.py:list_sessions(response_model=PaginatedResponse)`), а frontend `src/api/tradingApi.ts:17` декларирует возврат `TradingSession[]` (массив). TS не отловил, потому что аннотация ложная. FRONT2 в W2 sub-wave 2 написал `setSessions(r.data)` доверившись типу — на runtime `r.data` это объект без `.filter`.
+- **Минимальный fix (1 файл, defensive):** `ActivePositionsWidget.tsx:76-83` — добавлено `Array.isArray(data) ? data : data.items ?? []` (учитывает оба формата). Production-код `tradingApi.ts` НЕ тронут (если поправить тип — может сломать другие use cases в `TradingPage`/`SessionList`).
+- **Файлы (MOD):** `Develop/frontend/src/components/dashboard/ActivePositionsWidget.tsx` (1 функция).
+- **Проверка:** `npx tsc --noEmit` → 0 errors. Перезагрузка `http://localhost:5173` через Playwright — UI рендерится: 3 виджета (Баланс 200 000 ₽, Health, ActivePositions LKOH +17 ₽ / SBER +6 ₽), таблица стратегий, FirstRunWizard поверх (для нового юзера). 13 errors 401 в console — Playwright без cookie, на залогиненном sergopipo норма.
+- **Замечание (для S8):** аналогичная проблема может повториться везде, где frontend type декларирует массив, а backend отдаёт PaginatedResponse. Кандидат на gotcha-23 «PaginatedResponse vs T[] type mismatch» + audit всех api/*.ts. Карточка S7R-API-PAGINATED-TYPE-MISMATCH рекомендуется в `Sprint_8_Review/backlog.md` (заказчик решает уровень приоритета).
+- **Не закоммичено** — заказчик коммитит сам (правило `feedback_two_repos.md`).
+
+---
+
 ## 2026-04-26 — ARCH 7.R — финальное ревью S7 (PASS WITH NOTES)
 
 - **Что:** ARCH-агент завершил финальное ревью Sprint 7 (задача 7.R). Code review всех 17 задач по 8 разделам как в `Sprint_6_Review/code_review.md`. MR.5 (5 event_type → runtime) проверен через grep + чтение кода — все 5 publish-сайтов в production (`engine.py:846/885/1171/1201`, `multiplexer.py:221/244`). C1–C9 контракты подтверждены через grep. Регрессия E2E: 136 passed / 0 failed / 3 skipped (+17 vs S6 baseline 119, 0 failures). Documentация (ФТ v2.4 / ТЗ v1.4 / development_plan) синхронизирована за S7 (правило `feedback_review_docs.md`).
