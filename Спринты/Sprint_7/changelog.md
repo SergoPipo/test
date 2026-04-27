@@ -10,6 +10,89 @@
 
 ---
 
+## 2026-04-27 — Wizard step 4 redesign: data-saving + правильная Telegram-привязка (вариант B2)
+
+- **Триггер:** заказчик 2026-04-27 явно потребовал, чтобы данные с шага 4 wizard'а сохранялись (см. memory `project_wizard_notifications_save.md`). Расследование выявило, что задача S7 7.8-fe была сделана с архитектурным расхождением: фронтенд просил `bot_token` + `chat_id` руками, но бэкенд endpoint `POST /api/v1/users/me/wizard/complete` body вообще не принимал и payload игнорировал. Кроме того сам подход «вводить bot_token руками» противоречит S6 архитектуре (bot_token — global config из `Settings.TELEGRAM_BOT_TOKEN`, chat_id появляется через flow привязки бота `link-token` → `/start <code>` → webhook).
+- **Решение (вариант B2 из развилки B1/B2/B3):** переделать UI шага 4 wizard'а под правильную S6-архитектуру + расширить backend endpoint для сохранения email.
+
+### Backend изменения
+
+- **`app/users/schemas.py`**: добавлен `WizardCompleteRequest` (опциональное body endpoint'а) с полем `email: str | None`. Валидация через `field_validator` + regex (синхронизирован с frontend `isEmail`). Намеренно НЕ используется `pydantic.EmailStr`, чтобы не тянуть новую зависимость `email-validator`. Telegram `bot_token`/`chat_id` поля **не принимаются** — детальный комментарий в docstring объясняет почему (см. ниже). `WizardCompleteResponse` дополнен полем `email: str | None`, чтобы фронтенд видел сохранённое значение.
+- **`app/users/router.py`**: endpoint `complete_wizard(...)` теперь принимает опциональный `payload: WizardCompleteRequest | None = None`. Если передан и `payload.email is not None` — обновляется `user.email`. Идемпотентность контракта C6 сохранена: пустой POST по-прежнему работает (только timestamp, как раньше).
+- **`tests/unit/test_users/test_wizard.py`**: добавлено 3 теста (всего 8/8 passed):
+  - `test_complete_wizard_with_email_updates_users_email` — POST `{email: ...}` обновляет `users.email` и возвращает в ответе.
+  - `test_complete_wizard_invalid_email_rejected` — невалидный email → 422 (Pydantic validator).
+  - `test_complete_wizard_without_email_keeps_existing` — повторный вызов без body не затирает ранее установленный email.
+
+### Frontend изменения
+
+- **`api/types.ts`**: исправлено рассогласование типов `TelegramLinkToken.expires_at: string` → `expires_in: number` (backend возвращает TTL в секундах, не timestamp). Тип теперь соответствует реальному `TelegramLinkTokenResponse` из `app/notification/schemas.py`.
+- **`api/usersApi.ts`**: упрощён `WizardCompletePayload` до `{email?: string}`. Removed легаси-поля `broker`, `mode`, `notifications.telegram.bot_token`, `notifications.telegram.chat_id`, `notifications.email` — они никогда не использовались backend'ом (zombie-payload). `WizardCompleteResponse` дополнен `email?: string | null`.
+- **`components/wizard/FirstRunWizard.tsx`** — переделан шаг 4:
+  - **Telegram-блок:** убраны `<PasswordInput>` для bot_token и `<TextInput>` для chat_id. Заменены на:
+    - При первом показе шага 4 — `useEffect` запрашивает `notificationApi.getTelegramStatus()` и `usersApi.getMe()`.
+    - Если `linked: true` — показывается зелёный `<Badge>Подключено</Badge>` + текущий chat_id + кнопка «Отвязать» (вызов `notificationApi.unlinkTelegram()`).
+    - Если `linked: false` — кнопка «Привязать Telegram» (вызов `notificationApi.getLinkToken()` → backend endpoint `POST /notifications/telegram/link-token` → ответ `{token, bot_username, expires_in}`).
+    - После получения токена — показывается `<Alert>` с инструкцией: «Откройте бота `@{bot_username}` и отправьте: `/start {token}`. Код действует N мин.» + полл `getTelegramStatus` каждые 3 сек до получения `linked: true`. На успех — toast «Telegram успешно привязан» + переход в состояние «Подключено». Кнопка «Сгенерировать новый код» если истёк.
+  - **Email-блок:** убран `<Checkbox>` «Email» (больше не опциональный — теперь это просто отображение/правка существующего значения):
+    - При показе шага 4 — подтягивается текущий `users.email` через `usersApi.getMe()`.
+    - `<TextInput>` с label «Текущий адрес (можно изменить)» / «Укажите адрес» (если был null), pre-filled значением. Валидация — `isEmail` regex.
+    - Если значение изменилось относительно `emailInitial` — показывается подсказка «Будет обновлено: `<old>` → `<new>`».
+  - **`buildPayload`** — теперь возвращает `{}` если email не менялся, иначе `{email: <new>}`. Никаких telegram/broker/mode/notifications полей (zombie removed).
+  - **`canNext`** — обновлён: на шаге 4 «Далее» disabled если введённый email невалиден (раньше было только при `emailEnabled && !emailValid`).
+  - **Шаг 5 summary** — поправлен: `tgEnabled ? ', Telegram'` → `tgLinked ? ', Telegram'`, `emailEnabled` → `emailValue` (показывает Telegram если реально привязан, Email если адрес есть).
+- **`components/wizard/__tests__/FirstRunWizard.test.tsx`**: переписан под новый API. Добавлены 4 новых теста (всего 8/8 passed):
+  - подтягивание email + Telegram статуса при первом показе шага 4
+  - кнопка «Привязать Telegram» вызывает `getLinkToken` и показывает инструкцию
+  - невалидный email блокирует «Далее»
+  - finish с изменённым email отправляет `{email: '...'}` в payload
+  - finish без изменения email отправляет пустой `{}`
+- **Mock в тестах** дополнен: `usersApi.getMe`, `notificationApi.getTelegramStatus`, `getLinkToken`, `unlinkTelegram`.
+
+### Архитектурное обоснование (почему bot_token НЕ хранится per-user)
+
+В коде S6 видно:
+- `bot_token` берётся из `Settings.TELEGRAM_BOT_TOKEN` (env-переменная инстанса) — это **один бот** на всё приложение.
+- `chat_id` появляется в таблице `telegram_links` автоматически: пользователь жмёт «Привязать», получает 6-значный код через `LinkTokenStore` (in-memory, TTL=5 мин), отправляет боту `/start <code>`, webhook ловит chat_id из callback'а Telegram API и пишет связку `user_id ↔ chat_id`.
+- Wizard ввод `bot_token` руками создавал бы фантомную модель «у каждого юзера свой бот», противоречащую реализации.
+
+После переделки wizard использует тот же flow, что и `Settings → Уведомления` (S6 DEV-2). Никакого дублирования кода — просто переиспользование существующих endpoint'ов через `notificationApi`.
+
+### Verification (локально)
+
+- **Backend:** `ruff check .` — All checks passed. `mypy app/ --ignore-missing-imports` — Success: no issues found in 141 source files. `pytest tests/ -q` — **888 passed / 0 failed** (+3 wizard email tests).
+- **Frontend:** `pnpm lint` — exit 0, 0 errors / 10 warnings (warnings pre-existing, не валят CI). `pnpm tsc --noEmit` — 0 errors. `pnpm vitest run` — **398 passed / 0 failed** (+4 wizard tests).
+- **Dev-окружение перезапущено** через `./restart_dev.sh` (PID backend 93984, frontend 93985), backend healthcheck 200 OK.
+- **Playwright скриншоты** wizard step 4 сделаны (3 состояния):
+  - `Develop/frontend/e2e/screenshots/s7/wizard-step4-telegram-linked.png` — Telegram уже привязан, badge «Подключено» + чат ID + кнопка «Отвязать», email pre-filled из `users.email`.
+  - `Develop/frontend/e2e/screenshots/s7/wizard-step4-telegram-default.png` — Telegram не привязан, кнопка «Привязать Telegram» + email pre-filled.
+  - `Develop/frontend/e2e/screenshots/s7/wizard-step4-telegram-link-token.png` — после клика «Привязать»: показан 6-значный код, инструкция «Откройте бота `@moex_terminal_bot` и отправьте: `/start <code>`», TTL 5 мин, polling статуса.
+  - **NB:** PNG в `.gitignore` (правило handoff раздел 6 п.7), не коммитятся в репу — только для локальной верификации.
+  - Для скриншотов был временно сброшен `users.wizard_completed_at` для `sergopipo` через SQL (`UPDATE ... SET wizard_completed_at = NULL`), сразу после скриншотов восстановлено точное предыдущее значение (`2026-04-27 19:53:27.687895`) — production-данные пользователя не изменились.
+
+### Изменённые файлы
+
+**Develop/ (8 mod + 0 new):**
+- `backend/app/users/schemas.py` — `WizardCompleteRequest` schema + email в `WizardCompleteResponse`
+- `backend/app/users/router.py` — endpoint принимает body, обновляет `users.email`
+- `backend/tests/unit/test_users/test_wizard.py` — +3 теста (5 → 8)
+- `frontend/src/api/types.ts` — fix `TelegramLinkToken.expires_in`
+- `frontend/src/api/usersApi.ts` — упрощён `WizardCompletePayload`, дополнен `WizardCompleteResponse.email`
+- `frontend/src/components/wizard/FirstRunWizard.tsx` — переделан шаг 4 (Telegram link-flow + Email из profile)
+- `frontend/src/components/wizard/__tests__/FirstRunWizard.test.tsx` — +4 теста (4 → 8)
+
+### Закрывает требование заказчика
+
+> «Если пользователь на этом визарде указывает сведения для почты или для подключения Telegram, конечно же их нужно сохранять в настройках» (2026-04-27)
+
+Email теперь сохраняется в `users.email` (поле и в БД, и в /me ответе). Telegram привязывается через S6 flow — chat_id попадает в `telegram_links` через webhook бота, как и должно быть.
+
+### Не закоммичено
+
+Оркестратор коммитит сам, ветки спрашиваются отдельно для двух реп (`feedback_two_repos.md`).
+
+---
+
 ## 2026-04-27 — CI ZIеленый, run #24999043671 ✅ (после 3 попыток backend install)
 
 После основной волны (см. запись ниже) понадобилось ещё 2 итерации патча `ci.yml`, чтобы `pip install -e .[dev]` заработал на чистой Ubuntu CI среде. Локально работает с первого раза через `pip install --no-deps tinkoff-investments` потому что pip 26 не пересматривает уже satisfied пакет; в CI же pip каждый раз заново скачивает git+url из spec'а нашего pyproject и снова резолвит broken transitive `tinkoff = "^0.1.1"`.
