@@ -219,3 +219,23 @@
 - **Симптом:** ночью биржа MOEX закрыта (~19:00–10:00 МСК + выходные). T-Invest всё равно держит соединение, но регулярно разрывает по idle/lifecycle. `connection.lost`/`connection.restored` уведомления в это время — некритичны, пользователь не торгует.
 - **Что сделать на S8:** в `NotificationService._broker_status_loop` (или в `multiplexer._publish_connection_event`) проверять MOEX-календарь через `app/scheduler/calendar.py` (или эквивалент). Если биржа закрыта — пропускать publish (но логировать в backend.log на debug). Cooldown 15 мин остаётся как defense-in-depth.
 - **Приоритет:** low (cooldown 15 мин уже сильно сглаживает, market-closed filter — улучшение качества).
+
+### S7R-CI-NODE24-MIGRATION — миграция GitHub Actions на Node.js 24
+
+- **Источник:** Sprint 7, CI hotfix 2026-04-27, run #24999043671 annotations.
+- **Симптом:** GitHub Actions выводит warning на каждом run: `Node.js 20 actions are deprecated. The following actions are running on Node.js 20: actions/checkout@v4, actions/setup-python@v5, actions/setup-node@v4, pnpm/action-setup@v4. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Node.js 20 will be removed from the runner on September 16th, 2026.`
+- **Что сделать на S8:**
+  1. Проверить, есть ли версии используемых actions с поддержкой Node 24 (например, `actions/checkout@v5`, `actions/setup-python@v6`, и т.п.) — обновить в `Develop/.github/workflows/ci.yml` и `playwright-nightly.yml`.
+  2. Если новых версий ещё нет — добавить `env: FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'` на уровне workflow и проверить, что всё работает.
+  3. После 2026-06-02 — Node 24 станет default; до 2026-09-16 ещё можно временно опт-аутить через `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true`, после этой даты — обязательно мигрировать.
+- **Приоритет:** low (deadline 2026-09-16, до тех пор только warnings; функционально CI работает). Удобно сделать вместе с другими CI-улучшениями.
+
+### S7R-FE-LINT-WARNINGS-CLEANUP — 10 frontend lint warnings (react-hooks)
+
+- **Источник:** Sprint 7, CI hotfix 2026-04-27 (см. `Sprint_7/changelog.md`). После фикса 16 errors остались 10 warnings — не валят CI, но накапливаются и зашумляют annotations.
+- **Симптом:** `pnpm lint` выдаёт 10 warnings:
+  - `react-hooks/exhaustive-deps` (×8): `BlocklyWorkspace.tsx:187, 218`, `CandlestickChart.tsx:573`, `StrategyEditPage.tsx:247`, `GridSearchHeatmap.tsx:88`, `AIChat.tsx:203`, `DrawingsLayer.tsx:249` (priceLinesRef stale), `StrategyTesterPanel.tsx:162` (seriesRefs stale).
+  - `react-hooks/refs` (косвенно через cleanup, в DrawingsLayer и StrategyTesterPanel — те же 2 строки выше).
+- **Что сделать на S8:** пройти по каждому warning'у, либо включить отсутствующую dependency в массив deps, либо обернуть колбэки в `useCallback` где нужно, либо добавить осознанный `// eslint-disable-next-line react-hooks/exhaustive-deps -- <причина>`. Для stale ref'ов в cleanup — копировать `.current` в локальную переменную внутри effect, как советует ESLint.
+- **Дополнительно:** включить `--max-warnings 0` в `frontend/package.json` lint-скрипте, чтобы CI блокировал любые НОВЫЕ warnings (предотвращение регрессии).
+- **Приоритет:** low. Не валит CI, не блокирует фичи. Удобно сделать одной волной с `S7R-CI-NODE24-MIGRATION` как «CI gardening» в S8.
