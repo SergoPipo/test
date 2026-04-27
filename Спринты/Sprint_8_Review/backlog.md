@@ -176,3 +176,42 @@
 - **Симптом:** `PnLDistributionHistogram` использует нативный `title` для tooltip'а bar'а. UX-макет рекомендует Mantine `<Tooltip>` для консистентности.
 - **Что сделать:** замена + проверка a11y (aria-describedby).
 - **Приоритет:** low.
+
+---
+
+## Sprint 7 — Hotfix-карточки 2026-04-27 (post-S7 closeout)
+
+> Карточки заведены оркестратором по итогам двух production-bug'ов, обнаруженных заказчиком после закрытия S7. Hotfix'ы применены defensive-уровнем (виджет / NS cooldown), архитектурные правки — DEFERRED-S8.
+
+### S7R-MULTIPLEXER-SINGLETON — TInvestStreamMultiplexer не singleton
+
+- **Источник:** Sprint 7, hotfix 2026-04-27 «спам Telegram-уведомлений `connection_restored` за ночь» (см. `Sprint_7/changelog.md` запись от 2026-04-27).
+- **Симптом:** `TInvestStreamMultiplexer` создаётся per-`TInvestAdapter` (`Develop/backend/app/broker/tinvest/adapter.py:724`). При нескольких adapter'ах в системе (например, для свечей в `MarketDataService` + для торговли в `TradingService`) запускается несколько `_run_stream` циклов. Каждый имеет свой `_connection_event_published` флаг → каждый publish'ит свою пару `connection.lost`/`connection.restored` независимо → дубликаты на `event_bus`. На ночном reconnect-storm T-Invest (соединение разрывается ~1 раз/мин в нерабочие часы) пользователь получил **до 2880 Telegram-сообщений за ночь**.
+- **Текущая защита (hotfix 2026-04-27):** cooldown 15 мин в `NotificationService._broker_status_loop` (см. `_broker_event_cooldown_sec`). Закрывает симптом, но не root cause.
+- **Что сделать на S8:** сделать `TInvestStreamMultiplexer` singleton в `app.state.tinvest_multiplexer`, share между всеми `TInvestAdapter`. Lifespan создаёт/закрывает один экземпляр. Флаг `_connection_event_published` гарантированно один.
+- **Приоритет:** medium. Cooldown работает как defense-in-depth, но архитектурно multiplexer должен быть singleton (как описано в Gotcha 4 для S6 DEV-5: «единственный persistent gRPC stream на весь адаптер» — но требование не распространено на «весь процесс»).
+
+### S7R-API-PAGINATED-TYPE-MISMATCH — type/runtime mismatch в api-клиентах
+
+- **Источник:** Sprint 7, hotfix 2026-04-26 «ActivePositionsWidget runtime crash» (см. `Sprint_7/changelog.md` запись от 2026-04-26 после S7 closeout).
+- **Симптом:** `tradingApi.getSessions` (`Develop/frontend/src/api/tradingApi.ts:17`) декларирует возврат `TradingSession[]`, но backend `GET /api/v1/trading/sessions` возвращает `PaginatedResponse {items, total, ...}` (см. `Develop/backend/app/trading/router.py:list_sessions(response_model=PaginatedResponse)`). TS не отловил — ложная аннотация. FRONT2 в W2 sub-wave 2 написал `setSessions(r.data)` доверившись типу — на runtime `r.data.filter is not a function` крашит весь дашборд.
+- **Текущая защита (hotfix):** defensive guard в `ActivePositionsWidget.tsx:76-83` (`Array.isArray(data) ? data : data.items ?? []`).
+- **Что сделать на S8:**
+  1. **Audit всех `Develop/frontend/src/api/*.ts`** — найти все `apiClient.get<X[]>` для endpoint'ов, у которых backend `response_model=PaginatedResponse`. Привести типы к реальности (`Promise<{ data: PaginatedResponse<X> }>`).
+  2. **Поправить вызывающий код** — заменить `r.data` на `r.data.items` (или адаптер).
+  3. Опционально: создать `Develop/stack_gotchas/gotcha-23-api-paginated-type-mismatch.md` для будущих DEV.
+- **Приоритет:** medium-high. Аналогичные runtime-crash могут быть в других виджетах/страницах. ErrorBoundary вокруг top-level routes (как минимум) — отдельная карточка S7R-FRONTEND-ERROR-BOUNDARY-MISSING.
+
+### S7R-FRONTEND-ERROR-BOUNDARY-MISSING — нет ErrorBoundary вокруг страниц
+
+- **Источник:** Sprint 7, hotfix 2026-04-26 «ActivePositionsWidget runtime crash».
+- **Симптом:** runtime-ошибка в одном виджете (ActivePositionsWidget) уронила всю страницу `/dashboard` — пустой экран, мигание. React не имеет ErrorBoundary вокруг роутов / виджетов.
+- **Что сделать на S8:** добавить `<ErrorBoundary>` в `App.tsx` вокруг `<Routes>` (top-level fallback) + `<ErrorBoundary>` вокруг каждого виджета на `DashboardPage` (graceful degrade — один сломанный виджет не валит остальные).
+- **Приоритет:** medium. Защита от любых будущих runtime-багов в UI.
+
+### S7R-CONNECTION-EVENTS-MARKET-CLOSED — не публиковать в нерабочие часы
+
+- **Источник:** Sprint 7, hotfix 2026-04-27.
+- **Симптом:** ночью биржа MOEX закрыта (~19:00–10:00 МСК + выходные). T-Invest всё равно держит соединение, но регулярно разрывает по idle/lifecycle. `connection.lost`/`connection.restored` уведомления в это время — некритичны, пользователь не торгует.
+- **Что сделать на S8:** в `NotificationService._broker_status_loop` (или в `multiplexer._publish_connection_event`) проверять MOEX-календарь через `app/scheduler/calendar.py` (или эквивалент). Если биржа закрыта — пропускать publish (но логировать в backend.log на debug). Cooldown 15 мин остаётся как defense-in-depth.
+- **Приоритет:** low (cooldown 15 мин уже сильно сглаживает, market-closed filter — улучшение качества).

@@ -10,6 +10,29 @@
 
 ---
 
+## 2026-04-27 — Hotfix: спам Telegram-уведомлений «Соединение с T-Invest восстановлено»
+
+- **Симптом:** заказчик за ночь получил множество Telegram-сообщений `connection_restored` (всю ночь). Утром 2026-04-27 спам прекратился, но ущерб «notification fatigue» нанесён.
+- **Расследование** (через `/tmp/moex-dev-logs/backend.log`, 410 МБ за сутки):
+  - Каждое событие приходит **парой** через ~300-400 ms (например `05:56:52,288` и `05:56:52,698`).
+  - `connection.lost` тоже дублируется в каждом цикле reconnect.
+  - T-Invest ночью реально разрывает соединение каждые ~1 мин (`UNAVAILABLE: recvmsg:Connection reset by peer`, `CANCELLED: Received RST_STREAM with error code 8`) — это норма для нерабочих часов биржи.
+  - Расчёт: 12 часов × ~60 циклов/час × 2 publish'а × 2 события = **до 2880 Telegram-сообщений за ночь**.
+- **Root cause (две причины):**
+  1. **`TInvestStreamMultiplexer` не singleton:** создаётся per-`TInvestAdapter` (`app/broker/tinvest/adapter.py:724`). При нескольких adapter'ах в системе (например, для свечей в `MarketDataService` + для торговли в `TradingService`) запускается несколько `_run_stream` циклов, каждый со своим анти-спам флагом `_connection_event_published` → каждый publish'ит свои `connection.lost`/`connection.restored` независимо → дубликат на `event_bus`.
+  2. **Ночной reconnect-storm:** даже одиночного multiplexer'а достаточно для сотен уведомлений за ночь.
+- **Fix (минимальный, 1 файл):** добавлен **cooldown 15 мин** в `NotificationService._broker_status_loop` — закрывает обе причины сразу:
+  - Дубликаты от двух multiplexer'ов внутри одного 300-ms окна — фильтруются (cooldown 900 сек > 0.4 сек).
+  - Реальные reconnect-штормы — пользователь получает максимум одну пару `lost`/`restored` за 15 минут на event_name.
+  - `connection.lost` и `connection.restored` имеют независимые таймеры (cooldown по `event_name`).
+- **Файлы (MOD):** `Develop/backend/app/notification/service.py` — `import time`, +`_broker_event_cooldown_sec=900.0`, +`_last_broker_event_at: dict[str, float]`, +cooldown-check в `_broker_status_loop` перед `mapping = EVENT_MAP.get(event_name)`. Production-код multiplexer'а НЕ тронут.
+- **Проверка:** `py_compile` 0 errors. `pytest tests/test_notification/ tests/unit/test_notification/ -q` → **77 passed / 0 failed** (cooldown не сломал существующие тесты — они проверяют create_notification, dispatch, callbacks).
+- **Перезапуск:** `./restart_dev.sh` → backend PID 78593, health 200 OK. Cooldown активен с 2026-04-27 ~10:00 МСК.
+- **Архитектурный fix (DEFERRED-S8) — карточка S7R-MULTIPLEXER-SINGLETON:** сделать `TInvestStreamMultiplexer` singleton в `app.state` с share между всеми `TInvestAdapter`. Закроет root cause; cooldown останется как defense-in-depth.
+- **Не закоммичено** — заказчик коммитит сам.
+
+---
+
 ## 2026-04-26 — Hotfix после S7 closeout: ActivePositionsWidget runtime crash
 
 - **Симптом:** заказчик открыл `http://localhost:5173` после `restart_dev.sh` — пустой экран («что-то мигает и потом просто пустой»). frontend.log показал `TypeError: sessions.filter is not a function (in ActivePositionsWidget.tsx:42)` — крашит весь дашборд (нет ErrorBoundary вокруг виджетов).
