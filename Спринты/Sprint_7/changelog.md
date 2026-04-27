@@ -10,6 +10,32 @@
 
 ---
 
+## 2026-04-27 — Hotfix фаза 4: DEV_MODE подавление system_shutdown/session_stopped (вариант В)
+
+- **Что:** добавлен env-флаг `DEV_MODE: bool = False` в `Settings`. При `DEV_MODE=true` ([restart_dev.sh:43](restart_dev.sh#L43) `export DEV_MODE=true`) — `runtime.shutdown()` и `runtime.stop()` (вызванный из shutdown через `_shutting_down=True`) НЕ публикуют уведомления `system_shutdown` и `session_stopped`. В production переменная не задаётся → DEV_MODE=false → поведение по ТЗ 8.6 без изменений.
+- **Зачем:** после фаз 1-3 на каждый `./restart_dev.sh` оставалось 3 уведомления (1 `system_shutdown` + 2 `session_stopped` для LKOH/SBER). За день разработки набегало много шума.
+- **Файлы (MOD):**
+  - `Develop/backend/app/config.py` — `+DEV_MODE: bool = False` поле в `Settings` с docstring.
+  - `Develop/backend/app/trading/runtime.py` — в `stop()` проверка `_shutting_down AND DEV_MODE` → не публиковать `session.stopped` event на event_bus. В `shutdown()` проверка `DEV_MODE` → ранний return после `_record_shutdown_marker()` (без публикации `system_shutdown`).
+  - `restart_dev.sh` — `export DEV_MODE=true` перед `nohup uvicorn`.
+- **Проверка:**
+  - `py_compile` 0 errors. Полная регрессия `pytest tests/ -q` → **885 passed / 0 failed**.
+  - Live: контрольный тест (`max_id` БД до и после `./restart_dev.sh` в DEV_MODE окружении) — **0 новых уведомлений** (3 ранее).
+  - PID 82255 uvicorn имеет `DEV_MODE=true` в env (`ps eww -p $pid`).
+- **Эффект (комбо всех 4 фаз hotfix 2026-04-27):**
+
+| Событие | До | После всех 4 фаз |
+|---|---:|---:|
+| Telegram `connection_restored` за ночь | до 2880 | ≤4 (1 пара/15 мин при реальном outage >30 сек) |
+| Notification `session_recovered` с «4 д. 4 ч.» | 2 на restart | 0 (downtime считается от marker'а) |
+| Notification `system_shutdown` на restart_dev | 1 | 0 (DEV_MODE) |
+| Notification `session_stopped` на restart_dev | 2 (LKOH+SBER) | 0 (DEV_MODE) |
+| **Итого на ./restart_dev.sh** | **5** | **0** |
+
+- **Не закоммичено** — оркестратор коммитит сам.
+
+---
+
 ## 2026-04-27 — Hotfix фаза 3: «Время простоя 4 д. 4 ч.» в session_recovered
 
 - **Симптом:** заказчик увидел уведомления `Сессия восстановлена. Время простоя: 4 д. 4 ч.` после каждого `./restart_dev.sh` (хотя backend перезапускался секунды-минуты назад). Спам — потому что я делал ~5 рестартов подряд при тестировании предыдущих hotfix'ов, каждый раз → 5 уведомлений (1 `system_shutdown` + 2 `session_stopped` + 2 `session_recovered`) = 25 в Telegram.

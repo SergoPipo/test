@@ -40,6 +40,11 @@ source .venv/bin/activate
 alembic upgrade head || { echo "ERROR: alembic upgrade head упал"; exit 1; }
 
 echo "==> 3/4 Запускаю backend (uvicorn) на http://127.0.0.1:$BACK_PORT"
+# S7 hotfix 2026-04-27 (вариант В) — DEV_MODE подавляет шумные уведомления
+# system_shutdown / session_stopped при graceful shutdown через runtime.shutdown()
+# (на каждый ./restart_dev.sh раньше приходило 3 Telegram-сообщения,
+# теперь — 0). В production переменная не задаётся → DEV_MODE=false.
+export DEV_MODE=true
 nohup uvicorn app.main:app --reload --host 127.0.0.1 --port "$BACK_PORT" \
   > "$LOG_DIR/backend.log" 2>&1 &
 BACK_PID=$!
