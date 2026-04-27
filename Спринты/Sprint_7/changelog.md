@@ -10,6 +10,22 @@
 
 ---
 
+## 2026-04-27 — Hotfix фаза 3: «Время простоя 4 д. 4 ч.» в session_recovered
+
+- **Симптом:** заказчик увидел уведомления `Сессия восстановлена. Время простоя: 4 д. 4 ч.` после каждого `./restart_dev.sh` (хотя backend перезапускался секунды-минуты назад). Спам — потому что я делал ~5 рестартов подряд при тестировании предыдущих hotfix'ов, каждый раз → 5 уведомлений (1 `system_shutdown` + 2 `session_stopped` + 2 `session_recovered`) = 25 в Telegram.
+- **Root cause:** `SessionRuntime._get_last_active_time(session)` ([trading/runtime.py:450](Develop/backend/app/trading/runtime.py#L450)) ищет «самый поздний timestamp активности сессии» среди CB-events / последняя сделка / `last_signal_at` / `started_at` (fallback). Для **paper-сессий без активности** (нет CB, нет сделок, нет сигналов) → fallback на `started_at` (момент создания сессии 4 дня назад). При recovery: `downtime = now - started_at = 4 дня`, что НЕ отражает реальный downtime backend.
+- **Fix (2 части):**
+  1. **Маркер graceful shutdown** — новые helper'ы `_record_shutdown_marker()` / `_read_shutdown_marker()` в `runtime.py`. При `shutdown()` записывается timestamp в `Develop/backend/data/.last_shutdown_at` (UTC ISO). При `restore_all()` читается из файла, downtime = `now - shutdown_at` (правильное время offline backend, не «бездействие сессии»).
+  2. **Защита-кап в filter уведомления** — `MIN_DOWNTIME_FOR_NOTIFICATION < downtime ≤ MAX_DOWNTIME_FOR_NOTIFICATION (7 дней)`. Если fallback'ом пришёл `started_at` многодневной давности (нет маркера, например первый запуск после внедрения) — notification всё равно подавится при downtime > 7 дней (явный мусор).
+- **Файлы (MOD):** `Develop/backend/app/trading/runtime.py` (+`Path` import, +константа `_LAST_SHUTDOWN_MARKER`, +helpers, обновлён `restore_all` логика downtime, +`MAX_DOWNTIME_FOR_NOTIFICATION`, +вызов `_record_shutdown_marker()` в конце `shutdown()`). `Develop/backend/tests/test_trading/test_runtime_recovery.py` — `test_paper_session_restored_with_notification` мокирует `_read_shutdown_marker` чтобы не зависеть от filesystem-маркера от других тестов.
+- **Проверка:**
+  - `py_compile` 0 errors. Полная регрессия `pytest tests/ -q` → **885 passed / 0 failed**.
+  - Live: после `./restart_dev.sh` файл `data/.last_shutdown_at` существует с timestamp shutdown'а; БД показывает 3 свежих уведомления (`system_shutdown` + 2× `session_stopped`), **0 уведомлений `session_recovered`** (downtime ~30 сек < `MIN_DOWNTIME_FOR_NOTIFICATION = 120 сек`). Раньше было 5 (включая 2× `session_recovered` с «4 д. 4 ч.»).
+- **Оставшийся шум на dev-restart:** 3 уведомления вместо 5. `system_shutdown` + `session_stopped` всё ещё идут при каждом graceful shutdown (нормальное поведение S6, ТЗ 8.6). Если пользователь хочет подавить и их при `./restart_dev.sh` — отдельный фикс (DEFERRED-S8 кандидат: `S7R-DEV-MODE-SHUTDOWN-NOTIFICATIONS-SUPPRESS`).
+- **Не закоммичено** — оркестратор коммитит сам.
+
+---
+
 ## 2026-04-27 — Hotfix фаза 2: порог 30s + singleton multiplexer (root cause)
 
 - **Что:** root-cause-фикс спама `connection_restored` — два слоя:
