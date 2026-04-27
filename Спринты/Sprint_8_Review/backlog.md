@@ -183,7 +183,11 @@
 
 > Карточки заведены оркестратором по итогам двух production-bug'ов, обнаруженных заказчиком после закрытия S7. Hotfix'ы применены defensive-уровнем (виджет / NS cooldown), архитектурные правки — DEFERRED-S8.
 
-### S7R-MULTIPLEXER-SINGLETON — TInvestStreamMultiplexer не singleton
+### S7R-MULTIPLEXER-SINGLETON — ✅ DONE 2026-04-27 (закрыто оркестратором)
+
+> Закрыто в hotfix-волне фазы 2 (см. `Sprint_7/changelog.md:13-32`). Module-level singleton `get_or_create_multiplexer(token)` + `shutdown_multiplexers()` в lifespan. Полная регрессия 885/0 backend pytest. Live-проверка: `multiplexer_singleton_created` 1 раз, 2 подписки на один stream.
+
+### ~~S7R-MULTIPLEXER-SINGLETON — TInvestStreamMultiplexer не singleton~~ (исходное описание)
 
 - **Источник:** Sprint 7, hotfix 2026-04-27 «спам Telegram-уведомлений `connection_restored` за ночь» (см. `Sprint_7/changelog.md` запись от 2026-04-27).
 - **Симптом:** `TInvestStreamMultiplexer` создаётся per-`TInvestAdapter` (`Develop/backend/app/broker/tinvest/adapter.py:724`). При нескольких adapter'ах в системе (например, для свечей в `MarketDataService` + для торговли в `TradingService`) запускается несколько `_run_stream` циклов. Каждый имеет свой `_connection_event_published` флаг → каждый publish'ит свою пару `connection.lost`/`connection.restored` независимо → дубликаты на `event_bus`. На ночном reconnect-storm T-Invest (соединение разрывается ~1 раз/мин в нерабочие часы) пользователь получил **до 2880 Telegram-сообщений за ночь**.

@@ -10,6 +10,30 @@
 
 ---
 
+## 2026-04-27 — Hotfix фаза 2: порог 30s + singleton multiplexer (root cause)
+
+- **Что:** root-cause-фикс спама `connection_restored` — два слоя:
+  - **A — порог 30 сек в `_run_stream`:** `connection.lost`/`connection.restored` публикуются только если разрыв длился ≥30 секунд. Большинство T-Invest gRPC RST_STREAM реконнектятся за 5-10 сек (норма) — пользователь не должен видеть служебные моргания. Реализовано через `_disconnect_started_at: float | None` (monotonic timestamp), сравнение в exception-блоке. Симметрично: либо обе lost+restored публикуются, либо ни одной.
+  - **B — singleton multiplexer (S7R-MULTIPLEXER-SINGLETON, FIXED-NOW):** module-level `_singletons: dict[token, TInvestStreamMultiplexer]` + `get_or_create_multiplexer(token)` + `shutdown_multiplexers()`. Все `TInvestAdapter` с одним токеном делят один gRPC stream. Lifespan shutdown останавливает всех. `adapter.disconnect()` теперь только отписывает свои `subscription_id` через `multiplexer.unsubscribe(...)` (без stop). Карточка из `Sprint_8_Review/backlog.md` закрыта.
+- **Файлы (MOD):**
+  - `Develop/backend/app/broker/tinvest/multiplexer.py` — `import time`, +`_MIN_DISCONNECT_DURATION_SEC=30.0`, +`_disconnect_started_at` поле, обновлён `_run_stream` (success-блок reset'ит timestamp; exception-блок проверяет elapsed ≥ 30 перед publish lost), +module-level singleton API (`get_or_create_multiplexer`, `shutdown_multiplexers`, `_reset_singletons_for_tests`).
+  - `Develop/backend/app/broker/tinvest/adapter.py` — `_ensure_multiplexer` использует `get_or_create_multiplexer`, `disconnect` отписывает свои подписки без `multiplexer.stop()`.
+  - `Develop/backend/app/main.py` — в lifespan shutdown добавлен `await shutdown_multiplexers()` после `stream_manager.unsubscribe_all()`.
+  - `Develop/backend/tests/unit/test_broker/test_tinvest_subscribe_candles.py` — переименован тест `test_disconnect_stops_multiplexer` → `test_disconnect_unsubscribes_but_does_not_stop_multiplexer`, проверяет новое поведение (unsubscribe + НЕ stop).
+- **Проверка:**
+  - `py_compile` всех 3 production-файлов: 0 errors.
+  - `pytest tests/ -q` → **885 passed / 0 failed** (полная backend-регрессия).
+  - Backend перезапущен (PID 81053). Логи показывают: `multiplexer_singleton_created token_prefix=t.wC3lQT` ровно **один раз**; 2 подписки (LKOH + SBER) на один stream: `total_figi=1 → total_figi=2`. Раньше было 2 `multiplexer_started` через 9 сек.
+- **Эффект (комбо A+B+cooldown 15min):**
+  - Дубликаты от множественных multiplexer'ов — устранены архитектурно (1 multiplexer per token).
+  - Короткие моргания gRPC (≤30 сек) — не публикуются вовсе.
+  - Если разрыв >30 сек — пользователь видит максимум 1 пару lost+restored за 15 мин (cooldown остаётся как defense-in-depth).
+  - Снижение нагрузки на T-Invest API: ~50% (1 stream вместо 2 при 2 активных сессиях).
+- **DEFERRED-S8:** S7R-CONNECTION-EVENTS-MARKET-CLOSED (low) остаётся — не публиковать в нерабочие часы биржи MOEX. Cooldown + порог + singleton достаточно сильно снижают шум; market-closed filter — улучшение качества для S8.
+- **Не закоммичено** — оркестратор коммитит сам.
+
+---
+
 ## 2026-04-27 — Hotfix: спам Telegram-уведомлений «Соединение с T-Invest восстановлено»
 
 - **Симптом:** заказчик за ночь получил множество Telegram-сообщений `connection_restored` (всю ночь). Утром 2026-04-27 спам прекратился, но ущерб «notification fatigue» нанесён.
