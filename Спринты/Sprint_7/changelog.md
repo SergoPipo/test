@@ -10,6 +10,31 @@
 
 ---
 
+## 2026-04-27 — CI ZIеленый, run #24999043671 ✅ (после 3 попыток backend install)
+
+После основной волны (см. запись ниже) понадобилось ещё 2 итерации патча `ci.yml`, чтобы `pip install -e .[dev]` заработал на чистой Ubuntu CI среде. Локально работает с первого раза через `pip install --no-deps tinkoff-investments` потому что pip 26 не пересматривает уже satisfied пакет; в CI же pip каждый раз заново скачивает git+url из spec'а нашего pyproject и снова резолвит broken transitive `tinkoff = "^0.1.1"`.
+
+**Итерации:**
+1. **Попытка #1** (коммит `0065713`): добавил `pip install --no-deps git+...` перед `pip install -e .[dev]`. Локально работает (pip считает satisfied), в CI — fail (`ERROR: Could not find a version that satisfies the requirement tinkoff<0.2.0,>=0.1.1`). 18 сек.
+2. **Попытка #2** (коммит `91ccd10`): клонирую T-Invest SDK в `/tmp`, удаляю строку `tinkoff = "^0.1.1"` из его `pyproject.toml` через python-патч (poetry-style), ставлю из patched src. Шаг «Install T-Invest SDK (patched)» ✅ прошёл, но следующий `pip install -e .[dev]` снова упал — pip заново лезет по git+url из нашего pyproject и видит ОРИГИНАЛЬНУЮ metadata тинькофа. Лог показал «Requirement already satisfied: cachetools/deprecation/python-dateutil» (из patched версии), но финальный resolve снова на оригинале → fail. 19 сек.
+3. **Попытка #3** (коммит `d1dee2f`, ✅): после patched-install удаляю строку `"tinkoff-investments @ git+..."` из НАШЕГО `backend/pyproject.toml` python-патчем перед `pip install -e .[dev]`. SDK уже в site-packages → импорты работают, но pip без spec вообще не пересматривает tinkoff-investments. Защитный assert: удалена ровно 1 строка (если pyproject изменится — явный fail с понятным сообщением). **Backend ✅ 1m43s, frontend ✅ 2m50s.**
+
+**Итоговый CI workflow** (`.github/workflows/ci.yml` → backend job):
+1. checkout, setup-python
+2. **Install T-Invest SDK (patched)** — clone тинькофа в `/tmp`, патч pyproject (удалить bad poetry dep), `pip install /tmp/tinvest-src`
+3. **Install dependencies** — patch нашего `pyproject.toml` (удалить tinkoff-investments spec), `pip install -e .[dev]`
+4. **Lint (ruff)** — All checks passed
+5. **Type check (mypy)** — Success: no issues found in 141 source files
+6. **Unit tests** — `pytest tests/unit/` — 656/0
+
+**Frontend job** (без изменений после первого fix'а): pnpm install → eslint 0/10w → tsc 0 → vitest 394/0.
+
+**Annotations** в run'е — только warnings: `Node.js 20 actions are deprecated` (для `actions/checkout@v4`, `setup-python@v5`, `setup-node@v4`, `pnpm/action-setup@v4`) — миграция на Node 24 до 2026-09-16. И 8 warnings react-hooks/exhaustive-deps + react-hooks/refs (не валят CI). Кандидаты для backlog S8: `S7R-CI-NODE24-MIGRATION` (low), `S7R-FE-LINT-WARNINGS-CLEANUP` (low).
+
+**Production-эффект:** ноль. Изменения только в CI workflow и в python-патче, который применяется к /tmp клон-копии тинькофа и **временно** к нашему pyproject.toml в CI checkout (свежий clone каждый run, в репе оригинал не меняется).
+
+---
+
 ## 2026-04-27 — CI hotfix: ветка `s7/sprint-7` стала зелёной (вариант B)
 
 - **Триггер:** заказчик получил Gmail-уведомление от GitHub Actions «Run failed: CI - s7/sprint-7 (4fdf212)». Расследование показало, что **все 5 последних коммитов на ветке упали в CI**, причём:
