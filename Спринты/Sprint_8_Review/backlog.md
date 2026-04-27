@@ -102,12 +102,12 @@
 - **Объём:** ≤1 час. Добавить страницу `/backtest/grid/{job_id}/result` или модалку из dropdown badge.
 - **Приоритет:** medium. Не блокирует приёмку S7 (Grid Search backend полностью функционален, FRONT2 модалка запуска работает).
 
-### S7R-FE-LINT-PRE-EXISTING-6 — 6 frontend lint errors в legacy-файлах
+### S7R-FE-LINT-PRE-EXISTING-6 — 6 frontend lint errors в legacy-файлах ✅ DONE (2026-04-27, CI hotfix)
 
 - **Источник:** Sprint 7, FRONT1 W1 §3, midsprint_check §47.
 - **Симптом:** 6 lint errors в `CandlestickChart.tsx`, `SessionDashboard.tsx`, `ChartPage.tsx`, `ProfileSettingsPage.tsx`, `priceAlertStore.ts` — pre-existing, не вызваны кодом S7.
-- **Что сделать:** мини-волна `pnpm lint --fix` с ручным разбором non-fixable.
-- **Приоритет:** low.
+- **Что сделано:** в рамках CI hotfix-волны 2026-04-27 (см. `Sprint_7/changelog.md`) исправлены все 6 + ещё 10 новых из S7 (GridSearchHeatmap static-components, GridSearchForm only-export-components, DrawingsLayer immutability, FirstRunWizardGate set-state-in-effect, ChartPage refs). Использованы переименования с `_`-префиксом, удаление неиспользуемых импортов, обоснованные `eslint-disable` для DOM-мутаций. Frontend lint: 16 errors → 0 errors / 10 warnings.
+- **Приоритет:** low → закрыт.
 
 ### S7R-WIDGETS-UNIT-COVERAGE — HealthWidget / ActivePositionsWidget без unit-тестов
 

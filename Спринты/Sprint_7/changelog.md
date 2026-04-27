@@ -10,6 +10,74 @@
 
 ---
 
+## 2026-04-27 — CI hotfix: ветка `s7/sprint-7` стала зелёной (вариант B)
+
+- **Триггер:** заказчик получил Gmail-уведомление от GitHub Actions «Run failed: CI - s7/sprint-7 (4fdf212)». Расследование показало, что **все 5 последних коммитов на ветке упали в CI**, причём:
+  - Backend job падал на шаге `Install dependencies` за 18 сек (не доходил до тестов).
+  - Frontend job падал на шаге `Lint (eslint)` за 36 сек (не доходил до tsc/vitest).
+  - Локально всё было зелёное — но CI workflow исполнял проверки, которых локально ритуально не делали (mypy, eslint в строгом режиме, чистая Ubuntu среда без хаков для `tinkoff-investments`).
+- **Root causes:**
+  1. **Backend `Install dependencies`:** git-зависимость `tinkoff-investments @ git+...@0.2.0-beta117` тянет транзитивную `tinkoff<0.2.0,>=0.1.1`, которой нет на PyPI. CLAUDE.md описывал workaround `pip install --no-deps ...`, но он применялся вручную при локальной установке `.venv`, в `.github/workflows/ci.yml` отсутствовал.
+  2. **Frontend `Lint (eslint)`:** 16 errors в 9 файлах. Шесть — pre-existing (`S7R-FE-LINT-PRE-EXISTING-6`), десять — новые из S7 (`react-hooks/static-components` в `GridSearchHeatmap`, `react-hooks/refs` в `ChartPage`, `react-hooks/immutability` в `DrawingsLayer`, `react-refresh/only-export-components` в `GridSearchForm`, `react-hooks/set-state-in-effect` в `FirstRunWizardGate`).
+  3. **Backend `Type check (mypy)`:** 11 errors в 6 файлах — давний техдолг, mypy локально не проверяли (в `Develop/CLAUDE.md` плагином рекомендован только `pyright-lsp`/`py_compile` для .py).
+- **Fix backend:**
+  - `.github/workflows/ci.yml` — перед `pip install -e .[dev]` добавлен `pip install --no-deps "git+https://github.com/RussianInvestments/invest-python.git@0.2.0-beta117"`.
+  - `app/trading/runtime.py` — (1) перенесена константа `_LAST_SHUTDOWN_MARKER` ПОСЛЕ всех импортов (ruff E402), (2) расширены guard'ы в `_get_credentials_for_user` и `_check_real_positions`: проверка на None для `encrypted_api_key`, `encrypted_api_secret`, `encryption_iv` (mypy `bytes | None` vs `bytes`), (3) `trade.exit_price = 0` → `trade.exit_price = Decimal("0")` (mypy `int` vs `Decimal | None`).
+  - `tests/test_notification/test_singleton_di.py:111` — убран лишний `f` префикс из строки без placeholder'ов (ruff F541).
+  - `app/broker/tinvest/multiplexer.py:364` — `# type: ignore[attr-defined]` на вызов `_price_alert_monitor.check_alerts_for_figi` (поле имеет тип `object | None` для избежания циклической зависимости).
+  - `app/account/service.py:92` — переименована переменная `points` → `empty_points` в early-return ветке (mypy redefined name).
+  - `app/trading/ws_sessions.py:225-226` — переименован local `exc` → `recv_exc` (конфликт с `except ... as exc` в той же функции, mypy "outside except").
+  - `app/market_data/service.py:87` — `bool(user_id) and ...` → `user_id is not None and ...` (mypy narrow для `int | None`).
+  - `app/market_data/service.py:365` — добавлен `has_tinvest=True` в вызов `_fetch_candles` (был отсутствующий positional argument; **потенциальный runtime TypeError**, метод `_build_current_candle` вероятно dead code, но теперь type-safe).
+  - `app/trading/engine.py:488` — добавлен `assert isinstance(blocks_json, dict)` после `_json.loads` (mypy не сужает Any return).
+  - `tests/test_trading/test_runtime_recovery.py:181-189` — добавлено `encrypted_api_secret=b"fake_secret"` в test fixture `BrokerAccount` (после ужесточения guard'а в production code mock-аккаунт без этого поля стал триггерить early return; обновление теста, не ослабление production-логики).
+- **Fix frontend (16 lint errors → 0 errors / 10 warnings):**
+  - **Pre-existing 6 (unused vars):** `priceAlertStore.ts:14` (`get` → `_get`), `ProfileSettingsPage.tsx:2` (удалён неиспользуемый `Divider` из импорта), `SessionDashboard.tsx:39` (`pauseSession` → `_pauseSession`), `CandlestickChart.tsx:471, 523` (`e` → `_e` в catch).
+  - **Новые из S7:**
+    - `pages/ChartPage.tsx:268` — `// eslint-disable-next-line react-hooks/refs` с обоснованием (DOM-узел контейнера передаётся в overlay-компонент через `appendChild`).
+    - `components/backtest/GridSearchHeatmap.tsx` — `SortHead` вынесен из тела `MatrixTable` в top-level компонент с явными props (`sortBy`, `sortDir`, `onSort`).
+    - `components/backtest/GridSearchForm.tsx` + новый файл `components/backtest/gridSearchUtils.ts` — `parseRangeValues`, `calcTotal`, `totalSeverity`, константы `HARD_CAP_*`/`WARN_THRESHOLD`, тип `GridParam` вынесены в utils-файл (правило `react-refresh/only-export-components`). Обновлён импорт в `__tests__/GridSearchForm.test.tsx`.
+    - `components/charts/DrawingsLayer.tsx:67, 347` — `// eslint-disable-next-line react-hooks/immutability` с обоснованием (мутация `HTMLElement.style` — единственный способ позиционировать overlay-canvas и переключать cursor контейнера графика).
+    - `components/wizard/FirstRunWizardGate.tsx:26` — `// eslint-disable-next-line react-hooks/set-state-in-effect` (сброс state при logout — корректный cleanup-паттерн).
+- **Не было правок в production-логике:** все backend-изменения — narrow'ы, аннотации, безопасные guard'ы; frontend — переименование переменных, вынос компонента/utils, eslint-disable c обоснованием. Семантика API/runtime не изменилась.
+- **Verification (локально):**
+  - **Backend:** `ruff check .` — All checks passed. `mypy app/ --ignore-missing-imports` — Success: no issues found in 141 source files. `pytest tests/unit/ -q` (CI-shape) — **656 passed**. `pytest tests/ -q` (полный) — **885 passed / 0 failed**.
+  - **Frontend:** `pnpm lint` — exit 0, 0 errors / 10 warnings (warnings допустимы, max-warnings не задан в скрипте `eslint .`). `pnpm tsc --noEmit` — 0 errors. `pnpm test` (vitest) — **394 passed / 0 failed**.
+  - **CI workflow на GitHub Actions ещё НЕ перепроверен** — изменения не запушены (две репы, ветки спрашиваются отдельно по `feedback_two_repos.md`).
+- **Изменённые файлы:**
+  - **Develop/ (10 mod + 1 new):**
+    - `.github/workflows/ci.yml` (backend install step)
+    - `backend/app/trading/runtime.py` (4 mypy + 1 ruff)
+    - `backend/app/trading/engine.py` (1 mypy)
+    - `backend/app/trading/ws_sessions.py` (1 mypy)
+    - `backend/app/account/service.py` (1 mypy)
+    - `backend/app/market_data/service.py` (2 mypy)
+    - `backend/app/broker/tinvest/multiplexer.py` (1 mypy)
+    - `backend/tests/test_notification/test_singleton_di.py` (1 ruff)
+    - `backend/tests/test_trading/test_runtime_recovery.py` (test fixture)
+    - `frontend/src/components/backtest/GridSearchForm.tsx`
+    - `frontend/src/components/backtest/GridSearchHeatmap.tsx`
+    - `frontend/src/components/backtest/__tests__/GridSearchForm.test.tsx`
+    - `frontend/src/components/backtest/gridSearchUtils.ts` **(new)**
+    - `frontend/src/components/charts/CandlestickChart.tsx`
+    - `frontend/src/components/charts/DrawingsLayer.tsx`
+    - `frontend/src/components/trading/SessionDashboard.tsx`
+    - `frontend/src/components/wizard/FirstRunWizardGate.tsx`
+    - `frontend/src/pages/ChartPage.tsx`
+    - `frontend/src/pages/ProfileSettingsPage.tsx`
+    - `frontend/src/stores/priceAlertStore.ts`
+- **`/code-review` (superpowers:code-reviewer) для критических backend-правок** — выполнен после согласования с заказчиком. Вердикт: **0 critical, 4 concerns, 4 OK, 2 suggestions**. Ключевые находки:
+  - **Concern (применено):** ужесточённый guard в `_get_credentials_for_user` молча возвращал `None, None, False` без диагностики. **Fix:** добавлен `logger.warning("broker_credentials_incomplete", account_id, user_id, has_key, has_secret, has_iv)` перед return — облегчит расследование «почему стрим свечей не стартует» при битых записях в БД.
+  - **Concern (важная находка, без action):** `_build_current_candle` в `app/market_data/service.py` НЕ был dead code — вызывается из `get_candles` строка 141 для `timeframe in ("1h", "4h")` при `has_tinvest=True`. Раньше вызов `await self._fetch_candles(ticker, "1m", prev_start, now, user_id)` всегда падал бы с `TypeError: _fetch_candles() missing positional argument 'has_tinvest'`. Это значит, что фича «дострой текущей 1h/4h свечи из 1m данных T-Invest» либо никогда не работала в production, либо ходила другим путём. **Action для S8:** проверить логи production/staging на ошибку `TypeError: _fetch_candles() missing` после деплоя; если фича не нужна — пометить `_build_current_candle` deprecated, если нужна — добавить unit-тест на ветку 1h/4h.
+  - **OK:** правки `Decimal("0")`, перенос `_LAST_SHUTDOWN_MARKER`, переименование `exc → recv_exc`, `points → empty_points`, `assert isinstance(blocks_json, dict)` — безопасные, защищены try/except в caller'ах где нужно.
+  - **Suggestion (не применено, отложено):** `# type: ignore[attr-defined]` на `_price_alert_monitor.check_alerts_for_figi` можно заменить на `Protocol` без циклической зависимости. Для одного call-site overkill, оставлено как есть.
+  - **Suggestion (не применено, отложено):** добавить gotcha «БД с `nullable=True` для криптополей: добавляй полный guard перед decrypt» в `Develop/stack_gotchas/INDEX.md` — паттерн будет повторяться (импорт брокер-аккаунтов из бэкапа).
+- **Финальная локальная верификация после Concern-fix:** `ruff check .` 0 errors, `mypy` Success no issues found in 141 files, `pytest tests/test_trading/test_runtime_recovery.py` 2/2.
+- **Закрывает карточку S7R-FE-LINT-PRE-EXISTING-6** в `Sprint_8_Review/backlog.md` — обновлено в этой же волне (статус → ✅ DONE 2026-04-27).
+- **Не закоммичено** — оркестратор коммитит сам, ветки спрашиваются отдельно для `Test/` и `Develop/` (правило `feedback_two_repos.md`).
+
+---
+
 ## 2026-04-27 — Hotfix фаза 4: DEV_MODE подавление system_shutdown/session_stopped (вариант В)
 
 - **Что:** добавлен env-флаг `DEV_MODE: bool = False` в `Settings`. При `DEV_MODE=true` ([restart_dev.sh:43](restart_dev.sh#L43) `export DEV_MODE=true`) — `runtime.shutdown()` и `runtime.stop()` (вызванный из shutdown через `_shutting_down=True`) НЕ публикуют уведомления `system_shutdown` и `session_stopped`. В production переменная не задаётся → DEV_MODE=false → поведение по ТЗ 8.6 без изменений.
