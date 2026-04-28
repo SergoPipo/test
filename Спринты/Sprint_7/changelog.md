@@ -10,6 +10,134 @@
 
 ---
 
+## 2026-04-28 — chart-drawings rev2: миграция на ISeriesPrimitive + 7 фиксов UX
+
+### Триггер
+
+Заказчик прислал список из 7 замечаний по работе drawing-инструментов на графике:
+1. Нельзя выделить нарисованный объект (чтобы потом удалить).
+2. Линии/тренды/прямоугольники нельзя протянуть за границу текущих данных.
+3. Нельзя перетащить выделенный объект.
+4. Поле ввода текста (window.prompt) выбивается из dark-темы Mantine.
+5. При вертикальном drag графика отрисованные объекты «дёргаются» / «прыгают».
+6. Иконки тулбара заменить на TradingView-стиль и сгруппировать.
+7. Реализовать вывод long/short позиций (как в TradingView).
+
+### Архитектурное решение
+
+Полная миграция overlay-рендеринга на нативный API lightweight-charts v5: **`ISeriesPrimitive`**. Каждый Drawing-объект — отдельный primitive, прикреплённый к Candlestick-серии через `series.attachPrimitive()`. Lightweight-charts сам управляет рендерингом и автоматически перерисовывает primitive'ы при любом изменении viewport — это **бесплатно** решает п.1 (через встроенный `hitTest`), п.2 (доступ к `logicalToCoordinate`), п.5 (синхронизация с chart-loop устраняет «дёрганье»).
+
+### Реализовано (8 фаз в одной ветке `feat/chart-drawings-rev2` от `s7/sprint-7`)
+
+#### Фаза 1 — ISeriesPrimitive фундамент
+
+Новые файлы (`frontend/src/components/charts/primitives/`):
+- **`types.ts`** — общие типы `PointCoord`, `ResolvedStyle`, утилиты `externalIdFor` / `drawingIdFromExternal`.
+- **`hitTest.ts`** — чистые геометрические функции: `pointToSegmentDistance`, `isPointOnSegment`, `isPointInRect`, `distanceToVerticalLine`, `distanceToHorizontalLine`, `isPointInBox`. Без зависимостей от lightweight-charts → легко тестируются.
+- **`coords.ts`** — конверсия `(time, price) → (x, y)` через `timeToCoordinate` + `priceToCoordinate`. Утилиты: `isoToTime`, `timeToIso`, `pointToCoord`, `getBarWidthSec`, `clickToDrawingPoint`, `shiftPoint`, `shiftDrawing`.
+- **`DrawingPrimitiveBase.ts`** — абстрактный базовый класс, реализует `ISeriesPrimitive<Time>`. Управляет state (drawing/selected/hovered), lifecycle (attached/detached/invalidate), resolveStyle.
+- **`TrendlinePrimitive.ts`**, **`RectPrimitive.ts`**, **`VlinePrimitive.ts`**, **`HlinePrimitive.ts`**, **`LabelPrimitive.ts`** — 5 конкретных primitive-классов, каждый с собственным `Renderer` (через `target.useMediaCoordinateSpace`) и `hitTest`.
+
+Модифицированы:
+- **`DrawingsLayer.tsx`** — переписан с canvas-overlay на чистый контроллер primitive'ов. Старый код (canvas-mount, ResizeObserver, `subscribeVisibleTimeRangeChange`, ручной `priceLine` для hline) удалён. Управляет `Map<id, primitive>` через `attachPrimitive`/`detachPrimitive`. ~360 строк → ~270 строк, при этом функциональность шире.
+
+Тесты:
+- **`__tests__/hitTest.test.ts`** (+22 теста) — все 6 геометрических функций с edge-cases.
+
+#### Фаза 2 — Selection (п.1)
+
+В `DrawingsLayer.onClick` для `currentTool === 'cursor'` идёт перебор primitive-объектов (в обратном z-order), для каждого вызывается `prim.hitTest(x, y)`. Первый попавший — выделяется через `setSelected(id)`. Дополнительно — hover-подсветка через `subscribeCrosshairMove`. Кнопка «Удалить выделенный» в toolbar становится активной автоматически (она уже была завязана на `selectedId`).
+
+#### Фаза 3 — Extrapolation за last bar (п.2)
+
+- **`api/chartDrawingsApi.ts`** — `DrawingPoint` расширен опциональным `logical?: number` (опаковое поле, backend-совместимо).
+- **`coords.ts`** — `clickToDrawingPoint(param, chart, series)`: если `param.time` отсутствует (клик за last bar), генерим **синтетический ISO** через `barWidth × Δlogical`, и сохраняем `logical` для exact-replay при рендере.
+- **`pointToCoord`** — fallback'ит на `logicalToCoordinate(point.logical)`, когда `timeToCoordinate(t) === null`.
+- Линии и прямоугольники теперь можно тянуть на любое расстояние вправо за last bar.
+
+#### Фаза 4 — Drag&drop выделенного (п.3)
+
+- **`coords.ts`** — `shiftPoint(point, dx, dy, chart, series)` и `shiftDrawing(drawing, dx, dy, chart, series)` — конверсия pixel-дельты → новые `t`/`p`/`logical` с использованием logical-координат для устойчивости за last bar. Семантика по типам: trendline/rect — обе точки; hline — только price; vline — только t; label — anchor.
+- **`DrawingsLayer.tsx`** — pointerdown/move/up на `container` с `capture: true` (перехват ДО chart pan). Только если `selectedId` есть и pointerdown попадает в hit-area выделенного primitive. Throttle: primitive обновляется через `setDrawing()` каждый frame (локально), а **в store коммитится один `update()` на pointerup** — снижает нагрузку на localStorage в 60×.
+- Dead zone 3px чтобы не путать клик с drag.
+
+#### Фаза 5 — Mantine Modal вместо `window.prompt` (п.4)
+
+- **`LabelTextModal.tsx`** (новый) — controlled-компонент: Mantine `Modal` + `TextInput` + `Group` с кнопками «Отмена» / «OK». Enter→submit, Esc→cancel, autofocus, кнопка OK disabled при пустом тексте. data-testid: `chart-label-modal`, `chart-label-modal-input`, `chart-label-modal-submit`, `chart-label-modal-cancel`.
+- **`DrawingsLayer.tsx`** — `window.prompt` заменён на state `pendingLabelAnchor` + `pendingLabelText`. Modal открывается на клик label-инструментом, on submit вызывает `add({type:'label',data:{anchor,text}})`.
+
+#### Фаза 6 — Vertical-drag «дёрганье» (п.5)
+
+**Решено автоматически Фазой 1.** Lightweight-charts перерисовывает primitive'ы внутри своего chart-loop'а на каждое изменение viewport (включая vertical drag price-scale). Никаких отдельных подписок не требуется.
+
+#### Фаза 7 — TradingView-style toolbar (п.6)
+
+- Добавлен пакет **`lucide-react`** (~20kB gzipped).
+- **`DrawingToolbar.tsx`** — переписан: `TOOL_GROUPS: ToolDef[][]` вместо плоского массива. Группы:
+  1. Cursor (`MousePointer2`)
+  2. Lines: trendline (`TrendingUp`), hline (`Minus`), vline (`MoveVertical`)
+  3. Shapes: rect (`Square`)
+  4. Text: label (`Type`)
+  5. List (`List`) — drawings editor
+  6. Destructive: delete-selected (`Trash2`), clear-all (`Eraser`)
+- Между группами — Mantine `<Divider />` с `my={4}`.
+- Все `data-testid` сохранены — e2e не сломаются.
+
+#### Фаза 8 — TradingView-style open positions overlay (п.7)
+
+- **`primitives/OpenPositionPrimitive.ts`** (новый) — реализует `ISeriesPrimitive<Time>` с `paneViews` и `priceAxisViews`:
+  - **Entry-линия:** пунктирная горизонтальная (long: `#26a69a`, short: `#ef5350`).
+  - **Зона PnL:** полупрозрачный rect между entry-y и current-y. Цвет: green (PnL≥0) или red (PnL<0).
+  - **Бэйдж в price-axis:** «▲ +PNL» / «▼ -PNL» с цветом, соответствующим направлению.
+- **`OpenPositionsLayer.tsx`** (новый) — компонент-контроллер, аналогичен `DrawingsLayer`. Подписан на `useTradingStore.positions`, фильтрует по `ticker`, синхронизирует `Map<trade_id, primitive>` через `attachPrimitive`/`detachPrimitive`.
+- **`pages/ChartPage.tsx`** — добавлен `<OpenPositionsLayer chart={chartApi} series={chartSeries} ticker={ticker} />` рядом с `<DrawingsLayer />`.
+
+### Файлы
+
+Создано (10):
+- `frontend/src/components/charts/primitives/types.ts`
+- `frontend/src/components/charts/primitives/coords.ts`
+- `frontend/src/components/charts/primitives/hitTest.ts`
+- `frontend/src/components/charts/primitives/DrawingPrimitiveBase.ts`
+- `frontend/src/components/charts/primitives/TrendlinePrimitive.ts`
+- `frontend/src/components/charts/primitives/RectPrimitive.ts`
+- `frontend/src/components/charts/primitives/VlinePrimitive.ts`
+- `frontend/src/components/charts/primitives/HlinePrimitive.ts`
+- `frontend/src/components/charts/primitives/LabelPrimitive.ts`
+- `frontend/src/components/charts/primitives/OpenPositionPrimitive.ts`
+- `frontend/src/components/charts/primitives/__tests__/hitTest.test.ts`
+- `frontend/src/components/charts/LabelTextModal.tsx`
+- `frontend/src/components/charts/OpenPositionsLayer.tsx`
+
+Модифицировано (4):
+- `frontend/src/components/charts/DrawingsLayer.tsx` — переписан полностью
+- `frontend/src/components/charts/DrawingToolbar.tsx` — иконки lucide + группы
+- `frontend/src/api/chartDrawingsApi.ts` — `DrawingPoint.logical?: number`
+- `frontend/src/pages/ChartPage.tsx` — монтаж `OpenPositionsLayer`
+
+Зависимости (1): `+ lucide-react@1.11.0`
+
+### Проверки
+
+- **TypeScript:** `npx tsc --noEmit` — 0 errors.
+- **ESLint:** `npx eslint src/components/charts/...` — 0 errors, 0 warnings (моих).
+- **Vitest:** **437 / 437 passed** (включая 22 новых теста по hit-test).
+- **Playwright (визуально):** `localhost:5173/chart/LKOH` рендерится корректно — новый toolbar отображается с lucide-иконками и группами; drawing-объекты, сохранённые в localStorage от прошлых сессий, рисуются через primitive'ы без дёрганья.
+
+### Не сделано (вне scope)
+
+- **Sequential mode для drawings** — текущее ограничение «работает только в regular режиме» сохранено (в sequential mode `Time` это индекс, а не unix sec). Кандидат на следующую итерацию.
+- **Backend router для drawings** (`/api/v1/charts/{ticker}/{tf}/drawings`) — `BACKEND-PENDING`, контракт расширен новым полем `logical?` без ломки совместимости. Когда router появится — поле сериализуется как opaque.
+- **Preview во время рисования** (две-клик-фигуры) — старый код preview через canvas удалён. UX немного ухудшился (нет предпросмотра второй точки до клика). Можно вернуть через временный primitive — отдельная карточка.
+
+### Backlog (что добавить в S8)
+
+- `S7R-DRAW-SEQUENTIAL-MODE` (low) — поддержка drawings в sequential-режиме графика.
+- `S7R-DRAW-PREVIEW` (low) — preview второй точки во время рисования trendline/rect через временный primitive.
+- `S7R-DRAW-BACKEND` (medium) — реализовать REST router `/api/v1/charts/.../drawings` (контракт уже в `chartDrawingsApi.ts`, fallback на localStorage активен).
+
+---
+
 ## 2026-04-28 — Dashboard-аудит + AccountPage hotfix + 2 FAQ + 5 backlog-карточек
 
 ### Триггер
