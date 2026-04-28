@@ -220,6 +220,72 @@
 - **Что сделать на S8:** в `NotificationService._broker_status_loop` (или в `multiplexer._publish_connection_event`) проверять MOEX-календарь через `app/scheduler/calendar.py` (или эквивалент). Если биржа закрыта — пропускать publish (но логировать в backend.log на debug). Cooldown 15 мин остаётся как defense-in-depth.
 - **Приоритет:** low (cooldown 15 мин уже сильно сглаживает, market-closed filter — улучшение качества).
 
+### S7R-DASHBOARD-BALANCE-SPARKLINE-RANGE — sparkline баланса показывает «уступ» из-за фиксированного окна 30 дней
+
+- **Источник:** Sprint 7 + dashboard-аудит 2026-04-28 (см. `Документация по проекту/FAQ/dashboard.md` §2.3).
+- **Симптом:** виджет «Баланс» рисует sparkline за `days=30`. Если сессии созданы недавно (например, 7 дней назад), первые ~22 точки — нули, потом скачок в текущее значение. Визуально выглядит как «бурный рост в самом конце месяца», хотя на деле это просто момент создания первой сессии. Текущая надпись «+0 ₽ (+0.00%) за день» при таком sparkline вводит пользователя в заблуждение.
+- **Что сделать на S8:**
+  1. **Backend** (`app/account/service.py:list_balance_history`): принимать опциональный параметр `since_first_activity=true`, отрезать leading zeros до даты первой активности (минимум `started_at` среди sessions).
+  2. **Frontend** (`BalanceWidget.tsx`): передавать `since_first_activity=true`, добавить подпись «с DD.MM.YYYY» если окно меньше запрошенных 30 дней.
+  3. Альтернатива: всегда подписывать sparkline датой начала (даже без 1-го пункта).
+- **Приоритет:** medium. Не баг, а UX-неточность — пользователю кажется что баланс растёт, хотя он стоит на месте.
+
+### S7R-DASHBOARD-HEALTH-EXTENDED-FIELDS — backend `/health` не отдаёт `cb_state` / `tinvest_connected` / `scheduler_running`
+
+- **Источник:** Sprint 7 (HealthWidget.tsx:9-12 — намеренный degrade) + dashboard-аудит 2026-04-28.
+- **Симптом:** виджет «Состояние систем» постоянно показывает «нет данных» (yellow) для всех 3 систем — даже если backend в полном порядке. Причина: `GET /api/v1/health` возвращает только `{status, version, database}`, а frontend ищет дополнительные поля `cb_state`, `tinvest_connected`, `scheduler_running`, `scheduler_jobs`. При их отсутствии — graceful yellow «нет данных». Этот compromise был сознательным в S7 (DEV-4 промпт), но техдолг остался.
+- **Что сделать на S8:**
+  1. **Backend** `app/main.py:health` (или `app/health/router.py` если выделить): расширить response payload:
+     - `cb_state: 'ok'|'warn'|'triggered'` — из `app/circuit_breaker/engine.py` (state singleton).
+     - `tinvest_connected: bool` — из `app/broker/tinvest/multiplexer.py` (любой singleton multiplexer с активным stream).
+     - `scheduler_running: bool` + `scheduler_jobs: int` — из `app/scheduler/scheduler_service.py`.
+  2. **Тесты:** unit-тест на `/health` schema; mock у каждой подсистемы.
+  3. **Frontend** уже готов читать эти поля (`HealthWidget.tsx:42-51` — defensive types optional).
+- **Приоритет:** medium. Виджет существует, но бесполезен без реальных данных. Связано с `S7R-HEALTH-WS-MIGRATION` (low) — миграция на WS вместо polling 30s.
+
+### S7R-DASHBOARD-POSITION-SPARKLINE-EMPTY — пустой sparkline в виджете «Активные позиции»
+
+- **Источник:** Sprint 7 (ActivePositionsWidget.tsx:54 `spark: []`) + dashboard-аудит 2026-04-28.
+- **Симптом:** в карточках позиций (LKOH/SBER/...) sparkline пустой — отрисован только пустой SVG-контейнер. Causes: `r.spark = []` захардкожено в `buildRows`, потому что нужен отдельный endpoint для intraday OHLCV.
+- **Связь:** дублирует существующую карточку `S7R-WIDGET-SPARKLINE-24H` (low). **Не дублируем — пометить как duplicate.**
+- **Действие:** не заводить, при работе над `S7R-WIDGET-SPARKLINE-24H` упомянуть оба места использования (виджет + потенциально strategy table).
+
+### S7R-STRATEGY-STATUS-CHANGE-UI — нет UI для смены статуса стратегии
+
+- **Источник:** аудит дашборда 2026-04-28 (см. `Документация по проекту/FAQ/strategy_status.md` §2.3).
+- **Симптом:** backend поддерживает 6 статусов стратегии (`draft, tested, paper, live, paused, archived`) и принимает `PATCH /api/v1/strategies/{id}` с полем `status`. **Frontend нигде НЕ вызывает** `updateStrategy({status: ...})` — нет ни Select, ни кнопок «Архивировать» / «В paper». Все стратегии у всех пользователей навсегда остаются в `draft`. Единственный способ сменить статус — через `curl`/Postman.
+- **Что сделать на S8:**
+  1. **На странице `/dashboard` в строке стратегии** добавить контекстное меню `⋮`:
+     - «Архивировать» (если status≠archived) → PATCH status=archived
+     - «Восстановить из архива» (если status=archived) → PATCH status=draft
+     - «Поставить на паузу» (если status∈{paper,live}) → PATCH status=paused (запоминать предыдущий)
+     - «Продолжить» (если status=paused) → PATCH status=<запомнённый>
+  2. **На странице `/strategy/{id}/edit`** — `<Select>` со списком всех статусов рядом с именем.
+  3. При попытке `archived` для стратегии с активными `trading_sessions` — confirm-modal «Сессии продолжат работать. Остановить их?».
+  4. **(Обсудить отдельно перед реализацией):** автопереходы `draft → tested` после первого успешного бэктеста, `tested → paper` после первого запуска paper-сессии. Сейчас всё ручное — может, оставить так?
+- **Приоритет:** medium-high. Не блокирует торговлю, но ломает UX — пользователь не понимает что фильтры «Активные/Архив» не работают (всё в `draft`).
+
+### S7R-STRATEGY-STATUS-PAUSED-FILTER — статус `paused` не попадает ни в один фильтр
+
+- **Источник:** аудит 2026-04-28 (`FAQ/strategy_status.md` §3).
+- **Симптом:** на dashboard над таблицей стратегий 4 фильтра: `Все / Черновик / Активные / Архив`. «Активные» = `paper|live|tested`, «Архив» = `archived`, «Черновик» = `draft`. Стратегии в статусе `paused` показываются только во «Все».
+- **Что сделать:** включить `paused` в «Активные» (т.к. это «живая» стратегия, временно поставленная на паузу), либо добавить отдельный фильтр «Пауза».
+- **Приоритет:** low. Зависимость: `S7R-STRATEGY-STATUS-CHANGE-UI` (без UI смены статуса в `paused` никто и не попадёт).
+
+### S7R-STRATEGY-STATUS-ENUM-DRIFT — `live` (стратегия) vs `real` (тикер)
+
+- **Источник:** аудит 2026-04-28 (`FAQ/strategy_status.md` §1.2).
+- **Симптом:** `Strategy.status` использует значение `live`, а `StrategyInstrumentSummary.status` — `real`. Оба в UI показываются как «Real Trading», но в коде это разные строки. Drift-источник: `StrategyInstrumentSummary` создавался позже (S6), исторически использовали значение `mode` сессии (`real`/`paper`/`sandbox`).
+- **Что сделать:** унифицировать на `real` (или `live`) — массовая миграция данных + alembic. **Желательно через большой PR**, не точечно.
+- **Приоритет:** low. Не баг — работает, просто неконсистентно для будущих разработчиков.
+
+### S7R-ACCOUNT-PAGE-SANDBOX-SELECTION-FIXED — fix дефолтного выбора счёта на /account ✅ DONE 2026-04-28
+
+- **Источник:** Sprint 7 + dashboard-аудит 2026-04-28.
+- **Симптом (был):** AccountPage брала первый `is_active` broker_account из списка → попадала на «Сэндбокс» с `account_id=NULL` → backend возвращал HTTP 400 «У брокерского аккаунта не заполнен T-Invest account_id». Плюс операции загружались без `from`/`to` → 422.
+- **Что сделано:** `Develop/frontend/src/utils/pickDefaultBrokerAccount.ts` (новый) + `stores/accountSelectionStore.ts` (zustand persist) + переписан `pages/AccountPage.tsx`. Алгоритм default-выбора: фильтр (is_active && !is_sandbox && account_id IS NOT NULL), затем приоритет (trading_rights > readonly), затем id ASC. Persist выбора в localStorage. Sandbox исключён из дропдауна полностью. Дефолт окна операций — последние 30 дней. +18 unit-тестов (utility 14 + AccountPage 4). Подробное описание алгоритма — в `Документация по проекту/FAQ/dashboard.md` §3.4.
+- **Приоритет:** high → закрыт.
+
 ### S7R-CI-NODE24-MIGRATION — миграция GitHub Actions на Node.js 24
 
 - **Источник:** Sprint 7, CI hotfix 2026-04-27, run #24999043671 annotations.

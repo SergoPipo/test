@@ -10,6 +10,106 @@
 
 ---
 
+## 2026-04-28 — Dashboard-аудит + AccountPage hotfix + 2 FAQ + 5 backlog-карточек
+
+### Триггер
+
+Заказчик попросил «расскажи подробно про дашборд страницы Стратегии, обоснуй цифры, проверь сходятся ли они с реальностью; при нажатии на «Открыть счёт» в виджете Баланс выходит ошибка — это надо исправить».
+
+После анализа вскрылось 5 проблем:
+1. 🔴 **AccountPage 400 + 422** — дефолтный выбор брокерского счёта попадал на «Сэндбокс» с `account_id=NULL` (HTTP 400), а операции запрашивались без обязательных `from`/`to` (HTTP 422). Страница показывала Alert «Request failed with status code 400».
+2. 🟡 Sparkline баланса вводит в заблуждение (резкий «уступ» из-за фиксированного 30-дневного окна).
+3. 🟡 «Состояние систем» всегда показывает «нет данных» (backend `/health` не отдаёт расширенные поля).
+4. 🟡 Sparkline «Активных позиций» всегда пустой (нет endpoint'а intraday OHLCV — известная карточка `S7R-WIDGET-SPARKLINE-24H`).
+5. 🟡 **Все стратегии у всех пользователей в `draft`** — backend поддерживает 6 статусов (`draft, tested, paper, live, paused, archived`), но frontend нигде не вызывает `updateStrategy({status: ...})`. UI для смены статуса просто отсутствует.
+
+### Реализовано (вариант 2 → 1 → 3 по запросу заказчика)
+
+#### Часть 2 — fix AccountPage (sandbox-фильтр + persist + default + 422)
+
+- **`Develop/frontend/src/utils/pickDefaultBrokerAccount.ts`** (новый файл, +98 строк):
+  - `selectableAccounts(accounts)` — фильтр пригодных: `is_active=true && !is_sandbox && account_id !== null`. **Sandbox-счета исключены целиком** (по решению заказчика 2026-04-28).
+  - `pickDefaultBrokerAccountId(accounts)` — приоритет: 1) `has_trading_rights=true` (торговый, полный доступ) → 2) `has_trading_rights=false` (readonly). Внутри одного приоритета — первый по `id ASC` (детерминированный порядок).
+  - `resolveSelectedAccountId(persisted, accounts)` — резолв с учётом сохранённого выбора: если persisted валиден (всё ещё в списке пригодных) → возвращается он, иначе fallback на default.
+- **`Develop/frontend/src/stores/accountSelectionStore.ts`** (новый файл, +30 строк) — zustand persist под ключом `account-selection-storage`. Поле `selectedAccountId: number | null`. При смене счёта в дропдауне сразу пишется в localStorage. Между релогинами и закрытиями вкладки выбор сохраняется.
+- **`Develop/frontend/src/pages/AccountPage.tsx`** — переписано:
+  - `realAccounts` теперь использует `selectableAccounts()` (sandbox исключены автоматически).
+  - Дефолтный выбор через `resolveSelectedAccountId(persistedSelection, brokerAccounts)`.
+  - При смене счёта в `<Select>` → `setPersistedSelection(...)` (вместо локального useState).
+  - `accountSelectOptions` помечает readonly-счета суффиксом `(только чтение)`. Sandbox в опциях нет.
+  - Empty state: если пригодных счетов нет — заглушка с заголовком «Реальные брокерские счета не подключены», описанием «Здесь будут показаны баланс, позиции и история операций по подключённым счетам. Добавьте API-ключ T-Invest в Настройках → Брокеры — после привязки счета появятся здесь автоматически» + поясняющий текст «Sandbox-счета в этот раздел не попадают — для них используйте «Торговлю» с paper-режимом» + кнопка «Перейти в настройки».
+  - Дефолтное окно операций — последние 30 дней (`from = today - 30d`, `to = today`). Закрывает HTTP 422.
+- **Тесты** — все passed:
+  - `src/utils/__tests__/pickDefaultBrokerAccount.test.ts` (новый, **14 тестов**): selectableAccounts (4 фильтра), pickDefaultBrokerAccountId (5 сценариев — пустой, приоритет trading, ASC, readonly fallback, конкретный sergopipo case), resolveSelectedAccountId (5 сценариев — valid persist, fallback на дефолт, null persist, пустой список, sandbox transition).
+  - `src/pages/__tests__/AccountPage.test.tsx` — обновлены mock'и (добавлен mock `useAccountSelectionStore`), +3 новых теста: «исключает sandbox-счета из селектора», «empty-state когда есть только sandbox-счета», «persist выбора пользователя».
+- **Playwright верификация** на реальном dev-окружении: на `/account` загрузились реальные позиции из счёта «Только для чтения» (id=2, account_id=2119503304) — 16 позиций, баланс 1 454 193,40 ₽. Скриншот в `Develop/frontend/e2e/screenshots/s7/account-fixed.png` (`.gitignore`, не коммитится).
+
+#### Часть 1 — карточки в backlog + FAQ/dashboard.md
+
+- **5 новых карточек** в `Спринты/Sprint_8_Review/backlog.md`:
+  - `S7R-DASHBOARD-BALANCE-SPARKLINE-RANGE` (medium) — sparkline «уступ» из-за окна 30 дней. Backend `?since_first_activity=true` + frontend подпись.
+  - `S7R-DASHBOARD-HEALTH-EXTENDED-FIELDS` (medium) — backend `/health` не отдаёт `cb_state` / `tinvest_connected` / `scheduler_running` → виджет всегда yellow.
+  - `S7R-DASHBOARD-POSITION-SPARKLINE-EMPTY` — duplicate of `S7R-WIDGET-SPARKLINE-24H` (отмечено как такое).
+  - `S7R-ACCOUNT-PAGE-SANDBOX-SELECTION-FIXED` (high) — ✅ DONE 2026-04-28 (этой волной).
+- **`Документация по проекту/FAQ/dashboard.md`** (новый, ~200 строк) — структурированный разбор:
+  - §1 Структура страницы.
+  - §2 Виджет «Баланс»: что показывает, источник `/account/balance/history?days=30`, алгоритм total_value расчёта на backend (initial_capital × active sessions + cumulative realized_pnl from daily_stats), формула dayDelta/dayPct, известные нюансы.
+  - §3 Виджет «Состояние систем»: ожидаемые поля, текущий degrade, polling 30s.
+  - §4 Виджет «Активные позиции»: фильтр `active_position_lots > 0`, формула pnlPct, сортировка по `|pnl|`, top-5.
+  - §5 Таблица стратегий: колонки, фильтры, MOCK_DATA-zombie, нюанс «Позиция > 0 для draft-стратегий».
+  - §6 Страница `/account`: алгоритм выбора счёта по умолчанию (с примером для sergopipo), persist, окно операций 30 дней, sandbox-исключение.
+  - §7 FAQ — 6 частых вопросов.
+
+#### Часть 3 — статусы стратегии + FAQ/strategy_status.md
+
+- Разведка кода показала:
+  - `VALID_STATUSES = {draft, tested, paper, live, paused, archived}` (6 значений).
+  - При создании стратегии — хардкод `status="draft"`.
+  - PATCH `/api/v1/strategies/{id}` принимает `status`, валидирует, никаких state-machine ограничений переходов нет.
+  - **Frontend ни в одном месте НЕ вызывает** `updateStrategy({status: ...})` — нет ни Select, ни кнопок «Архивировать/В paper». Все стратегии навсегда в `draft`.
+  - **Несоответствие:** `Strategy.status` использует `live`, `StrategyInstrumentSummary.status` (вычисляемый автоматически) — `real`. Drift из S6.
+  - Статус `paused` не попадает ни в один фильтр на dashboard (только во «Все»).
+- **2 новые карточки** в backlog:
+  - `S7R-STRATEGY-STATUS-CHANGE-UI` (medium-high) — добавить контекстное меню `⋮` в строке стратегии (Архивировать / Восстановить / Пауза / Продолжить) + Select на странице редактирования. Confirm-modal при попытке `archived` для стратегии с активными сессиями.
+  - `S7R-STRATEGY-STATUS-PAUSED-FILTER` (low) — `paused` не в фильтрах.
+  - `S7R-STRATEGY-STATUS-ENUM-DRIFT` (low) — унификация `live` vs `real`.
+- **`Документация по проекту/FAQ/strategy_status.md`** (новый, ~200 строк):
+  - §1 Два разных «статуса» (стратегии vs тикера) — не путать. Таблица всех 6 значений с лейблами/цветами.
+  - §2 Текущие правила переходов: создание → `draft`, изменение только через PATCH (UI отсутствует), нет автоматических переходов, нет state-machine.
+  - §3 Что показывает каждый фильтр на dashboard.
+  - §4 Что хочется в S8 (план для `S7R-STRATEGY-STATUS-CHANGE-UI`).
+  - §5 FAQ — 7 вопросов (включая «как перевести в Paper», «нормально ли что paper-сессия идёт, а статус Черновик», «можно ли архивировать с активной сессией», «status стратегии vs status сессии — это одно и то же?»).
+
+### Verification (локально)
+
+- **Backend** не трогался → не перезапускалась полная регрессия. ruff/mypy/pytest изменения нулевые.
+- **Frontend:**
+  - `pnpm lint` — exit 0, 0 errors / 10 warnings (warnings pre-existing, не валят CI).
+  - `pnpm tsc --noEmit` — 0 errors.
+  - `pnpm vitest run` — **415 passed / 0 failed** (+17 от предыдущего 398: pickDefaultBrokerAccount 14 + AccountPage 3).
+- **Playwright** на реальном dev-окружении (`./restart_dev.sh` уже запущен): `/account` загружается без ошибок, реальные данные с T-Invest счёта «Только для чтения» отображаются.
+
+### Изменённые файлы
+
+**Test/ (3 mod + 2 new):**
+- `Спринты/Sprint_7/changelog.md` — эта запись
+- `Спринты/Sprint_8_Review/backlog.md` — +5 карточек
+- `Документация по проекту/FAQ/dashboard.md` — **новый**
+- `Документация по проекту/FAQ/strategy_status.md` — **новый**
+
+**Develop/ (3 mod + 3 new):**
+- `frontend/src/utils/pickDefaultBrokerAccount.ts` — **новый**
+- `frontend/src/stores/accountSelectionStore.ts` — **новый**
+- `frontend/src/utils/__tests__/pickDefaultBrokerAccount.test.ts` — **новый**
+- `frontend/src/pages/AccountPage.tsx` — переписан (sandbox фильтр, persist, default, окно 30 дней)
+- `frontend/src/pages/__tests__/AccountPage.test.tsx` — +3 теста, mock `useAccountSelectionStore`
+
+### Не закоммичено
+
+Оркестратор коммитит сам, ветки спрашиваются отдельно для двух реп (`feedback_two_repos.md`).
+
+---
+
 ## 2026-04-27 — Wizard step 4 redesign: data-saving + правильная Telegram-привязка (вариант B2)
 
 - **Триггер:** заказчик 2026-04-27 явно потребовал, чтобы данные с шага 4 wizard'а сохранялись (см. memory `project_wizard_notifications_save.md`). Расследование выявило, что задача S7 7.8-fe была сделана с архитектурным расхождением: фронтенд просил `bot_token` + `chat_id` руками, но бэкенд endpoint `POST /api/v1/users/me/wizard/complete` body вообще не принимал и payload игнорировал. Кроме того сам подход «вводить bot_token руками» противоречит S6 архитектуре (bot_token — global config из `Settings.TELEGRAM_BOT_TOKEN`, chat_id появляется через flow привязки бота `link-token` → `/start <code>` → webhook).
