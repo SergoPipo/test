@@ -10,6 +10,64 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix-8: chart сжат по вертикали + рисунки потерялись под ключом «anon»
+
+### Триггер
+
+После приёмки hotfix-7 заказчик: «На примере лукойла всё так же не работает. Не отображаются рисунки, которые я выводил на график лукойла. И когда открываю через торговую сессию пятиминутный график — он сжат по вертикали очень сильно».
+
+### Корни (2 разных бага)
+
+**Баг A — chart сжат по вертикали (CSS-gotcha):** в `pages/ChartPage.tsx` `<Stack>` имел `flex: 1, minWidth: 0, overflow: 'hidden'` — но **без `minHeight: 0`**. Это классическая ловушка CSS Flexbox: дефолтный `min-height: auto` в flex column не даёт детям с `flex: 1` корректно распределить вертикальное пространство. Контейнер chart получал высоту, ограниченную «контентной» высотой Stack (то есть очень малую), → chart сжимался.
+
+В первой итерации layout fix (hotfix-2) я установил `minHeight: 0` на внешний `<Flex>` и `<Box>`, но забыл про средний `<Stack>` — без него «цепочка» min-height auto обрывает flex grow.
+
+**Баг B — рисунки потерялись под ключом 'anon':** в hotfix-6 я добавил guard `if (userId == null) return` в `setDrawingsContext`. До hotfix-6 setContext мог сработать с `userId=null` (auth ещё не восстановлен из persist) → `add()` сохранял рисунки в localStorage по ключу `drawings:anon:LKOH:D`. После hotfix-6 setContext всегда вызывается с правильным userId, но **старые осиротевшие рисунки** под `anon` так и остаются — никогда не загружаются.
+
+### Реализовано
+
+#### Fix-A: minHeight: 0 на Stack (`pages/ChartPage.tsx`)
+
+```ts
+// Было:
+<Stack style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+// Стало:
+<Stack style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+```
+
+Цепочка теперь полная: outer `<Flex minHeight: 0>` → `<Stack minHeight: 0>` → mainContent `<Group flex: 1, minHeight: 0>` → `<Box flex: 1, minHeight: 0>`. Chart получает реальную высоту от viewport.
+
+Playwright подтвердил: на `localhost:5173/chart/LKOH?session=2` с TF=5m chart рендерится во всю высоту, свечи и volume отображаются, нет сжатия.
+
+#### Fix-B: миграция 'anon' → userId (`utils/drawingsPersistence.ts`)
+
+`loadLocalDrawings(userId, ticker, tf)` теперь:
+1. Пробует основной ключ `drawings:N:TICKER:TF`.
+2. Если он пуст и `userId != null` — пробует «осиротевший» ключ `drawings:anon:TICKER:TF`.
+3. Если там что-то есть — **переносит** под правильный ключ через `saveLocalDrawings` и **удаляет** старый (одноразовая миграция).
+4. Возвращает items.
+
+Refactor: ввёл приватный helper `readRawAtKey(key)` — чтение и валидация (version, format) общие для основного ключа и anon-ключа.
+
+### Файлы
+
+Модифицировано (2):
+- `frontend/src/pages/ChartPage.tsx` — `minHeight: 0` на `<Stack>`.
+- `frontend/src/utils/drawingsPersistence.ts` — миграция anon→userId + helper `readRawAtKey`.
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint` — 0 errors, 0 warnings (моих).
+- `vitest run` — **438 / 438 passed** (включая 8 chartDrawingsStore + 4 drawingsPersistence — все совместимы).
+- Playwright `chart/LKOH?session=2` (5m TF) — chart полной высоты, свечи + volume отображаются, баннер `PAPER #2 · Тестовая` на месте.
+
+### Не сделано (вне scope)
+
+- **Migration warning toast** — пользователь не уведомляется, что произошла миграция anon→userId. Можно добавить в hotfix-9 если важно.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix-7: «Object is disposed» — chart не отображался при переходе из торговой сессии
 
 ### Триггер
