@@ -10,6 +10,121 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix: 4 регрессии после ручной приёмки
+
+### Триггер
+
+После приёмки заказчик прислал 4 проблемы по предыдущему commit'у `bb444a6`:
+
+1. **Линии тренда рисуются неправильно** — нет preview между p1 и курсором, пользователь не видит куда тянется линия до второго клика.
+2. **Drag только vertical** — выделенный объект перетаскивается только вверх/вниз, по X не двигается.
+3. **Линии за last bar по-прежнему не создаются** — кликнул правее последней свечи, ничего не создаётся.
+4. **Toolbar не как в TradingView** — нет popover-меню для групп, иконки не похожи на TradingView (нужны линии с кружочками-анкорами на концах, а не lucide `TrendingUp`).
+
+### Корни проблем (анализ кода)
+
+**п.2 drag только vertical:** в `pointToCoord` приоритет был `time → logical fallback`. После drag мы обновляем `point.logical` (точное pixel-positioning), но `point.t` остаётся валидным (синтезированный ISO внутри данных). При рендере `timeToCoordinate(t)` срабатывает раньше logical → возвращает **старую** x-координату. Drag по X визуально не накапливается.
+
+**п.3 extrapolation creation:** в `getBarWidthSec` использовались `mid` и `mid+1`. Если `mid+1` оказывается за last bar — `coordinateToTime(x)` возвращает null → `barWidth` null → `clickToDrawingPoint` для клика за last bar полностью fail'ит и возвращает null → точка не создаётся.
+
+**п.1 preview:** в Phase 1 я явно отметил «вне scope», но без preview инструмент неюзабелен.
+
+**п.4 toolbar:** в Phase 7 я ограничился заменой Tabler→lucide, без структурной группировки. TradingView использует popover-меню по клику на parent-кнопку (одна иконка для целой категории «Линии»).
+
+### Реализовано
+
+#### Fix-2 — drag по X (`coords.ts`)
+
+В `pointToCoord` и `shiftPoint` приоритет конверсии **`logical → time`** (вместо `time → logical fallback`):
+
+```ts
+let x: number | null = null;
+if (point.logical != null) {
+  x = ts.logicalToCoordinate(point.logical as Logical);
+}
+if (x == null) {
+  x = ts.timeToCoordinate(isoToTime(point.t));
+}
+```
+
+Logical-координата всегда даёт точную pixel-позицию (включая после drag). Time остаётся fallback'ом для старых drawings без `logical`-поля.
+
+#### Fix-3 — extrapolation creation (`coords.ts`)
+
+`getBarWidthSec` переписан на стратегию «несколько кандидатов внутри данных»:
+
+```ts
+const candidates = [from + 1, Math.floor((from + to) / 2), Math.max(from + 1, to - 2)];
+for (const a of candidates) {
+  const xa = ts.logicalToCoordinate(a);
+  const xb = ts.logicalToCoordinate(a + 1);
+  // ...пробуем coordinateToTime для пары a, a+1; первая валидная — возвращаем
+}
+```
+
+Дополнительно `clickToDrawingPoint` больше не возвращает null когда `barWidth` не вычислился — генерим точку с `logical` и текущей датой как ISO. При рендере `pointToCoord` использует `logical` (приоритет), ISO нужен только для backend-совместимости.
+
+Вспомогательная функция `synthesizeIsoFromLogical` вынесена из `clickToDrawingPoint` и переиспользуется в `shiftPoint`.
+
+#### Fix-1 — preview-primitive (`DrawingsLayer.tsx`)
+
+Новый useEffect: пока `pendingPoint` есть и инструмент — двух-клик (`trendline`/`rect`), на каждое движение курсора создаётся/обновляется временный primitive с `id='__preview__'`, blue dashed-стиль. На pointer-leave / Esc / завершение фигуры — preview detach'ится.
+
+```ts
+const previewPrimRef = useRef<DrawingPrimitiveBase | null>(null);
+// в crosshairMove:
+const previewDrawing = { id: '__preview__', type: currentTool, data: { p1: pendingPoint, p2: hover }, style: { color: '#60A5FA' } };
+if (previewPrimRef.current) previewPrimRef.current.setDrawing(previewDrawing);
+else { ...attach... }
+```
+
+Preview не попадает в store (id `__preview__` не пересекается с реальными items в синхронизирующем useEffect).
+
+#### Fix-4 — TradingView-style toolbar (`DrawingToolbar.tsx` + `DrawingToolbarIcons.tsx`)
+
+- **Новый файл `DrawingToolbarIcons.tsx`** — кастомные SVG в стиле TradingView: `CursorIcon`, `TrendlineIcon` (диагональ + 2 кружка-анкора), `HlineIcon` (линия + центральный кружок), `VlineIcon`, `RectIcon`, `LabelIcon` (T), `ListIcon`, `TrashIcon`. lucide-react больше не используется (зависимость осталась в package.json — на будущее).
+- **Структура**:
+  1. Cursor (singleton)
+  2. **Lines** — Mantine `<Menu>` с popover, иконка parent-кнопки = последний выбранный line-tool. Внутри: Trendline (T), HLine (H), VLine.
+  3. Rect (singleton, иконка `RectIcon`)
+  4. Label (singleton)
+  5. List (открыть Modal-редактор)
+  6. **Trash** — Mantine `<Menu>` popover. Внутри: «Удалить выделенный» (Del), «Удалить все рисунки».
+- Между группами — `<Divider />`.
+- `aria-pressed` на parent-кнопках (Lines подсвечивается синим если current — trendline/hline/vline; Trash активен если есть selectedId или items).
+- `data-testid` обновлены: `chart-tool-lines` (parent), `chart-tool-trash` (parent). Дочерние `chart-tool-trendline/hline/vline/delete/clear` теперь внутри Menu.Items.
+
+#### Тесты
+
+- `__tests__/DrawingToolbar.test.tsx` переписан под новую структуру:
+  - Удалён тест «клик по trendline через popover» (Mantine Menu в jsdom требует `userEvent`-симуляцию hover/portal — покрытие отдаём e2e).
+  - Добавлены тесты parent-aria: «parent Lines подсвечен когда выбран trendline», «Trash parent disabled при пустом state», «Trash parent enabled при наличии рисунков», «Trash parent enabled при наличии selectedId».
+  - Hot-keys (T/H/V/Esc/ignore-input) — без изменений, работают как раньше.
+
+### Файлы
+
+Создано (1): `frontend/src/components/charts/DrawingToolbarIcons.tsx`
+
+Модифицировано (4):
+- `frontend/src/components/charts/primitives/coords.ts` — приоритет logical, getBarWidthSec, synthesizeIsoFromLogical, fallback в clickToDrawingPoint
+- `frontend/src/components/charts/DrawingsLayer.tsx` — preview-primitive useEffect, импорты ticker/timeframe из store
+- `frontend/src/components/charts/DrawingToolbar.tsx` — переписан с Mantine Menu и кастомными SVG
+- `frontend/src/components/charts/__tests__/DrawingToolbar.test.tsx` — обновлён под новую структуру (parent-кнопки)
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint src/components/charts/...` — 0 errors, 0 warnings.
+- `vitest run` — **438 / 438 passed** (на 1 больше, чем до фикса — добавлены тесты parent-aria, удалён нестабильный portal-тест).
+- Playwright: `localhost:5173/chart/LKOH` — новый toolbar отображается компактно (8 иконок вместо 11 раньше), кастомные SVG в стиле TradingView, divider'ы между группами видны.
+
+### Не сделано (вне scope)
+
+- **Удаление `lucide-react` из package.json** — зависимость не удалена, оставлена «на будущее» (если понадобится для других мест). Удалить можно через `pnpm remove lucide-react` если bundle-size критичен.
+- **Hover-trigger для Mantine Menu** — был `trigger="click-hover"`, упростил до `trigger="click"` (стабильнее в jsdom-тестах). Mantine `openOnHover` можно вернуть отдельным фиксом.
+
+---
+
 ## 2026-04-28 — chart-drawings rev2: миграция на ISeriesPrimitive + 7 фиксов UX
 
 ### Триггер
