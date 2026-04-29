@@ -10,6 +10,71 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix-9: рисунки рисовались в неверном месте (logical-first)
+
+### Триггер
+
+Заказчик: «Стали пропадать рисунки. На графике лукойла сохранил long position — на скриншоте видно (в Modal «Рисунки на графике»), что она присутствует, но на фоне её не видно».
+
+### Корень
+
+В hotfix-2 (после жалобы на drag по X) я поменял приоритет в `pointToCoord` и `shiftPoint` с `time → logical fallback` на `logical → time fallback`. Это решало drag (где после первого move обновлялся только logical, и `timeToCoordinate(старый t)` возвращал ту же позицию), но создавало другую проблему:
+
+**`logical` — это индекс бара в текущем dataset, а не абсолютное время**. После reload данных (особенно на 5m TF где много баров; смена TF, refresh свечей через WS, прокрутка к старым данным с подгрузкой) бар с тем же `logical` оказывается **другим временем** → drawing рисуется в неправильном месте, или `logical` уходит за visible range → primitive рендерится за пределами видимости (пользователь его «не видит»).
+
+### Реализовано
+
+В hotfix-4 я уже починил `getBarWidthSec` — теперь `synthesizeIsoFromLogical` надёжно возвращает валидный ISO. Это значит, что `shiftPoint` при drag обновляет **и `t` и `logical`** согласованно. Поэтому можно безопасно вернуть `time-first` приоритет.
+
+#### Fix-A: `pointToCoord` — приоритет time → logical (`coords.ts`)
+
+```ts
+// Было (logical-first, после hotfix-2):
+let x: number | null = null;
+if (point.logical != null) {
+  x = ts.logicalToCoordinate(point.logical as Logical);
+}
+if (x == null) {
+  x = ts.timeToCoordinate(isoToTime(point.t));
+}
+
+// Стало (time-first, как до hotfix-2 + улучшения):
+let x = ts.timeToCoordinate(isoToTime(point.t));
+if (x == null && point.logical != null) {
+  x = ts.logicalToCoordinate(point.logical as Logical);
+}
+```
+
+`time` = абсолютная метка → стабильна между сессиями, не зависит от dataset. `logical` остаётся как fallback **только для точек за last bar** (где `timeToCoordinate` возвращает null).
+
+#### Fix-B: `shiftPoint` — тот же приоритет для согласованности (`coords.ts`)
+
+Изменён аналогично — `oldX` берётся через `timeToCoordinate(t)` сначала, `logicalToCoordinate` как fallback. В DrawingsLayer drag-handler передаётся `originalDrawing` на каждый move (накопительный dx от старта), так что `oldX` — это базовая позиция до drag start, что корректно.
+
+### Drag регрессия?
+
+Нет. Drag совместим благодаря фиксу `getBarWidthSec` из hotfix-4: `shiftPoint` обновляет и `t` (через `synthesizeIsoFromLogical`), и `logical`. После drag `t` валиден → `timeToCoordinate(новый t)` возвращает точную координату → drag по X работает.
+
+Если бы `synthesizeIsoFromLogical` иногда возвращал null (как было до hotfix-4), `t` оставался бы старым → time-first приоритет ломал бы drag. Сейчас этого нет.
+
+### Файлы
+
+Модифицировано (1):
+- `frontend/src/components/charts/primitives/coords.ts` — `pointToCoord` и `shiftPoint` обратно на time-first приоритет.
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint coords.ts` — 0 errors, 0 warnings.
+- `vitest charts + chartDrawingsStore` — **66 / 66 passed**.
+- Playwright `chart/LKOH` — chart полной высоты, **зелёный rect (старый rect drawing) видим в правильной позиции** (раньше не был виден, потому что logical-первый приоритет рисовал его за visible range).
+
+### Trade-off
+
+Если пользователь нарисовал drawing на ОДНОМ TF и переключился на ДРУГОЙ TF — drawing всё равно отрисуется на правильном **time** (благодаря time-first). Logical уже не валиден между TF — но это OK, fallback на time.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix-8: chart сжат по вертикали + рисунки потерялись под ключом «anon»
 
 ### Триггер
