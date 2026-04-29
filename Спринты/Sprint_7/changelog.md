@@ -10,6 +10,94 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix-7: «Object is disposed» — chart не отображался при переходе из торговой сессии
+
+### Триггер
+
+Заказчик: «Из открытой торговой сессии перехожу на график лукойла — он не отображается». На скриншоте: header с OHLC заполнен (5530/5533,50/...), crosshair виден, но самих свечей нет.
+
+### Корень
+
+Playwright поверх показал в console:
+
+```
+Error: Object is disposed
+  at DevicePixelContentBoxBinding.get
+  at DevicePixelContentBoxBinding.resizeCanvasElement
+  at TimeAxisWidget._internal_setSizes
+  at ChartWidget._private__adjustSizeImpl
+  at ChartWidget._private__drawImpl
+```
+
+Это race в lightweight-charts:
+1. CandlestickChart unmount → `chart.remove()` (chart instance disposed).
+2. `onChartReady(null, null)` — но вызывается **после** `chart.remove()`. Parent setState async → DrawingsLayer/OpenPositionsLayer ещё видят disposed chart в props.
+3. Pending ResizeObserver entry, который браузер доставил после `observer.disconnect()`, всё равно срабатывает (это документированное поведение ResizeObserver) и вызывает `chart.applyOptions({width, height})` на disposed instance → exception.
+4. Layout fix из hotfix-2 (`flex: 1` вместо `calc(100vh - 220px)`) сделал ResizeObserver более активным — race стал воспроизводиться при каждом переходе с trading-страницы.
+
+В режиме session переключение TF (`setTimeframe(sessionInfo.timeframe)` + `fetchCandles()`) триггерит loading-flip → CandlestickChart unmount/re-mount → ловит race.
+
+### Реализовано
+
+#### Fix-A: try/catch в ResizeObserver (`CandlestickChart.tsx`)
+
+```ts
+const observer = new ResizeObserver((entries) => {
+  if (disposed) return;
+  for (const entry of entries) {
+    const { width: rw, height: rh } = entry.contentRect;
+    if (rw > 0 && rh > 0) {
+      if (!chartRef.current) {
+        createChartInstance(rw, rh);
+      } else {
+        try {
+          chartRef.current.applyOptions({ width: rw, height: rh });
+          // + showVolume scaleMargins update
+        } catch {
+          // chart мог быть disposed между disconnect и pending callback
+        }
+      }
+    }
+  }
+});
+```
+
+`disposed` флаг + try/catch — двойной guard. Если pending ResizeObserver entry приходит после `observer.disconnect()` (race), `applyOptions` молча проглатывается.
+
+#### Fix-B: порядок onChartReady → chart.remove() (`CandlestickChart.tsx::cleanup`)
+
+```ts
+return () => {
+  disposed = true;
+  observer.disconnect();
+  ...
+  // ВАЖНО: уведомляем layer'ы ДО chart.remove() — даём шанс detachPrimitive
+  // на ещё-живом series. Раньше было наоборот → race с React-рендером.
+  try { onChartReadyRef.current?.(null, null); } catch { /* silent */ }
+  if (chartRef.current) {
+    try { chartRef.current.remove(); } catch { /* silent */ }
+  }
+  chartRef.current = null;
+  ...
+};
+```
+
+DrawingsLayer / OpenPositionsLayer успевают cleanup свои primitives через React rerender (они зависят от props.series), пока chart instance ещё валиден.
+
+### Файлы
+
+Модифицировано (1):
+- `frontend/src/components/charts/CandlestickChart.tsx` — try/catch в ResizeObserver + порядок cleanup.
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint` — 0 errors, 1 pre-existing warning (не моё).
+- `vitest charts` — 58/58 passed.
+- **Playwright `localhost:5173/chart/LKOH?session=2` — 0 errors** (раньше 22, в т.ч. «Object is disposed»). Свечи рендерятся, OHLC заполнен (5433/5439/5432/5435 на 5м TF), volume бары видны, тулбар и баннер сессии PAPER #2 на месте.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix-6: рисунок исчезает после reload
 
 ### Триггер
