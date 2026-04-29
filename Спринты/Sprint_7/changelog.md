@@ -10,6 +10,53 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix-5: body-drag не работал для position
+
+### Триггер
+
+После приёмки commit'а `03d47b0` заказчик: «Теперь с изменением размеров всё корректно работает, но я не могу перетащить этот инструмент».
+
+### Корень
+
+`shiftDrawing` в `coords.ts` (вызывается из `applyHandleDrag` при `handle === 'body'`) знает только про legacy-поля payload'а: `p1`, `p2`, `anchor`, и спец-логику для `hline.price` и `vline.t`. Поля **`entry`, `end`, `target`, `stop`** (которые добавлены для long_position/short_position) — не обрабатываются. При drag за тело фигура остаётся на месте.
+
+Resize углов работал, потому что для него `applyHandleDrag` имеет отдельную position-ветку (добавлена в hotfix-4). Для body такой ветки не было.
+
+### Реализовано
+
+В `shiftDrawing` (`coords.ts`) добавлена ветка для long/short position — двигает все 4 поля как единое целое:
+
+```ts
+if (drawing.type === 'long_position' || drawing.type === 'short_position') {
+  if (data.entry) data.entry = shiftPoint(data.entry, dx, dy, chart, series);
+  if (data.end) data.end = shiftPoint(data.end, dx, dy, chart, series);
+  // target/stop — числа, двигаем через priceToCoordinate + dy → coordinateToPrice
+  if (data.target != null) {
+    const oldY = series.priceToCoordinate(data.target);
+    if (oldY != null) {
+      const newPrice = series.coordinateToPrice(oldY + dy);
+      if (newPrice != null) data.target = Number(newPrice);
+    }
+  }
+  // ... аналогично для stop
+}
+```
+
+`entry`/`end` — DrawingPoint, для них существует `shiftPoint` (он сам разбирается с logical/time/price). `target`/`stop` — просто числа-цены, двигаем через прямую конверсию pixel-Y в price.
+
+### Файлы
+
+Модифицировано (1):
+- `frontend/src/components/charts/primitives/coords.ts` — position-ветка в `shiftDrawing`.
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint coords.ts` — 0 errors, 0 warnings.
+- `vitest src/components/charts/` — 58/58 passed.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix-4: Position resize не работал + узкая фигура
 
 ### Триггер
