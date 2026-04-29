@@ -10,6 +10,89 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix-3: Long/Short Position drawing tool (TradingView-style)
+
+### Триггер
+
+Заказчик прислал скриншот TradingView с группой «Forecasting and measurement tools» и инструментами **Long position** / **Short position**. Это **drawing-инструмент для планирования сделки** (не отображение реальных open positions из tradingStore — то покрыто Phase 8 в `OpenPositionsLayer`). Пользователь рисует на графике предполагаемую сделку: где войти, где цель, где стоп — система автоматически считает % изменения, R/R и Open P&L.
+
+### Реализовано
+
+#### Шаг 1: расширение типов (`api/chartDrawingsApi.ts`)
+
+- `DrawingType` расширен: `'long_position'` | `'short_position'`.
+- `DrawingPayload` дополнен полями: `entry?: DrawingPoint`, `end?: DrawingPoint`, `target?: number`, `stop?: number`, `qty?: number`. Backend получит их как opaque-поля (router пока в BACKEND-PENDING, контракт расширяется без слома совместимости).
+
+#### Шаг 2: `PositionDrawingPrimitive.ts` (новый файл, ~210 строк)
+
+Единый primitive-класс для long и short (поведение определяется типом drawing'а).
+
+**Рендер** (через `target.useMediaCoordinateSpace`):
+- Зелёный полупрозрачный rect (`rgba(38, 166, 154, 0.18)`) от entry до target — зона потенциальной прибыли.
+- Красный полупрозрачный rect (`rgba(239, 83, 80, 0.18)`) от entry до stop — зона потенциального убытка.
+- Серая dashed entry-линия (`#9CA3AF`) посередине.
+- Текстовый бэйдж над entry: `«L +0.50% · R/R 2.00»` / `«S +0.50% · R/R 2.00»` (направление + % прибыли + risk/reward соотношение). Цвет текста = profit color.
+- При selected — 4 анкора-кружка по углам (target-tl/tr, stop-bl/br).
+
+**Price-axis бэйджи** (через `priceAxisViews`):
+- Target price — green badge с числом.
+- Stop price — red badge с числом.
+
+**Hit-test**:
+- Если selected — приоритетно проверяет 4 угла (radius 8px) → возвращает `corner-tl/tr/bl/br`.
+- Body — внутри bbox от target-y до stop-y, от entry-x до end-x → возвращает `body`.
+
+Drag через `applyHandleDrag` (из предыдущей итерации) — body двигает целиком, углы изменяют размер. Resize углов автоматически меняет target/stop через `shiftPoint` + price из новой Y-координаты.
+
+#### Шаг 3: иконки (`DrawingToolbarIcons.tsx`)
+
+- `LongPositionIcon` — зелёный rect сверху (target), серая dashed entry-линия, красный rect снизу (stop), буква «L» в левой колонке.
+- `ShortPositionIcon` — symmetric: красный сверху (stop), серая, зелёный снизу (target), буква «S».
+
+#### Шаг 4: интеграция в DrawingsLayer
+
+- `createPrimitive()` добавлены case `'long_position'` / `'short_position'` → `new PositionDrawingPrimitive(drawing)`.
+- `handleCreation()` добавлены case → вызывает новую утилиту `buildPositionPayload(pt, direction, chart)`:
+  - `entry = pt`, `end = pt + 30 баров вправо` (через `getBarWidthSec`).
+  - Long defaults: `target = entry × 1.005`, `stop = entry × 0.9975` → R/R = 2.
+  - Short defaults: `target = entry × 0.995`, `stop = entry × 1.0025` → R/R = 2.
+  - `qty = 1`.
+- Создание — 1 клик (одно действие), без двух-точечного режима. После создания инструмент возвращается на cursor.
+
+#### Шаг 5: toolbar группа «Прогнозирование» (`DrawingToolbar.tsx`)
+
+- Новая parent-кнопка с popover-меню `Mantine.Menu`, `data-testid="chart-tool-positions"`. Иконка — последняя выбранная (Long или Short, через тот же sync-setState-в-render паттерн что у группы Lines).
+- В меню: 2 пункта `Long position` / `Short position` с соответствующими data-testid (`chart-tool-long-position` / `chart-tool-short-position`).
+- aria-pressed на parent активна когда `currentTool ∈ {long_position, short_position}`.
+- Расположена между группами «Текст» и «Список рисунков».
+
+### Файлы
+
+Создано (1):
+- `frontend/src/components/charts/primitives/PositionDrawingPrimitive.ts`
+
+Модифицировано (4):
+- `frontend/src/api/chartDrawingsApi.ts` — DrawingType + DrawingPayload поля.
+- `frontend/src/components/charts/DrawingToolbarIcons.tsx` — LongPositionIcon, ShortPositionIcon.
+- `frontend/src/components/charts/DrawingsLayer.tsx` — createPrimitive case + buildPositionPayload + handleCreation.
+- `frontend/src/components/charts/DrawingToolbar.tsx` — POSITION_TOOLS, lastPositionTool, новая Menu-группа в JSX.
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint` — 0 errors, 1 pre-existing warning (CandlestickChart, не моё).
+- `vitest run` — **438 / 438 passed**.
+- Playwright: новая иконка Position видна в toolbar между Label и List. Полный UX-сценарий (создание, drag углов для resize target/stop, drag body для перемещения всей фигуры) требует ручной проверки.
+
+### Не сделано (вне scope, кандидаты на отдельные карточки)
+
+- **Бэйджи Target/Open P&L/Stop в стиле TradingView** (зелёный/красный с подробной информацией: цена + % + Amount = qty × Δprice). Сейчас только один компактный бэйдж над entry-линией. Расширение требует расчёта Open P&L через current price (нужен `series.dataByIndex(lastLogical)` или подписка на updates).
+- **Edit Modal для qty / target / stop** — пока фигура редактируется только drag'ом за углы. Modal с числовыми input'ами для точной настройки — отдельная задача.
+- **Контекстное меню по правому клику** на фигуре (Edit / Delete / Convert to position).
+- **Дополнительные handles** на target/stop линиях (middle-top, middle-bottom) для drag только цены без изменения времени.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix-2: layout, creation за last bar, resize handles
 
 ### Триггер
