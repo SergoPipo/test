@@ -10,6 +10,84 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix-10: long/short position тянулась вместо переноса при body-drag
+
+### Триггер
+
+После hotfix-9: «Теперь вместо перетаскивания long/short позиции по горизонтали она не перетаскивается, а тянется в ширину».
+
+### Корень
+
+В hotfix-9 я унифицировал приоритет в `pointToCoord` И `shiftPoint` на **time-first**. Для render это правильно (стабильность между сессиями). Но для **drag** возник баг:
+
+`buildPositionPayload` синтезирует `end.t` через `entryTimeSec + 30 × barWidth`. Это время может **не совпадать** с timestamp ни одного бара (например, midpoint между баром на 17:30 и баром на 17:35). При вызове `shiftPoint(end, dx, dy)`:
+
+```ts
+let oldX = ts.timeToCoordinate(isoToTime(end.t));  // → null или x ближайшего бара
+```
+
+`lightweight-charts` для time, не совпадающего с bar timestamp:
+- Возвращает `null` → срабатывает fallback на logical (OK).
+- ИЛИ возвращает координату ближайшего bar'а (например `x_17:30` для t=17:32) — **неточно**.
+
+В обоих случаях `oldX` неточен → `newX = oldX + dx` смещён относительно реальной visual позиции end → end сдвигается не на dx, а на dx ± bar offset.
+
+`entry.t` обычно совпадает с bar timestamp (это клик пользователя, который lightweight-charts округляет к bar'у) → `oldX` для entry точен → entry двигается правильно. **end не двигается на правильное расстояние** → фигура «тянется в ширину» (entry уехал, end остался ≈ на месте).
+
+### Реализовано
+
+**Разделение приоритетов** для двух функций (они оптимизируют под разные цели):
+
+#### `pointToCoord` — остаётся **time-first** (для render)
+
+```ts
+let x = ts.timeToCoordinate(isoToTime(point.t));
+if (x == null && point.logical != null) {
+  x = ts.logicalToCoordinate(point.logical as Logical);
+}
+```
+
+Стабильность между сессиями: `time` — абсолютная метка, не зависит от текущего dataset.
+
+#### `shiftPoint` — **logical-first** (для drag)
+
+```ts
+let oldX: number | null = null;
+if (point.logical != null) {
+  oldX = ts.logicalToCoordinate(point.logical as Logical);
+}
+if (oldX == null) {
+  oldX = ts.timeToCoordinate(isoToTime(point.t));
+}
+```
+
+Точная пиксельная позиция текущей фигуры: `logicalToCoordinate(logical)` — **линейная функция** дробного индекса, всегда возвращает точную позицию даже для нецелого logical (например, 230.7).
+
+После drag `synthesizeIsoFromLogical` обновляет `t` через barWidth × delta — `pointToCoord` на следующем рендере вернёт x от этого нового t. Если `t` совпадает с bar'ом — точная позиция; если нет — fallback на logical (тоже точная). Drag плавный, render стабильный после reload.
+
+### Файлы
+
+Модифицировано (1):
+- `frontend/src/components/charts/primitives/coords.ts` — `shiftPoint` обратно на logical-first (откат hotfix-9 для shiftPoint, но `pointToCoord` остался time-first).
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint coords.ts` — 0 errors, 0 warnings.
+- `vitest charts + chartDrawingsStore` — **66 / 66 passed**.
+- Playwright `chart/LKOH` — **0 console errors**, зелёный rect отображается в правильной позиции.
+
+### Архитектурный итог: разные приоритеты для разных целей
+
+| Функция | Приоритет | Цель |
+|---------|-----------|------|
+| `pointToCoord` | time → logical | стабильность между сессиями (выживает reload, смену TF) |
+| `shiftPoint` | logical → time | точная pixel-позиция (drag без «залипания» к bar'ам) |
+
+Оба источника обновляются согласованно при каждом drag (synthIso через barWidth + новый logical), так что render стабилен после drag.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix-9: рисунки рисовались в неверном месте (logical-first)
 
 ### Триггер
