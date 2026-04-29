@@ -10,6 +10,111 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix-2: layout, creation за last bar, resize handles
+
+### Триггер
+
+После приёмки commit'а `84ab0a9` заказчик прислал 3 новых проблемы:
+
+1. **График не занимает всю высоту страницы** — внизу пустое пространство, при resize окна высота не пересчитывается (на скриншоте видно ~30% свободного места под графиком).
+2. **Линия пропадает при создании за last bar** — если ставить **конечную точку** трендлайна за пределами текущего времени, линия не отображается. При этом drag нарисованной линии за last bar — работает (фикс из предыдущей итерации).
+3. **Нет resize у trendline / rect** — выделенный объект перетаскивается только целиком, нельзя тянуть за концы линии или углы прямоугольника для изменения формы.
+
+### Реализовано
+
+#### Fix-1 — layout: chart на всю высоту (`pages/ChartPage.tsx`)
+
+Корень: контейнер графика имел статическую `height: 'calc(100vh - 220px)'`, не реагировал на размер окна и оставлял пустое место.
+
+```ts
+// Было:
+<Group style={{ height: 'calc(100vh - 220px)', minHeight: 400 }}>
+// Стало:
+<Group style={{ flex: 1, minHeight: 0 }}>
+<Box style={{ flex: 1, position: 'relative', minWidth: 0, minHeight: 0 }}>
+```
+
+Внешний `<Stack>` уже имеет `flex: 1`, поэтому Group растягивается на всё свободное вертикальное пространство, а Box (контейнер chart) — на всё свободное по обоим осям. При resize браузера chart пересчитывается автоматически (lightweight-charts реагирует на ResizeObserver).
+
+#### Fix-2 — линия за last bar при создании (`DrawingsLayer.tsx`)
+
+Корень: `chart.subscribeClick` в lightweight-charts иногда не вызывает callback для кликов **за** последним баром (только для кликов внутри области данных). При установке p1 внутри данных это работает, но второй клик за last bar пропускается → `add()` никогда не вызывается → фигура не создаётся.
+
+Решение: **двухслойная архитектура click-handler'а**:
+
+- `chart.subscribeClick` — основной handler (как и было).
+- `container.addEventListener('click')` — **fallback**: ловит клики, которые subscribeClick пропустил. Использует `clickToDrawingPoint` с `time: undefined` → синтез ISO через `logical`-координату.
+- **Дедупликация**: `lastSubscribeCreationRef = useRef(0)` — timestamp последнего успешного creation через subscribeClick. Container handler пропускает обработку, если subscribeClick сработал в последние 200ms (значит, это был один и тот же click).
+- Игнорирование зоны price-axis: container handler пропускает клики в правых ~60px (там сама ось цены).
+
+Creation-логика вынесена в общую функцию `handleCreation(pt)` — используется обоими handler'ами, нет дубликата switch/case.
+
+#### Fix-3 — resize handles (рефакторинг hit-test + drag)
+
+Расширена externalId-конвенция: `drawing:<id>:<handle>` где `handle ∈ {body, p1, p2, corner-tl/tr/bl/br}`.
+
+**`primitives/types.ts`** (новый функционал):
+- Тип `DrawingHandle` — все возможные handle.
+- `externalIdForHandle(drawing, handle)` — формирует ID с handle-суффиксом.
+- `parseExternalId(ext)` → `{drawingId, handle}` — обратное.
+- `cursorForHandle(handle)` → CSS cursor (`nwse-resize` для tl/br углов, `nesw-resize` для tr/bl, `move` для body/анкоров).
+- `externalIdFor` сохранён как backwards-compat alias.
+
+**`primitives/TrendlinePrimitive.ts.hitTest`**:
+- Если `isSelected()` → проверяет p1 и p2 (radius 8px) **до** body. Возвращает externalId с `handle='p1'` или `'p2'`.
+- Иначе/fallback — segment hit-test, handle `'body'`.
+
+**`primitives/RectPrimitive.ts.hitTest`**:
+- Если `isSelected()` → проверяет 4 угла (tl/tr/bl/br, radius 8px) до body. Углы вычисляются по min/max координат p1/p2 (учёт ориентации).
+- Иначе — point-in-rect с handle `'body'`.
+
+**`primitives/{Hline,Vline,Label}Primitive.ts`** — обновлены на `externalIdForHandle(drawing, 'body')` (вместо legacy `externalIdFor`). Resize-функционала у них нет (только body).
+
+**`primitives/coords.ts`** (новая утилита `applyHandleDrag`):
+
+```ts
+applyHandleDrag(drawing, handle, dx, dy, chart, series): ChartDrawing
+```
+
+Семантика:
+- `'body'` → `shiftDrawing` (движение целиком, как раньше).
+- `'p1'` / `'p2'` → `shiftPoint` только к нужной точке (для trendline).
+- `'corner-tl/tr/bl/br'` → определяет какая из p1/p2 хранит min/max координаты для X и Y, применяет дельту к нужным компонентам. Учитывает ориентацию (p1 и p2 могут быть в любом порядке).
+
+**`DrawingsLayer.tsx`** drag-handler:
+- Парсит `parseExternalId(prim.hitTest(x, y).externalId)` → получает `handle`.
+- Сохраняет в `dragStateRef.current.handle`.
+- На pointermove вызывает `applyHandleDrag(originalDrawing, handle, dx, dy, ...)` вместо `shiftDrawing`.
+- Cursor динамически: для углов — `nwse-resize`/`nesw-resize`, для body — `grabbing`, для анкоров — `move`.
+
+### Файлы
+
+Модифицировано (9):
+- `frontend/src/pages/ChartPage.tsx` — flex layout вместо calc().
+- `frontend/src/components/charts/DrawingsLayer.tsx` — fallback container click + drag через handle.
+- `frontend/src/components/charts/primitives/types.ts` — DrawingHandle + externalIdForHandle + parseExternalId + cursorForHandle.
+- `frontend/src/components/charts/primitives/TrendlinePrimitive.ts` — hit-test приоритет p1/p2 если selected.
+- `frontend/src/components/charts/primitives/RectPrimitive.ts` — hit-test приоритет 4 углов если selected.
+- `frontend/src/components/charts/primitives/HlinePrimitive.ts` — externalIdForHandle.
+- `frontend/src/components/charts/primitives/VlinePrimitive.ts` — externalIdForHandle.
+- `frontend/src/components/charts/primitives/LabelPrimitive.ts` — externalIdForHandle.
+- `frontend/src/components/charts/primitives/coords.ts` — applyHandleDrag для дифференцированного drag по handle.
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint` — 0 errors, 1 pre-existing warning в CandlestickChart (не моё).
+- `vitest run` — **438 / 438 passed**.
+- Playwright: chart на `/chart/LKOH` теперь занимает всю высоту от toolbar'а до футера (на скриншоте видно от ~Y=110 до ~Y=830, без пустого пространства внизу).
+
+### Не сделано (вне scope)
+
+- **Drag нарисованного rect за рёбра** (не углы) — пока только углы. Edge-handles (середина каждой стороны) можно добавить отдельно.
+- **Resize hline/vline за концы** — у них нет «концов» в смысле отрезка. Hline тянется на всю ширину, vline — на всю высоту. Resize не применим.
+- **Анимированные cursor-style transitions** — на смене handle курсор меняется мгновенно, без плавного перехода. Это OS-level, не правится.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix: 4 регрессии после ручной приёмки
 
 ### Триггер
