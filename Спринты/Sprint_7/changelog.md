@@ -10,6 +10,76 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix-6: рисунок исчезает после reload
+
+### Триггер
+
+Заказчик: «Почему после того, как я поместил рисунок на графике и перезагрузил страницу, то рисунка я не вижу?»
+
+### Корни (2 связанных бага)
+
+**Баг A — главный (`chartDrawingsStore.setContext`):** при успешном GET от backend (даже когда он вернул `[]`) код **перезаписывал localStorage пустым массивом**:
+
+```ts
+const items = Array.isArray(resp.data) ? resp.data : [];
+set({ items, backendAvailable: true });
+saveLocalDrawings(userId, ticker, tf, items); // ← разрушает local cache
+```
+
+Раньше backend возвращал ошибку (404 / connection refused) → catch → fallback на localStorage. Сейчас, видимо, dev-сервер запущен с backend, endpoint существует, возвращает `[]` (т.к. router всё ещё BACKEND-PENDING — реальной БД-таблицы нет) — каждый reload трёт local-кэш.
+
+**Баг B — race condition (`ChartPage.tsx`):** `setDrawingsContext` вызывался при `!ticker || !token` guard'е, но БЕЗ проверки `userId`. Если auth ещё не восстановился из persist (zustand persist async), userId был `null` — ключ localStorage становился `'drawings:anon:LKOH:D'` вместо `'drawings:7:LKOH:D'`. Загружались «не те» рисунки (или пусто), а потом, когда userId восстанавливался, useEffect перезапускался с правильным userId — но за это время мог сработать Баг A и перезаписать local пустым.
+
+### Реализовано
+
+#### Fix-A (`stores/chartDrawingsStore.ts::setContext`)
+
+```ts
+const items = Array.isArray(resp.data) ? resp.data : [];
+if (items.length > 0) {
+  // Backend знает рисунки — он источник истины, синхронизируем localStorage.
+  set({ items, backendAvailable: true });
+  saveLocalDrawings(userId, ticker, tf, items);
+} else {
+  // Backend пустой — НЕ затираем local cache. Берём из localStorage
+  // (пока router pending — БД всегда вернёт []; затирать local нельзя).
+  const local = loadLocalDrawings(userId, ticker, tf);
+  set({ items: local, backendAvailable: true });
+}
+```
+
+Trade-off: если пользователь удалил рисунок через другую вкладку/устройство (через backend), в этой вкладке после reload он увидит его обратно из local. Это допустимо до запуска backend router'а — после него поведение станет правильным (delete через API очистит local при следующем reload, потому что backend ответит со списком без удалённого).
+
+#### Fix-B (`pages/ChartPage.tsx`)
+
+```ts
+useEffect(() => {
+  if (!ticker || !token || userId == null) return;  // +userId guard
+  setDrawingsContext(userId, ticker, currentTimeframe);
+}, [userId, ticker, currentTimeframe, token, setDrawingsContext]);
+```
+
+Гарантирует что setContext вызывается только с реальным userId — не с null. Когда auth восстанавливается из persist, useEffect перезапустится с правильным userId.
+
+### Файлы
+
+Модифицировано (2):
+- `frontend/src/stores/chartDrawingsStore.ts` — не перезаписывать localStorage пустым ответом backend.
+- `frontend/src/pages/ChartPage.tsx` — userId guard в setDrawingsContext effect.
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint` — 0 errors, 0 warnings.
+- `vitest run` — **438 / 438 passed** (включая 8 тестов chartDrawingsStore — все совместимы с новым поведением).
+
+### Не сделано (вне scope)
+
+- **Backend router** для `/api/v1/charts/{ticker}/{tf}/drawings` — отдельная карточка `S7R-DRAW-BACKEND` (medium). Когда появится, поведение setContext станет более «классическим»: backend = источник истины, localStorage только cache.
+- **Очистка stale local cache при logout** — не реализовано. После logout localStorage остаётся, новый пользователь увидит свои данные (другой userId → другой ключ), но если зайти под `null`/anon, увидит cache последнего залогиненного. Не критично для MVP.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix-5: body-drag не работал для position
 
 ### Триггер
