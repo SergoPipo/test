@@ -10,6 +10,85 @@
 
 ---
 
+## 2026-04-29 — chart-drawings rev2 hotfix-4: Position resize не работал + узкая фигура
+
+### Триггер
+
+После приёмки commit'а `327c273` заказчик прислал: «Long и short позиции добавляются, но очень узкие, и я не могу изменить их размеры».
+
+### Корни (3 связанных бага)
+
+1. **Узкая фигура.** Defaults `target = entry × 1.005, stop = entry × 0.9975` — суммарная высота 0.75% от entry. На графике LKOH 5500₽ это 41 пунктов; при price-range 1100 пунктов — ~3% высоты графика, на 800px = ~25 px. После открытия pricerange (когда график более «развёрнут» по Y) — фигура схлопывается до 6-10 px. Углы (radius 8 px) перекрываются → нельзя прицельно ткнуть в конкретный угол.
+
+2. **`applyHandleDrag` обрабатывал углы только для `'rect'`.** В `coords.ts` была проверка `drawing.type === 'rect' && handle.startsWith('corner-')`. Для `'long_position'` / `'short_position'` управление углами уходило в fallback `shiftDrawing` → drag двигал фигуру целиком вместо resize. То есть resize **физически не вызывался**.
+
+3. **Bonus: hit-test position путал tl/bl для short.** В `PositionDrawingPrimitive.hitTest` я жёстко задал `tl=(x1, yTarget), bl=(x1, yStop)`. Для short `target < entry < stop` → `yTarget > yStop` → угол с handle-именем `corner-tl` оказывался **визуально внизу**. Cursor-стили были перепутаны (`nwse-resize` для нижнего-левого вместо верхнего-левого).
+
+### Реализовано
+
+#### Fix-1: defaults (`DrawingsLayer.tsx::buildPositionPayload`)
+
+```ts
+// Было: ±0.5% / ∓0.25%
+const targetMul = direction === 'long' ? 1.005 : 0.995;
+const stopMul   = direction === 'long' ? 0.9975 : 1.0025;
+// Стало: ±2% / ∓1% (R/R остаётся 2)
+const targetMul = direction === 'long' ? 1.02 : 0.98;
+const stopMul   = direction === 'long' ? 0.99 : 1.01;
+```
+
+Суммарная высота фигуры — ~3% от entry (раньше 0.75%). Видна на любом разумном price-range. R/R сохранён = 2.
+
+#### Fix-2: hit-test через min/max (`PositionDrawingPrimitive.hitTest`)
+
+Углы теперь по **геометрической** позиции, не по семантике (target/stop). Для long и short tl всегда визуально верхний-левый. Hit-area увеличен до 10 px (radius² ≤ 100) — для надёжного попадания на узких фигурах.
+
+```ts
+// Было (только верно для long):
+const corners = [['corner-tl', x1, yTarget], ['corner-bl', x1, yStop], ...];
+// Стало (универсально):
+const minYrect = Math.min(yTarget, yStop);
+const maxYrect = Math.max(yTarget, yStop);
+const corners = [['corner-tl', minX, minYrect], ['corner-bl', minX, maxYrect], ...];
+```
+
+#### Fix-3: position-ветка в `applyHandleDrag` (`coords.ts`)
+
+Главный баг. Добавлена ветка ДО ветки rect:
+
+```ts
+if ((drawing.type === 'long_position' || drawing.type === 'short_position')
+    && data.entry && data.end && data.target != null && data.stop != null
+    && handle.startsWith('corner-')) {
+  // Какая точка левее в pixel-space — её и двигаем для левых углов.
+  const leftIsEntry = cEntry.x <= cEnd.x;
+  // Какая Y-координата верхняя — её price двигаем для top-углов.
+  const targetIsTop = yTarget <= yStop;
+  // По handle определяем needsLeftX/needsTopY:
+  // corner-tl → true/true, corner-tr → false/true,
+  // corner-bl → true/false, corner-br → false/false.
+  // X: меняем entry или end через shiftPoint(_, dx, 0, _)
+  // Y: меняем target или stop через priceToCoordinate(_) + dy → coordinateToPrice
+}
+```
+
+Логика учитывает оба возможных порядка точек (entry слева/справа, target сверху/снизу) — работает одинаково для long и short, и при «вывернутых» фигурах после ручного редактирования.
+
+### Файлы
+
+Модифицировано (3):
+- `frontend/src/components/charts/DrawingsLayer.tsx` — defaults в buildPositionPayload.
+- `frontend/src/components/charts/primitives/PositionDrawingPrimitive.ts` — hit-test через min/max corners + radius 10px.
+- `frontend/src/components/charts/primitives/coords.ts` — position-ветка в applyHandleDrag.
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint` — 0 errors, 1 pre-existing warning.
+- `vitest run` — **438 / 438 passed**.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix-3: Long/Short Position drawing tool (TradingView-style)
 
 ### Триггер
