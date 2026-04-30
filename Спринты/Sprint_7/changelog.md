@@ -10,6 +10,57 @@
 
 ---
 
+## 2026-04-30 — S7R-BACKTEST-LIST-AUTOREFRESH: автообновление списка бэктестов
+
+### Триггер
+
+Пользователь сообщил баг: после завершения фонового бэктеста бейдж в шапке показывает «ГОТОВО», но в таблице `/backtests` запись не появляется до перезагрузки страницы.
+
+### Корень
+
+[`BacktestListPage.tsx`](Develop/frontend/src/pages/BacktestListPage.tsx) делал `fetchBacktests()` только один раз в `useEffect` на mount, без подписки на `useBackgroundBacktestsStore` или WS-события `backtest:done`. Backend всё писал корректно — `BacktestRun` row создаётся в `router.py:928` ещё на этапе queue фонового job'а, потом обновляется до `completed`.
+
+### Реализовано (TDD: 7 vitest тестов RED → GREEN)
+
+#### Hook `useAutorefreshOnBackgroundBacktestDone(refresh)`
+
+- Подписывается на `useBackgroundBacktestsStore.subscribe` один раз (без re-subscribe на rerender — иначе теряются transitions running→terminal).
+- `seenTerminal: Set<job_id>` заполняется на mount всеми уже-terminal job'ами из persist localStorage. Они **не триггерят** refresh — иначе reload-петля при каждом заходе на страницу.
+- При появлении нового `done`/`error`/`cancelled` — `refresh()` один раз. Повторные store updates с тем же job не вызывают refresh.
+- `refreshRef` подхватывает свежую функцию (нет stale closure).
+
+#### Интеграция
+
+`BacktestListPage.tsx` — одна строка под существующим `useEffect`:
+
+```ts
+useAutorefreshOnBackgroundBacktestDone(fetchBacktests);
+```
+
+#### Тесты (7)
+
+- mount idempotent (старые done в localStorage не триггерят refresh),
+- running → done вызывает refresh один раз,
+- повторный store update с тем же job → refresh НЕ повторяется,
+- error / cancelled тоже триггерят (status=failed/cancelled нужен в БД-таблице),
+- новый job, добавленный сразу как done (race),
+- два разных job завершаются последовательно → refresh дважды,
+- refresh-ref stability при rerender hook (свежий callback подхватывается).
+
+### Файлы
+
+- `Develop/frontend/src/hooks/useAutorefreshOnBackgroundBacktestDone.ts` (new)
+- `Develop/frontend/src/hooks/__tests__/useAutorefreshOnBackgroundBacktestDone.test.ts` (new, 7 тестов)
+- `Develop/frontend/src/pages/BacktestListPage.tsx` (1 import + 1 hook call)
+
+### Результат
+
+- Vitest: **445 passed** (438 + 7 новых, 0 регрессий).
+- TypeScript: `npx tsc --noEmit` → 0 errors.
+- Develop PR: https://github.com/SergoPipo/moex-terminal/pull/3 (база `s7/sprint-7`).
+
+---
+
 ## 2026-04-30 — chart-drawings backlog: cleanup — удаление неиспользуемой lucide-react
 
 ### Триггер
