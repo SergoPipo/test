@@ -10,6 +10,85 @@
 
 ---
 
+## 2026-04-30 — chart-drawings rev2 hotfix-11: position end не двигался по X при body-drag
+
+### Триггер
+
+После hotfix-10: «По горизонтали не перетаскивается» (long/short position).
+
+### Корень
+
+В `synthesizeIsoFromLogical` использовался **жёстко** `Math.floor(visRange.to)` как референсный logical для вычисления synthIso. Если `visRange.to` оказывается за last bar (visible range шире данных, что часто бывает после первого load), то:
+
+```ts
+const refLogical = Math.floor(Number(visRange.to));  // например, 250
+const refX = ts.logicalToCoordinate(250 as Logical);  // вернёт x (за last bar)
+const refTime = ts.coordinateToTime(refX);  // null! (нет bar'а на этой x)
+return null;
+```
+
+→ `synthIso = null` → `shiftPoint` возвращал `t: synthIso ?? point.t` → **старый t**. На render `pointToCoord` (time-first) → `timeToCoordinate(старый t)` → **старая x**. End не двигался по X.
+
+`entry` двигалась, потому что её исходный `t` мог матчиться к bar'у — синтез не нужен на первом move; если потом synth fail'ился, для entry могла быть «защита» через другой код-path. Но для `end` — её `t` всегда synthesized в `buildPositionPayload`, race ловился сразу.
+
+### Реализовано (2 уровня защиты)
+
+#### Fix-A: `synthesizeIsoFromLogical` — перебор кандидатов
+
+```ts
+const candidates: number[] = [
+  Math.floor((from + to) / 2),  // середина
+  from + 1,
+  Math.max(from + 1, to - 2),
+  from,
+  to,
+];
+for (const refLogical of candidates) {
+  if (refLogical < from || refLogical > to) continue;
+  const refX = ts.logicalToCoordinate(refLogical as Logical);
+  if (refX == null) continue;
+  const refTime = ts.coordinateToTime(refX);
+  if (refTime == null) continue;
+  // ... успех
+  return iso;
+}
+return null;
+```
+
+Теперь нужен только **один** валидный референс среди ~5 кандидатов. Гарантированно работает если в visible range есть хоть пара баров.
+
+#### Fix-B: `shiftPoint` — fallback delta-from-oldT
+
+Дополнительная защита если synth всё-таки null (sequential mode, недостаточно данных):
+
+```ts
+let newT = synthesizeIsoFromLogical(chart, Number(newLogical));
+if (newT == null && point.logical != null) {
+  const barWidth = getBarWidthSec(chart);
+  if (barWidth != null) {
+    const oldTimeSec = Math.floor(new Date(oldIsoUtc).getTime() / 1000);
+    const deltaLogical = Number(newLogical) - point.logical;
+    const newTimeSec = oldTimeSec + deltaLogical * barWidth;
+    newT = new Date(newTimeSec * 1000).toISOString();
+  }
+}
+```
+
+Считаем дельту от исходного t через известный barWidth × Δlogical. Гарантирует, что **t всегда обновится** при drag.
+
+### Файлы
+
+Модифицировано (1):
+- `frontend/src/components/charts/primitives/coords.ts` — synthesizeIsoFromLogical перебор кандидатов + shiftPoint fallback delta-from-oldT.
+
+### Проверки
+
+- `tsc --noEmit` — 0 errors.
+- `eslint coords.ts` — 0 errors, 0 warnings.
+- `vitest charts + chartDrawingsStore` — **66 / 66 passed**.
+
+---
+
 ## 2026-04-29 — chart-drawings rev2 hotfix-10: long/short position тянулась вместо переноса при body-drag
 
 ### Триггер
