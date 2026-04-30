@@ -10,6 +10,89 @@
 
 ---
 
+## 2026-04-30 — chart-drawings backlog: S7R-DRAW-CONTEXT-MENU контекстное меню + display_order
+
+### Триггер
+
+S7R-DRAW-CONTEXT-MENU из backlog: правый клик по выделенному drawing'у должен показывать меню «Редактировать / На передний план / Скопировать / Удалить».
+
+### Реализовано
+
+#### Backend (TDD: 4 новых теста RED → GREEN)
+
+- **Миграция** `e8a1f2b3c4d9_add_chart_drawings_display_order.py`:
+  - `chart_drawings.display_order INTEGER NULL` через `batch_alter_table` (SQLite-совместимо).
+  - Down: drop_column. NULL backfill — без server_default (Gotcha-12).
+- **ORM** `app/common/models.py:67`: `display_order: Mapped[int | None]` с docstring о z-order.
+- **Schemas** `app/chart_drawings/schemas.py`:
+  - `ChartDrawingUpdate.display_order: int | None = None`
+  - `ChartDrawingResponse.display_order: int | None = None`
+- **Router** `app/chart_drawings/router.py`:
+  - `update_drawing` принимает `display_order` (отдельная ветка, не затирает data).
+  - `list_drawings` сортирует `display_order ASC NULLS FIRST, id ASC` — фигура с бо́льшим значением рендерится последней (поверх).
+  - `_row_to_response` пробрасывает `row.display_order` в ответ.
+- **Тесты** (4 новых в `test_chart_drawings_position.py`):
+  - `test_display_order_default_null_returned` — POST → response содержит `display_order: None`.
+  - `test_patch_display_order_persists_in_response` — PATCH сохраняет значение.
+  - `test_list_orders_by_display_order_then_id` — порядок меняется после PATCH.
+  - `test_patch_display_order_alone_does_not_clear_data` — PATCH только display_order не затирает data.
+
+#### Frontend store (`stores/chartDrawingsStore.ts`)
+
+- Тип `display_order?: number | null` в `ChartDrawing`.
+- Новый интерфейс `ChartDrawingUpdate extends Partial<ChartDrawingCreate>` для PATCH-семантики (display_order вне Create-схемы).
+- `bringToFront(id)`:
+  - находит `max(display_order)` (или 0), ставит drawing'у `max+1`,
+  - локально переносит в конец `items` (lightweight-charts рендерит primitives в порядке attach → последний поверх),
+  - PATCH'ит на backend (для local-id PATCH пропускается).
+- `duplicate(id, barWidthSec)`:
+  - сдвиг `+1 бар` для всех «временных» точек (`p1/p2/anchor/entry/end`, `vline.t`),
+  - `+0.5%` к `hline.price`,
+  - target/stop/qty position'а сохраняются как есть.
+  - Использует существующий `add()` — корректно обрабатывает optimistic id.
+
+#### Frontend component (`components/charts/DrawingsLayer.tsx`)
+
+- **Z-order re-attach**: при изменении ПОРЯДКА items (а не только содержимого) — detach всех primitives + attach в новом порядке. Существование (add/remove) и содержимое (drag, setDrawing) — incremental, без re-attach (нет лишних flicker'ов).
+- **Right-click listener** на container (capture):
+  - hit-test от верхнего слоя к нижнему,
+  - при попадании — `e.preventDefault()`, `setSelected(hitId)`, открывает меню,
+  - в режиме рисования (currentTool ≠ cursor) меню не открывается.
+- **Mantine Menu через `<Portal>`** с invisible target div (position:fixed по координатам курсора): пункты меню «Редактировать» (Tabler IconEdit), «На передний план» (IconArrowUp), «Скопировать» (IconCopy), Divider, «Удалить» (IconTrash, color="red"). Mantine управляет click-outside / Escape / a11y / focus.
+- **Props `onEditPosition?: (id: string) => void`** — callback для задачи S7R-DRAW-POSITION-EDIT-MODAL. Если callback не передан — пункт «Редактировать» disabled. Для не-position типов (trendline/hline/...) — также disabled.
+- **Esc** теперь закрывает контекстное меню (помимо отмены preview).
+
+### Файлы
+
+**Backend:**
+- `Develop/backend/app/common/models.py` (+display_order)
+- `Develop/backend/app/chart_drawings/schemas.py` (+поле в Update/Response)
+- `Develop/backend/app/chart_drawings/router.py` (+sort, +PATCH-ветка, +response field)
+- `Develop/backend/alembic/versions/e8a1f2b3c4d9_add_chart_drawings_display_order.py` (new)
+- `Develop/backend/tests/unit/test_chart_drawings/test_chart_drawings_position.py` (+4 теста)
+
+**Frontend:**
+- `Develop/frontend/src/api/chartDrawingsApi.ts` (+display_order, +ChartDrawingUpdate)
+- `Develop/frontend/src/stores/chartDrawingsStore.ts` (+bringToFront, +duplicate)
+- `Develop/frontend/src/stores/__tests__/chartDrawingsStore.test.ts` (+6 тестов)
+- `Develop/frontend/src/components/charts/DrawingsLayer.tsx` (contextmenu + Mantine Menu + reattach)
+- `Develop/frontend/e2e/s7-drawing-tools.spec.ts` (+ e2e «right-click on drawing»)
+
+### Результат
+
+- Backend: `pytest tests/` → **907 passed** (было 903 + 4 новых, 0 регрессий).
+- Frontend Vitest: 71 файлов, **445 passed** (было 430 + 15 новых, 0 регрессий).
+- TypeScript: `npx tsc --noEmit` → 0 errors.
+- Playwright e2e: новый тест `right-click on drawing opens context menu` → **PASSED**, скриншот `e2e/screenshots/s7/s7-7.6-context-menu.png` подтверждает: меню рендерится с тенью, dark theme, иконками Tabler, разделителем, красным «Удалить».
+- 2 уже существовавшие регрессии (`trendline tool active`, `keyboard shortcuts tooltip`) не моей ответственности — упали и до изменений (проверено через `git stash`).
+
+### Известные ограничения
+
+- «Редактировать» — disabled до реализации S7R-DRAW-POSITION-EDIT-MODAL (задача 3 backlog'а). Для не-position типов остаётся disabled (по плану — «no-op или базовая редактура цвета»).
+- Колонка `display_order` опциональная: существующие рисунки в БД с NULL продолжают работать, сортируются первыми (по id).
+
+---
+
 ## 2026-04-30 — chart-drawings backlog: S7R-DRAW-BACKEND расширение schemas (position-типы + logical)
 
 ### Триггер
