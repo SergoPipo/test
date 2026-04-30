@@ -10,6 +10,54 @@
 
 ---
 
+## 2026-04-30 — chart-drawings backlog: S7R-DRAW-BACKEND расширение schemas (position-типы + logical)
+
+### Триггер
+
+S7R-DRAW-BACKEND из backlog: рисунки long_position/short_position сохранялись только в localStorage, потому что backend схема (`app/chart_drawings/schemas.py`) не знала про эти типы. POST с `type=long_position` возвращал 422, фронт уходил в catch и работал в fallback-режиме.
+
+### Аудит: что уже было
+
+Роутер `app/chart_drawings/router.py` + ORM-модель `ChartDrawing` + 11 тестов CRUD/ownership/auth — уже реализованы (S7 fix-волна BACK2, коммит до начала backlog'а). Реальный gap — только schemas:
+
+- `DrawingType` Literal — 5 типов вместо 7 (нет `long_position` / `short_position`)
+- `DrawingPayload` — нет полей `entry`, `end`, `target`, `stop`, `qty`
+- `DrawingPoint` — нет поля `logical?: number` (фронт-rev2 экстраполяция за last bar, см. `chartDrawingsApi.ts:38`)
+- `validate_payload_for_type` — нет правил для position-типов
+
+### Реализовано (TDD)
+
+**RED** → 15 новых тестов в `tests/unit/test_chart_drawings/test_chart_drawings_position.py`:
+- POST long_position / short_position со всем payload → 201
+- PATCH с полным data сохраняет все поля (явный тест replace-контракта)
+- Валидация: parametrize по 5 обязательным полям × 2 типа = 10 422-кейсов
+- `logical` round-trip для trendline (присутствует / опциональное)
+
+**GREEN** → расширил `schemas.py`:
+- `DrawingType` Literal +`long_position`, +`short_position`
+- `ALLOWED_TYPES` (set) — синхронизирован
+- `DrawingPoint.logical: float | None = None` (opaque-passthrough, без валидации)
+- `DrawingPayload` +`entry: DrawingPoint | None`, +`end: DrawingPoint | None`, +`target/stop/qty: float | None`
+- `validate_payload_for_type` — ветка для `long_position` / `short_position`: проверяет наличие entry/end (как dict-points) и target/stop/qty (`is None` — 0 валидное значение)
+- Module docstring обновлён: явно зафиксирована **replace-семантика PATCH** (фронт обязан отправлять весь payload, server заменяет `data_json` целиком — это уже соответствует поведению `chartDrawingsStore.update`)
+
+### Файлы
+
+- `Develop/backend/app/chart_drawings/schemas.py` — расширение Literal/Payload/Point + validate
+- `Develop/backend/tests/unit/test_chart_drawings/test_chart_drawings_position.py` — новый файл, 15 тестов
+
+### Frontend
+
+Не менялся. После backend-deploy `chartDrawingsStore` перестанет уходить в catch для position-типов и автоматически переключится на backend как источник истины (см. `setContext` логику: при наличии backend-items они затирают localStorage; при пустом ответе localStorage остаётся как cache).
+
+### Результат
+
+- `pytest tests/` — **903 passed** (было 888 ± регрессий нет; +15 position).
+- `py_compile` schemas.py + router.py — OK.
+- Контракт совпал с frontend `chartDrawingsApi.ts` (тип, payload, logical).
+
+---
+
 ## 2026-04-30 — chart-drawings rev2 hotfix-11: position end не двигался по X при body-drag
 
 ### Триггер
