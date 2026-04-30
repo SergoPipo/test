@@ -10,6 +10,30 @@
 
 ---
 
+## 2026-04-30 — chart-drawings backlog: cleanup — удаление неиспользуемой lucide-react
+
+### Триггер
+
+В `package.json` остался зависимость `lucide-react@^1.11.0`, которая не импортировалась нигде в коде (единственное упоминание — в комментарии `DrawingToolbar.tsx:43` про дизайн иконок). Иконки в проекте — `@tabler/icons-react` (Mantine стиль) и кастомные SVG (DrawingToolbarIcons.tsx).
+
+### Реализовано
+
+- `pnpm remove lucide-react` → пакет удалён из `package.json` и `pnpm-lock.yaml`.
+- Комментарий в `DrawingToolbar.tsx` обновлён (убрано сравнение с lucide-react, добавлено упоминание Tabler в контексте контекстного меню).
+
+### Файлы
+
+- `Develop/frontend/package.json`
+- `Develop/frontend/pnpm-lock.yaml`
+- `Develop/frontend/src/components/charts/DrawingToolbar.tsx` (комментарий)
+
+### Результат
+
+- TypeScript: 0 errors.
+- Vitest (затронутая папка `components/charts/__tests__/`): **48 passed**.
+
+---
+
 ## 2026-04-30 — chart-drawings backlog: S7R-DRAW-POSITION-EDIT-MODAL числовая настройка позиций
 
 ### Триггер
