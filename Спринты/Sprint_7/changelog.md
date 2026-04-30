@@ -10,6 +10,70 @@
 
 ---
 
+## 2026-04-30 — chart-drawings backlog: S7R-DRAW-POSITION-EDIT-MODAL числовая настройка позиций
+
+### Триггер
+
+S7R-DRAW-POSITION-EDIT-MODAL из backlog: для long/short position нужна модалка с числовыми input'ами, чтобы пользователь мог точно задать `target/stop/qty` без drag за углы. Открывается из контекстного меню пункт «Редактировать», который backlog #2 оставил с заглушкой `onEditPosition?: (id) => void`.
+
+### Реализовано (TDD: 12 vitest тестов RED → GREEN)
+
+#### Компонент `PositionEditModal.tsx`
+
+- 3 `<NumberInput>`: «Целевая цена», «Стоп», «Количество» (decimalScale=4, step=0.01 для цен; min=0, step=1 для qty).
+- Read-only display: бейдж «Long»/«Short» (color="teal"/"red"), цена входа через `formatCurrency` (`1 234,56 ₽`).
+- Live-расчёт под формой:
+  - **Соотношение R/R** = Reward / Risk — `2,00` (ru-RU локаль).
+  - **Максимальная прибыль** = `|target − entry| × qty` — `formatCurrency` (зелёный).
+  - **Максимальный убыток** = `|entry − stop| × qty` — `formatCurrency` (красный).
+- Бизнес-валидация (Apply disabled):
+  - **long**: `target > entry`, `stop < entry`, `qty > 0`.
+  - **short**: `target < entry`, `stop > entry`, `qty > 0`.
+- На Apply: `store.update(id, {type, data: {...currentData, target, stop, qty}, style})` — replace-семантика (см. backlog #1).
+- На Cancel/закрытие: ничего не меняет.
+- Если `drawingId === null` или указывает на не-position тип — Modal не рендерится (no-op).
+
+#### Интеграция
+
+- `pages/ChartPage.tsx`:
+  - state `editingPositionId: string | null`,
+  - `<DrawingsLayer onEditPosition={setEditingPositionId} />`,
+  - `<PositionEditModal drawingId={editingPositionId} onClose={() => setEditingPositionId(null)} />`.
+- В контекстном меню (backlog #2) пункт «Редактировать» теперь активен для position-типов и вызывает `onEditPosition(ctxItem.id)`.
+
+#### Тесты
+
+- **Vitest** (`PositionEditModal.test.tsx`, 12 тестов):
+  - drawingId=null → не рендерится; не-position тип → не рендерится.
+  - Long/short — корректные начальные значения и Badge.
+  - R/R и Max profit/loss — formula-correct (long и short).
+  - Бизнес-валидация (target/stop/qty) → Apply disabled.
+  - Apply вызывает update с правильным payload + onClose.
+  - Cancel вызывает onClose без update.
+- **Playwright e2e** (`s7-drawing-tools.spec.ts`):
+  - long_position → right-click → click «Редактировать» → Modal открыт → Cancel закрывает.
+  - Скриншот `s7-7.6-position-edit-modal.png` подтверждает: Long badge, цена входа `320,00 ₽`, R/R = 2,00, прибыль `100,00 ₽` (teal), убыток `50,00 ₽` (red), Mantine dark theme.
+
+### Файлы
+
+- `Develop/frontend/src/components/charts/PositionEditModal.tsx` (new)
+- `Develop/frontend/src/components/charts/__tests__/PositionEditModal.test.tsx` (new, 12 тестов)
+- `Develop/frontend/src/pages/ChartPage.tsx` (state + props + render Modal)
+- `Develop/frontend/e2e/s7-drawing-tools.spec.ts` (+ e2e тест)
+
+### Результат
+
+- Vitest: **457 passed** (445 + 12 новых, 0 регрессий).
+- TypeScript: `npx tsc --noEmit` → 0 errors.
+- Playwright: новый e2e PASSED (3.0s).
+- Скриншот вживую подтверждает: модалка открывается ровно на месте позиции, форматирование `ru-RU` корректно.
+
+### Известные ограничения
+
+- Текущий контекстное меню (backlog #2): «Редактировать» disabled для не-position типов — реализация «базовой редактуры цвета» отнесена в будущий backlog (формальной задачи в S7R пока нет).
+
+---
+
 ## 2026-04-30 — chart-drawings backlog: S7R-DRAW-CONTEXT-MENU контекстное меню + display_order
 
 ### Триггер
