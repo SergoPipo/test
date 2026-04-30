@@ -10,6 +10,80 @@
 
 ---
 
+## 2026-04-30 — S7R-GRID-RESULTS-UI: UI для просмотра результатов Grid Search
+
+### Триггер
+
+Пользователь сообщил три связанные проблемы Grid Search:
+1. Карточка фонового бэктеста (виджет «колба») показывает «Стратегия #1» вместо реального имени «Тестовая».
+2. После завершения Grid Search не видно ни в `/backtests`, ни как-либо ещё — посмотреть результаты невозможно.
+3. Кнопки «Открыть результат» в карточке нет.
+
+### Корень
+
+| # | Симптом | Найденная причина |
+|---|---|---|
+| 1 | «Стратегия #1» вместо имени | `GridSearchForm` не передавал `strategy_name` в `store.add()`; UI fallback'ил на `Стратегия #${strategy_id}`. |
+| 2 | Результаты Grid Search недоступны | `result.matrix` приходит через WS event `done`, но `useBacktestJobWS` сохранял **только** `result_id`. Сам `matrix` выбрасывался. Компонент `<GridSearchHeatmap>` существовал, но не был подключён ни к одной странице. В `/backtests` grid не пишется по архитектуре ARCH §2.2 (1000 комбинаций × Backtest row слишком тяжело для БД). |
+| 3 | Кнопки «Открыть результат» нет | Условие рендера требовало `result_id`, которого у grid не бывает. |
+
+### Реализовано (TDD: 4 новых vitest + 2 Playwright e2e)
+
+#### Store (`backgroundBacktestsStore.ts`)
+
+- Тип `BackgroundBacktest` +`job_type?: 'single' | 'grid'`, +`grid_result?: GridResult`.
+- `setStatus` extras принимает `grid_result`.
+- `partialize` **исключает** `grid_result` из persist (matrix может быть до 1000 строк × 6 полей — overhead в localStorage). После reload карточка остаётся как «ГОТОВО», но heatmap недоступен — показывается fallback.
+
+#### Прокидка имени стратегии
+
+`StrategyEditPage` → `<GridSearchModal strategyName={name}>` → `<GridSearchForm strategyName={...}>` → `store.add({ job_type: 'grid', params: { strategy_name } })`.
+
+#### WS hook (`useBacktestJobWS.ts`)
+
+- Helper `extractGridResult()` парсит `result.matrix` + `overfitting_warning`.
+- В обоих handler'ах event `'done'` для grid сохраняется `grid_result` через `setStatus`.
+
+#### Виджет (`BackgroundBacktestsBadge.tsx`)
+
+- Бейдж «Grid» (фиолетовый, IconChartGridDots) рядом с именем стратегии для `job_type='grid'`.
+- Subtitle для grid: `«SBER · 1ч · 4 комбинаций · 1 мин назад»`.
+- Кнопка дифференцируется: «Открыть результат» (single → `/backtests/{id}`) или **«Показать результат»** (grid → inline Modal с `<GridSearchHeatmap>`).
+- Fallback-сообщение «Результат недоступен после перезагрузки страницы. Запустите Grid Search заново» для grid done без `grid_result`.
+- Inline Modal (size='xl') с готовым `<GridSearchHeatmap>` — heatmap, переключатель метрик (Sharpe / P&L / Win Rate / Drawdown), полная таблица, alert overfitting.
+
+#### GridSearchModal — текст-подсказка
+
+Убрана вводящая в заблуждение фраза про «список бэктестов» (туда grid не попадает), добавлено пояснение про кнопку «Показать результат» в карточке после завершения.
+
+### Файлы
+
+- `Develop/frontend/src/stores/backgroundBacktestsStore.ts`
+- `Develop/frontend/src/components/backtest/GridSearchForm.tsx`
+- `Develop/frontend/src/components/backtest/GridSearchModal.tsx`
+- `Develop/frontend/src/pages/StrategyEditPage.tsx`
+- `Develop/frontend/src/hooks/useBacktestJobWS.ts`
+- `Develop/frontend/src/components/notifications/BackgroundBacktestsBadge.tsx`
+- `Develop/frontend/src/components/notifications/__tests__/BackgroundBacktestsBadge.test.tsx` (+4 теста)
+- `Develop/frontend/e2e/s7-grid-search-results.spec.ts` (new — 2 e2e + 2 скриншота)
+
+### Результат
+
+- Vitest: **442 passed** (438 + 4 новых, 0 регрессий).
+- TypeScript: `npx tsc --noEmit` → 0 errors.
+- Playwright e2e: 2/2 passed (1.6s + 0.8s).
+- **Скриншоты подтверждают**:
+  - `s7-7.2-grid-card.png` — карточка с именем «Тестовая», бейдж Grid (фиолетовый), subtitle «4 комбинаций», кнопка «Показать результат →».
+  - `s7-7.2-grid-heatmap.png` — Modal с 2×2 heatmap (rsi_period × sl_pct), цветовая заливка по Sharpe (0,42 → 1,34), переключатель метрик, полная таблица отсортированная по Sharpe ▼.
+- Develop PR: https://github.com/SergoPipo/moex-terminal/pull/4 (база `s7/sprint-7`).
+
+### Известные ограничения
+
+- `grid_result.matrix` не persist'ится. После reload карточка показывает fallback-сообщение, кнопка «Показать результат» скрыта.
+- Долгосрочное решение — backend-endpoint `GET /api/v1/backtest/grid/{job_id}/result`, который вернёт сохранённый matrix из БД. Отдельная архитектурная задача (в этом фиксе не делаем).
+
+---
+
 ## 2026-04-30 — S7R-BACKTEST-LIST-AUTOREFRESH: автообновление списка бэктестов
 
 ### Триггер
