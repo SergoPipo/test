@@ -10,6 +10,76 @@
 
 ---
 
+## 2026-05-06 — S7R-GRID-APPLY-PARAMS: применение результатов Grid Search
+
+### Триггер
+
+Пользователь жаловался: «Я вижу таблицу Grid Search, а как применить понравившуюся комбинацию?». Heatmap был чисто read-only — никакого способа взять параметры из ячейки и (a) запустить single-backtest для проверки, или (b) сохранить их в стратегию.
+
+### Реализовано
+
+#### Backend
+
+`app/backtest/strategy_params.py`:
+- Новая функция `replace_strategy_params(code, params) -> code` — AST-rewriter, переписывает default-значения в `params = (...)` сгенерированного Backtrader-кода. Сохраняет порядок и Python-валидность через `ast.unparse`. Неизвестные ключи (которых нет в стратегии) игнорируются. Невалидный код / пустой params → возврат без изменений (graceful).
+
+`app/backtest/engine.py`:
+- `BacktestEngine.run()` и `_setup_cerebro()` принимают `override_params: dict | None`. Если задан, передаются в `cerebro.addstrategy(strategy_class, **override_params)` — переопределяют `params = (...)` стратегии для конкретного запуска. Без override — старое поведение.
+
+`app/backtest/router.py` (`_run_backtest_task`):
+- Парсит `params.params_json` (JSON-строку из BacktestCreate) → dict → передаёт в `engine.run(override_params=...)`. Раньше `params_json` сохранялся в БД, но игнорировался движком — теперь применяется как override.
+
+`app/strategy/router.py`:
+- Новый endpoint `POST /api/v1/strategy/{strategy_id}/versions/from-params`.
+- Body: `VersionFromParamsCreate{params, source_version_id?, comment?}`.
+- Логика: взять source-версию (по `source_version_id` или current_version), прогнать `replace_strategy_params(generated_code, params)`, создать новую `StrategyVersion` через `service.create_version()` с автогенерируемым comment'ом «Применено из Grid Search: rsi_period=18, ...» (или явным от пользователя).
+- Ownership-check, 404 для не-найденной source-версии, 422 если params не нашлись в коде.
+
+`app/strategy/schemas.py`:
+- Новая схема `VersionFromParamsCreate`.
+
+#### Frontend
+
+`frontend/src/api/backtestApi.ts`:
+- Поле `BacktestParams.params_json?: string` для передачи override на single-backtest.
+
+`frontend/src/api/strategyApi.ts`:
+- Метод `createVersionFromParams(strategyId, payload)`.
+
+`frontend/src/stores/backgroundBacktestsStore.ts`:
+- `BackgroundBacktestParams.strategy_version_id?: number` — нужно для протаскивания контекста к heatmap.
+
+`frontend/src/components/backtest/GridSearchForm.tsx`:
+- При запуске grid-job проставляет `strategy_version_id` в params, чтобы heatmap знал куда применять.
+
+`frontend/src/components/backtest/GridSearchHeatmap.tsx`:
+- Опциональный prop `applyContext: GridApplyContext` (strategyId, strategyVersionId, ticker, timeframe, dates, capital).
+- Selectable rows в полной таблице: клик подсвечивает строку blue-9.
+- Под таблицей панель с двумя кнопками (видна только при `applyContext`):
+  - **«Прогнать бэктест»** (`IconRocket`) — POST /backtest с `params_json` выбранной строки + добавляет single-job в `backgroundBacktestsStore`. Бэкенд применит params как override.
+  - **«Применить к стратегии»** (`IconPin`) — POST /strategy/{id}/versions/from-params, после успеха navigate(`/strategies/{id}`) и закрытие модалки.
+- Кнопки disabled пока строка не выделена; loading во время запроса; уведомления через `notifications.show`.
+
+`frontend/src/components/notifications/BackgroundBacktestsBadge.tsx`:
+- Передаёт `applyContext` в `<GridSearchHeatmap>` из `gridResultBt.params`. На `onVersionCreated` закрывает grid-result модалку.
+
+### Тесты
+
+- `tests/unit/test_backtest/test_strategy_params_replace.py` — 9 тестов на rewriter (single/multiple/partial replace, unknown keys, empty params, invalid code, no class, float, валидность результата).
+- `tests/unit/test_strategy/test_version_from_params.py` — 6 тестов на endpoint (basic flow, comment override, unknown param 422, source_version_id, ownership, not-found).
+- Существующие vitest 468/468 pass без изменений.
+
+### Имена кнопок
+
+- **«Прогнать бэктест»** — короткая команда, описывает действие.
+- **«Применить к стратегии»** — повторяет фразу пользователя, передаёт суть (стратегия меняется, появляется новая версия в истории).
+
+### Результат
+
+Полный цикл Grid Search → выбор → применение замкнут. Пользователь может: (1) запустить любую комбинацию как обычный backtest для верификации (стратегия не меняется), (2) сохранить понравившуюся комбинацию в стратегию (создаётся новая версия для отката).
+
+---
+
 ## 2026-05-06 — S7R-TG-LINK-AUTOREFRESH: poll статуса привязки Telegram
 
 ### Триггер
