@@ -59,6 +59,12 @@
 
 UX через меню Telegram стал интуитивным: «нажми /start → пришли код». Старая схема (`/start <code>`, deep-link) сохранена. Параллельно починена локальная инфраструктура webhook через ngrok — бот снова получает апдейты.
 
+### Послесловие: LaunchAgent (автостарт ngrok при логине)
+
+`scripts/com.moex-terminal.ngrok.plist` — добавлен блок `EnvironmentVariables` с `PATH=/opt/homebrew/bin:...`, потому что launchd при логине стартует с минимальным `$PATH`, где нет `/opt/homebrew/bin`, и `ngrok` не находился. Однако реальный блокер автостарта — **macOS TCC**: lognд видит скрипт в `~/Documents/...` как `Operation not permitted`. Чтобы автостарт реально заработал — пользователю надо в **System Settings → Privacy & Security → Full Disk Access** добавить `/bin/bash`.
+
+Сейчас это не критично: ручной запуск `bash scripts/start_ngrok_webhook.sh` работает, ngrok+webhook поднимаются, бот функционирует. Автостарт — фича удобства; решение TCC — задача за пределами кода.
+
 ---
 
 ## 2026-05-06 — S7R-GRID-PARAMS-AUTOCOMPLETE: автоподстановка имён параметров стратегии
