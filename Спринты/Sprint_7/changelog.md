@@ -10,6 +10,80 @@
 
 ---
 
+## 2026-05-06 — S7R-GRID-PARAMS-AUTOCOMPLETE: автоподстановка имён параметров стратегии
+
+### Триггер
+
+Закрытие UX-источника C из S7R-GRID-PARAMS-FIX: пользователь ввёл `sma_fast` для RSI-стратегии и получил matrix полную error-ячеек, потому что форма не валидировала имена против реальных `params` стратегии. Нужно показывать пользователю реальные имена и default-значения.
+
+### Реализовано (TDD: 17 backend + 2 Playwright e2e)
+
+#### Backend
+
+`app/backtest/strategy_params.py` (new):
+- `extract_strategy_params(code) -> [{name, default}]` — AST-парсер сгенерированного Backtrader-кода. Ищет `class GeneratedStrategy` → атрибут `params = (('name', value), ...)` → возвращает список в порядке объявления.
+- Graceful fallback: пустая строка / SyntaxError / нет class / нет params → пустой список (UI покажет alert + TextInput-fallback).
+
+`app/backtest/router.py` + `schemas.py`:
+- Endpoint `GET /api/v1/backtest/strategy-params/{strategy_version_id}` → `StrategyParamsResponse{params: [{name, default}]}`.
+- Ownership: 403 для чужой версии (через существующий `_get_version_for_user`).
+- 404 для несуществующей, 401 без токена.
+
+#### Frontend
+
+`api/backtestApi.ts`:
+- +`getStrategyParams(versionId)` метод, +`StrategyParamInfo` / `StrategyParamsResponse` типы.
+
+`components/backtest/GridSearchForm.tsx`:
+- На mount подгружает список через GET endpoint.
+- Если есть параметры → Mantine `<Select searchable>` с опциями вида `«rsi_period (по умолчанию 14)»`. При выборе автоматически заполняет поле «Значения» default-значением (если оно пустое).
+- `usedNames`: Set имён, уже использованных в форме; Select не предлагает их повторно — один параметр стратегии не может фигурировать в двух строках grid'а.
+- Endpoint вернул пустой список или упал → fallback к TextInput + Alert «введите имя вручную (см. FAQ Grid Search)».
+- Старый seed `sma_fast / 5, 10, 15` удалён — сбивал пользователей.
+- +props `strategyName`, проброшен из `StrategyEditPage` через `GridSearchModal` → `GridSearchForm` → `store.add({params: {strategy_name}})`. Дополнительно фиксит fallback «Стратегия #1» в карточке для grid jobs.
+
+### Тесты
+
+**Backend (17 новых):**
+- `test_strategy_params_extract.py` — 12 unit-тестов парсера: RSI / MACD-тройка / BB float / multi-indicators / empty params / пустая строка / invalid Python / нет class / нет params attr / negative default / string default / порядок объявления сохранён.
+- `test_grid_endpoint.py` +5 интеграционных: happy-path / empty params / другой пользователь 403 / несуществующий ID 404 / без токена 401.
+
+**Frontend Playwright (2 новых):**
+- `s7-grid-params-autocomplete.spec.ts`:
+  - happy-path: API возвращает `[rsi_period:14, stop_loss_pct:2]` → Select с опциями → выбор → values input авто-заполнен `14`;
+  - fallback: API вернул `{params: []}` → Alert + TextInput.
+- Скриншот: `e2e/screenshots/s7/s7-7.2-grid-autocomplete.png`.
+
+### Файлы
+
+**Backend:**
+- `Develop/backend/app/backtest/strategy_params.py` (new)
+- `Develop/backend/app/backtest/schemas.py` (+2 модели)
+- `Develop/backend/app/backtest/router.py` (+endpoint)
+- `Develop/backend/tests/unit/test_backtest/test_strategy_params_extract.py` (new, 12 тестов)
+- `Develop/backend/tests/unit/test_backtest/test_grid_endpoint.py` (+5 тестов)
+
+**Frontend:**
+- `Develop/frontend/src/api/backtestApi.ts`
+- `Develop/frontend/src/components/backtest/GridSearchForm.tsx`
+- `Develop/frontend/src/components/backtest/GridSearchModal.tsx`
+- `Develop/frontend/src/pages/StrategyEditPage.tsx`
+- `Develop/frontend/e2e/s7-grid-params-autocomplete.spec.ts` (new)
+
+### Результат
+
+- Backend pytest → **905 passed** (+17 новых, 0 регрессий).
+- Frontend vitest → **438 passed** (0 регрессий).
+- TypeScript → 0 errors.
+- Playwright → 2/2 passed.
+- Develop PR: https://github.com/SergoPipo/moex-terminal/pull/5.
+
+### Связь с FAQ
+
+Параллельно создан `Документация по проекту/FAQ/grid_search.md` — пошаговое руководство для пользователя: что такое Grid Search, имена параметров (таблица), сценарий, лимиты, типичные ошибки.
+
+---
+
 ## 2026-05-06 — S7R-GRID-PARAMS-FIX: grid params не доходили до strategy + win_rate ×100
 
 ### Триггер
