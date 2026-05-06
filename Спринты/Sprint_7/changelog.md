@@ -59,11 +59,28 @@
 
 UX через меню Telegram стал интуитивным: «нажми /start → пришли код». Старая схема (`/start <code>`, deep-link) сохранена. Параллельно починена локальная инфраструктура webhook через ngrok — бот снова получает апдейты.
 
-### Послесловие: LaunchAgent (автостарт ngrok при логине)
+### Послесловие: автостарт ngrok отменён (TCC + безопасность)
 
-`scripts/com.moex-terminal.ngrok.plist` — добавлен блок `EnvironmentVariables` с `PATH=/opt/homebrew/bin:...`, потому что launchd при логине стартует с минимальным `$PATH`, где нет `/opt/homebrew/bin`, и `ngrok` не находился. Однако реальный блокер автостарта — **macOS TCC**: lognд видит скрипт в `~/Documents/...` как `Operation not permitted`. Чтобы автостарт реально заработал — пользователю надо в **System Settings → Privacy & Security → Full Disk Access** добавить `/bin/bash`.
+Изначально автостарт реализовывался через `LaunchAgent` (`scripts/com.moex-terminal.ngrok.plist`). Реальный блокер — **macOS TCC**: launchd видит скрипт в `~/Documents/...` как `Operation not permitted`. Workaround — выдать `/bin/bash` Full Disk Access, но это широкое разрешение для всего интерпретатора bash в системе. По обсуждению с заказчиком решено отказаться от автостарта в пользу простого ручного запуска.
 
-Сейчас это не критично: ручной запуск `bash scripts/start_ngrok_webhook.sh` работает, ngrok+webhook поднимаются, бот функционирует. Автостарт — фича удобства; решение TCC — задача за пределами кода.
+**Что убрано:**
+- `scripts/com.moex-terminal.ngrok.plist` — удалён из репо.
+- `~/Library/LaunchAgents/com.moex-terminal.ngrok.plist` — выгружен (`launchctl unload`) и удалён.
+- FDA на `/bin/bash` — отозван заказчиком в System Settings.
+
+**Как запускать ngrok+webhook теперь (ручной режим):**
+
+```bash
+bash ~/Documents/Claude_Code/Test/Develop/scripts/start_ngrok_webhook.sh
+```
+
+или удобный alias в `~/.zshrc`:
+
+```bash
+alias mox-tg='bash ~/Documents/Claude_Code/Test/Develop/scripts/start_ngrok_webhook.sh'
+```
+
+После логина в Mac (если планируется работа с Telegram-ботом) — один раз выполнить `mox-tg`. ngrok+webhook поднимутся за ~3 секунды. На всё остальное время — никаких висящих процессов и широких системных разрешений.
 
 ---
 
