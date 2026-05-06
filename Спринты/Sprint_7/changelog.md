@@ -10,6 +10,57 @@
 
 ---
 
+## 2026-05-06 — S7R-TG-START-MENU: двухшаговый /start для меню Telegram
+
+### Триггер
+
+Пользователь жаловался: «нажимаю /start из меню бота — он сразу отвечает без места куда вписать токен». При этом `/start <code>` работал. Команды меню Telegram не позволяют параметризовать вызов — отправляется голое `/start`.
+
+### Контекст: что заодно починили в инфраструктуре
+
+Прежде чем добраться до этого UX-улучшения, выяснилось, что **бот вообще не получал апдейтов** — webhook не обновлялся уже какое-то время. Корневая причина:
+
+- `scripts/start_ngrok_webhook.sh` искал `.env` в `backend/.env`, но конфиг переехал в `Develop/.env` (туда же, куда смотрит `app/config.py`). Скрипт молча падал на `set -e` с «TELEGRAM_BOT_TOKEN не задан». LaunchAgent (`com.moex-terminal.ngrok.plist` на автостарт при логине) — exit code 126.
+- Из-за этого ngrok не поднимался → `setWebhook` не вызывался → Telegram слал апдейты на мёртвый URL → бот молчал.
+
+**Фикс:** `ENV_FILE="$PROJECT_DIR/.env"` (см. ниже). После запуска скрипта вручную ngrok поднялся, webhook зарегистрирован — бот ожил.
+
+### Реализовано (TDD: 6 unit + 1 регрессионный)
+
+`app/notification/telegram_webhook.py`:
+- В `__init__` добавлено состояние `_awaiting_token: dict[str, float]` (chat_id → expires_at, TTL 5 мин = соответствует TTL `link_store`).
+- Регистрация `MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text)` для приёма не-командных сообщений.
+- `_handle_start` без args: кладёт chat_id в `_awaiting_token`, бот отвечает «Отправьте 6-значный код…». `/start <code>` (deep-link) продолжает работать как раньше — сразу привязывает.
+- `_handle_text` — новый: если chat_id ждёт токен и текст ровно 6 цифр → consume + upsert link. Если не цифры → мягкий отказ, state сохраняется для повторной попытки. Если state протух → удалить + подсказка `/start`. Без активного state — игнорировать молча (бот не эхо).
+- Общая логика consume + upsert + reply вынесена в `_link_account(token, chat_id, message)`.
+
+`scripts/start_ngrok_webhook.sh`:
+- `ENV_FILE`: `backend/.env` → `.env` (корень `Develop/`, синхронно с `app/config.py`).
+
+### Тесты (`tests/test_notification/test_telegram_start_flow.py`, новый)
+
+- `/start` без args → chat_id в `_awaiting_token`, бот просит код.
+- `/start` без args → текст с 6-значным кодом → `TelegramLink` создан в БД, state очищен.
+- Не-токеновое сообщение в ожидании → отказ + state сохранён (можно переотправить).
+- Текст без предварительного `/start` → бот молчит.
+- Просроченный state → удалить + подсказка.
+- Backward-compat: `/start <token>` всё ещё работает.
+
+Прогон: 13/13 pass (6 новых + 7 существующих `test_telegram_callbacks.py`). Mypy чисто.
+
+### Ручная проверка
+
+После рестарта backend:
+1. В терминале: Настройки → Уведомления → Привязать Telegram → 6-значный код.
+2. В боте `/start` (через меню) → бот: «Отправьте 6-значный код…».
+3. Отправляем код → бот: «✅ Telegram привязан…».
+
+### Результат
+
+UX через меню Telegram стал интуитивным: «нажми /start → пришли код». Старая схема (`/start <code>`, deep-link) сохранена. Параллельно починена локальная инфраструктура webhook через ngrok — бот снова получает апдейты.
+
+---
+
 ## 2026-05-06 — S7R-GRID-PARAMS-AUTOCOMPLETE: автоподстановка имён параметров стратегии
 
 ### Триггер
