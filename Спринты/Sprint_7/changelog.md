@@ -10,6 +10,59 @@
 
 ---
 
+## 2026-05-06 — S7R-GRID-PARAMS-FIX: grid params не доходили до strategy + win_rate ×100
+
+### Триггер
+
+Пользователь после ручной приёмки PR #4 (Grid Search UI) запустил Grid Search через `sma_fast=[5, 10, 15]` для RSI-стратегии и сообщил два бага:
+- **Win Rate = 4 444,4%** (нонсенс, должен быть 0–100%).
+- **3 комбинации идентичны:** Sharpe=0,19, P&L=16 697, Trades=18 — параметр не влияет на результат.
+
+### Корень
+
+Найдено **2 критических бага и 1 UX-источник**:
+
+| # | Где | Что |
+|---|---|---|
+| A | `GridSearchHeatmap.tsx:280, 381` | Двойное умножение `win_rate * 100`. Backend (`metrics.py:54`) уже возвращает значение в процентах. 44 × 100 = 4444. |
+| B | `grid.py:310` | `cerebro.addstrategy(strategy_class)` без `**params`. Backtrader использовал дефолтные значения для всех комбинаций. Префикс `grid_params = {...}` был фиктивным — code_generator его не читал. |
+| C | `GridSearchForm.tsx` | UX: форма принимает любое имя без валидации против реальных `params` стратегии. Пользователь ввёл `sma_fast`, а в RSI-стратегии нет такого param — есть только `rsi_period`. Отдельная задача S7R-GRID-PARAMS-AUTOCOMPLETE. |
+
+### Реализовано
+
+#### A — Frontend
+
+- `GridSearchHeatmap.tsx`: убрано `* 100` в tooltip ячейки (строка 280) и в полной таблице (строка 381). Теперь `cell.win_rate` отображается напрямую.
+
+#### B — Backend
+
+- `grid.py`: `cerebro.addstrategy(strategy_class, **params)` — Backtrader корректно override'ит `params = (...)` стратегии до вызова `__init__`. Удалён фиктивный префикс `grid_params = {...}`.
+- Если ключ kwargs не существует в `params` стратегии → Backtrader выбросит `ValueError` → попадёт в matrix как `{error: '...'}`. Это даёт пользователю понятный сигнал о неправильном имени параметра вместо silent identical results.
+- Обновлён docstring `_run_single_backtest`.
+
+#### Тесты (+2 в `test_grid.py`)
+
+- `test_different_param_values_produce_different_results` — главный регресс-тест. Стратегия с `params=(('threshold', 100.0),)`. Прогон `threshold=100` vs `threshold=110` даёт разное `trades_count`/`pnl`. До фикса оба запуска возвращали идентичный результат.
+- `test_unknown_param_name_yields_error_in_result` — несуществующее имя → result содержит `error`, `trades_count=0`.
+
+### Файлы
+
+- `Develop/frontend/src/components/backtest/GridSearchHeatmap.tsx` (2 строки)
+- `Develop/backend/app/backtest/grid.py` (3 правки + docstring)
+- `Develop/backend/tests/unit/test_backtest/test_grid.py` (+2 теста)
+
+### Результат
+
+- Backend: `pytest tests/` → **890 passed** (+2 новых, 0 регрессий).
+- Frontend: vitest → **442 passed**, `npx tsc --noEmit` → 0 errors.
+- Develop commit: `211545b` (продолжение PR #4).
+
+### Известное ограничение
+
+UX-источник C (UI не подсказывает имена параметров стратегии) не закрыт в этом фиксе. Если пользователь введёт неправильное имя (например `sma_fast` для RSI-стратегии), он увидит matrix полностью из error-ячеек — это уже понятный сигнал, но не предотвращение. Полный фикс с autocomplete — отдельная задача S7R-GRID-PARAMS-AUTOCOMPLETE.
+
+---
+
 ## 2026-04-30 — S7R-GRID-RESULTS-UI: UI для просмотра результатов Grid Search
 
 ### Триггер
