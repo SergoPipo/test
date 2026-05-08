@@ -10,6 +10,51 @@
 
 ---
 
+## 2026-05-08 — S7R-TG-POSITIONS-FIX: /positions, /status, /closeall — DetachedInstance + утечка чужих сессий
+
+### Триггер
+
+Юзер написал `/positions` боту, ожидал список своих открытых paper-позиций — бот молчал. Webhook жив, ngrok ок, но в backend log:
+
+```
+sqlalchemy.orm.exc.DetachedInstanceError: Parent instance <LiveTrade>
+is not bound to a Session; lazy load operation of attribute 'session'
+cannot proceed
+File "app/notification/telegram_webhook.py", line 256, in _handle_positions
+    f"{direction_icon} {trade.session.ticker}: "
+```
+
+### Корневая причина (на самом деле два бага)
+
+1. **DetachedInstanceError**: handler собирал `open_trades` внутри `async with self._db_factory() as db`, потом ВЫХОДИЛ из блока, и только после строил текст — где `trade.session.ticker` пытался lazy-load relationship на закрытой сессии.
+2. **Утечка чужих сессий**: запрос `select(TradingSession).where(status in [active, paused])` **без фильтра по user_id**. Аналогично в `/status` и `/closeall`. На single-user локалке невидимо, но в multi-user окружении пользователь видел бы (и потенциально закрывал в `/closeall`) чужие позиции.
+
+### Реализовано
+
+`backend/app/notification/telegram_webhook.py`:
+
+- Новый хелпер `_load_user_active_sessions(db, user_id)` — единый запрос с join `TradingSession → StrategyVersion → Strategy → user_id` + `selectinload(TradingSession.live_trades)`. Eager-load избавляет от lazy-load после async with; user-фильтр закрывает security-issue.
+- `_handle_positions` — текст формируется **внутри** async with (ticker берётся из `session.ticker`, не через `trade.session.ticker`), пустой случай определяется флагом `had_any` после цикла.
+- `_handle_status` — переключён на хелпер.
+- `_execute_closeall` (callback `confirm_closeall`) — переключён на хелпер.
+
+### Тесты
+
+`tests/test_notification/test_telegram_positions.py` (новый, 5 unit'ов):
+- `test_returns_open_positions` — главный кейс, прежний DetachedInstance больше не падает; ticker `SBER` в ответе.
+- `test_only_own_user_positions` — фикстура `other_user_with_filled_trade` (тикер `GAZP`), проверка что в ответе **есть** `SBER` и **нет** `GAZP`.
+- `test_no_positions_message` — без filled-сделок: fallback «Нет открытых позиций».
+- `test_unlinked_chat_rejected` — chat_id не привязан → стандартный отказ.
+- `TestHandleStatus.test_only_own_user_sessions` — `/status` тоже фильтрует по user_id.
+
+Прогон: 200/200 backend pytest pass (notification 18 + strategy 145 + auth прочее) · mypy 0.
+
+### Результат
+
+`/positions` теперь возвращает список реальных filled-позиций пользователя с тикерами. `/status` показывает только свои стратегии. `/closeall` закрывает только свои позиции. uvicorn `--reload` уже подхватил — можно тестировать.
+
+---
+
 ## 2026-05-08 — S7R-APPLY-SYNC-FIX: defensive guard для нестандартных blocks_json
 
 ### Триггер
