@@ -10,6 +10,58 @@
 
 ---
 
+## 2026-05-08 — S7R-GRID-POLISH: persist grid_result, статус single-из-grid, русификация графиков
+
+### Триггер
+
+После приёмки `S7R-GRID-APPLY-PARAMS` пользователь поднял четыре связанных пункта:
+
+1. **Grid result теряется после reload** — открыть «Показать результат» у фоновой карточки grid не получалось.
+2. **Кнопка «Прогнать бэктест»** запускала backend-задачу, но карточка в шапке-колбе оставалась `В очереди` навсегда (статус не приходил по WS).
+3. **Win / Loss / BE** на странице бэктеста — английские подписи в Mantine donut.
+4. **Распределение P&L** — пользователь не понимал что показывает гистограмма.
+
+### Реализовано
+
+#### 1. Persist `grid_result` через REST-snapshot
+
+`frontend/src/api/backtestApi.ts`:
+- Добавлен `getJob(jobId)` — GET `/backtest/jobs/{job_id}` (endpoint уже был, контракт S7 7.17). Возвращает в т.ч. `result.matrix` для grid jobs.
+
+`frontend/src/components/notifications/BackgroundBacktestsBadge.tsx`:
+- В `BackgroundBacktestRow` — `useEffect` при mount: для grid done-карточек без `grid_result` (флаг `gridResultMissingAfterReload` уже был, теперь не только индикатор) тянет snapshot через `getJob` и пишет matrix в store через `setStatus(jobId, 'done', { grid_result })`.
+- Почему так, а не persist в localStorage: `partialize` намеренно вырезает matrix (до 1000 ячеек × ~5 чисел — раздувает quota localStorage). REST-снапшот ленивый и кэшируется в памяти на сессию.
+
+#### 2. Статус single-из-grid
+
+`frontend/src/components/backtest/GridSearchHeatmap.tsx`:
+- Кнопка «Прогнать бэктест» переведена с `backtestApi.launch` (POST `/backtest`) на `backtestApi.launchBackground` (POST `/backtest/run-async`). Только второй endpoint создаёт запись в `backtest_jobs` с настоящим job_id, по которому WS канал `/ws/backtest/{job_id}` доставляет `progress`/`done`. Старый POST не создавал job, и шапка-колба теряла связь с этим бэктестом.
+
+#### 3. Русификация Donut
+
+`frontend/src/components/backtest/WinLossDonutChart.tsx`:
+- Заголовок `Win / Loss / BE` → **Победы / Убытки / Безубыток** (как в легенде).
+- `aria-label` SVG аналогично русифицирован.
+
+#### 4. Пояснение к гистограмме P&L
+
+`frontend/src/components/backtest/PnLDistributionHistogram.tsx`:
+- Рядом с заголовком «Распределение P&L» появилась иконка `IconInfoCircle` с Mantine `<Tooltip>`. Текст:
+  «Каждый столбик — количество сделок, попавших в диапазон процентной прибыли/убытка шириной 0.5%. Красные — убыточные, зелёные — прибыльные. Пунктирные линии — средний убыток (красная) и средняя прибыль (зелёная).»
+- Логика расчёта проверена и не меняется: бакеты `[low, high)` шага 0.5%, цвет по центру бакета (`< -0.05% → loss`, `> +0.05% → profit`, иначе `be`), линии avg loss/profit — арифметические средние по сделкам с |pct| > 0.05%.
+
+### Тесты
+
+- vitest: 66/66 pass (мок `getJob` добавлен в `BackgroundBacktestsBadge.test.tsx`).
+- tsc: 0 errors.
+- Backend изменений нет → pytest не затрагиваем.
+
+### Результат
+
+После reload страницы grid done-карточка автоматически восстанавливает heatmap (≤1 REST-запрос на карточку при mount). Single-бэктесты, запущенные из Grid Search heatmap, теперь корректно проходят через состояния `queued → running → done`. Donut и гистограмма читаются на русском, гистограмма имеет hover-пояснение.
+
+---
+
 ## 2026-05-06 — S7R-GRID-APPLY-PARAMS: применение результатов Grid Search
 
 ### Триггер
