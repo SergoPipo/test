@@ -10,6 +10,129 @@
 
 ---
 
+## 2026-05-08 — S7R-PROCESS: системные правки после ретро по плагинам и code-review
+
+### Триггер
+Заказчик указал, что я не использовал доступные плагины (`typescript-lsp`,
+`pyright-lsp`, `playwright`, `code-review`, `context7`) — что привело к
+двум одинаковым `Stack Gotcha #1` багам подряд (`pnl.toFixed`, потом
+`stats.win_rate.toFixed`). Договорились на 3 системных меры.
+
+### 1. Типы Decimal-полей: `number` → `string` в `frontend/src/api/types.ts`
+`Stack Gotcha #1` (Pydantic v2 сериализует `Decimal` как JSON `string`)
+обходил TypeScript только потому что типы во `frontend/api/types.ts`
+объявлены как `number` — компилятор молчал на `.toFixed()`, рантайм
+крашил.
+
+Поправлены **все** Decimal-поля production-Response'ов:
+- `TradingSession`: `initial_capital`, `current_pnl`, `current_pnl_pct_position`,
+  `position_sizing_value`, `active_position_entry_price` → `string`.
+- `LiveTrade`: `entry_price`, `exit_price`, `pnl`, `pnl_pct`, `commission`,
+  `slippage` → `string | null`.
+- `Position`: `entry_price`, `current_price`, `unrealized_pnl` →
+  `string | null` (учтён случай pending-trade без entry_price; см.
+  блокер #2 ниже).
+- `TradingDashboard.total_pnl`, `SessionStats.{win_rate, net_pnl, ...}`,
+  `BrokerBalance.{total, available, blocked}` → `string`.
+
+Теперь `tsc` строго запрещает `.toFixed`/`>= 0`/арифметику без явного
+`Number()` coerce — компилятор ловит «забытое преобразование» на этапе
+сборки.
+
+После смены типов `tsc -p tsconfig.app.json --noEmit` высветил 8 production-мест
+без coerce — все исправлены: `BalanceCards.tsx` (reduce и сравнение),
+`OpenPositionPrimitive.ts:41/43/101` (priceToCoordinate),
+`PnLSummary.tsx:63` (LineData.value), `SessionDashboard.tsx:180-183` (передача
+SessionStartRequest), `SessionList.tsx:29` (sort by current_pnl),
+`ActivePositionsWidget.tsx:44-46` (расчёт pnlPct).
+
+Test-фикстуры приведены в соответствие с новыми типами:
+`BalanceCards.test`, `PnLSummary.test`, `PositionsTable.test`,
+`SessionCard.test`, `TradesTable.test`, `tradingStore.test`,
+`AccountPage.test` — числа в моках поменяны на строки.
+
+### 2. Code-review этапов A/Б/C нашло 3 блокера
+
+🔴 **Блокер #1 — race в `runtime._handle_candle`**: RiskMonitor закрывал
+trade и коммитил, далее в том же handler SignalProcessor мог сразу
+открыть новую сделку на той же свече (стратегия рассчитала сигнал ДО
+учёта пробоя SL). Это нарушало `max_concurrent_positions` invariant и
+расходилось с backtrader-семантикой stop-orders («исполнение на bar,
+новый сигнал — на следующем»).
+
+**Фикс** (`runtime.py:898-915`): после `RiskMonitor.check_sl_tp` если
+`closed_count > 0` — `return` из `_handle_candle`. Сигнал текущей свечи
+игнорируется, на следующей свече стратегия пересчитает с учётом нового
+состояния. Лог `session_runtime_skip_signal_after_sl_tp` фиксирует
+случаи.
+
+🔴 **Блокер #2 — `TradingService.close_position`/`close_all_positions`
+без ownership-check**: Telegram-webhook фильтрует через JOIN, но REST
+endpoint `POST /sessions/{session_id}/positions/{trade_id}/close`
+вызывал service без `user_id` → пользователь A мог закрыть позицию
+пользователя B, передав чужой `session_id`.
+
+**Фикс**: `service.close_position(... , user_id=)` и
+`close_all_positions(... , user_id=)` теперь обязательно JOIN'ят
+`StrategyVersion → Strategy.user_id` (`service.py:492-548`); router
+передаёт `current_user.id` (`router.py:149,160`).
+
+🔴 **Блокер #3 — `Position` контракт vs реальный
+`get_all_positions`-вывод**: dashboard-endpoint отдавал
+`current_price=None, unrealized_pnl=None` для трейдов, открытых не на
+этом тикере, а frontend `Position.current_price/unrealized_pnl`
+объявлены как non-null `string`. Любой потенциальный consumer упал бы
+на `.toFixed`. Сейчас endpoint не дёргается — но это тикающая бомба.
+
+**Фикс**: `Position` поля `entry_price`, `current_price`,
+`unrealized_pnl` → `string | null`, что соответствует реальности
+(pending-trade без entry, dashboard без unrealized).
+
+### 3. `gotcha-01-pydantic-decimal.md` — чеклист «при смене Pydantic Response»
+Добавлен явный 4-пунктовый чеклист:
+1. Обновить `api/types.ts` (Decimal → `string`).
+2. `tsc -p tsconfig.app.json --noEmit` — поправить ВСЕ ругательства через `Number()`.
+3. Обновить тестовые фикстуры (`100` → `"100"`).
+4. Grep по фронту перед коммитом: `grep -rn '\.toFixed\|>=\b' src/` по
+   файлам, касающимся изменённого Response.
+
+Обновлены `sprints` (S5, S5R + S7), `severity: high`, `tags` += `typescript`,
+описан S7-кейс в «Ретро».
+
+### Файлы (сводно)
+- **Backend:** `app/trading/{router.py, service.py, runtime.py}` (ownership + race).
+- **Frontend:** `src/api/types.ts` (типы), `src/components/{account/BalanceCards.tsx,
+  charts/primitives/OpenPositionPrimitive.ts, dashboard/ActivePositionsWidget.tsx,
+  trading/{PnLSummary.tsx, SessionCard.tsx, SessionDashboard.tsx, SessionList.tsx}}`
+  (Number() coerce).
+- **Тесты:** 7 fixture-файлов (`__tests__/*.tsx`, `__tests__/*.ts`) — number → string.
+- **Документация:** `Develop/stack_gotchas/gotcha-01-pydantic-decimal.md` (чеклист + S7-ретро).
+
+### Тесты
+- Backend `pytest tests/ -q` → **1015 passed / 0 failed** (55s; без регрессий).
+- Frontend vitest на затронутых компонентах → **11 passed**.
+- `tsc -p tsconfig.app.json --noEmit`: 0 ошибок от моих изменений
+  (pre-existing ошибки `'suspended'`-status, `BlocklyWorkspace`,
+  `BacktestTrade.direction` и т.п. остались, как были до S7).
+
+### Что перенесено в backlog S8 (по итогам code-review)
+- Optimistic-lock на `DailyStat` row (`ON CONFLICT DO UPDATE`) против
+  гонки RiskMonitor / manual close.
+- `ensure_lot_size` через UPSERT, чтобы убрать шум IntegrityError-rollback.
+- equity-curve gap interpolation в `get_stats`.
+- Инвалидация `generated_code` при ручном edit `text_description`.
+- Pre-existing TypeScript-долг (`'suspended'` в SessionStatus,
+  `BlocklyWorkspace`/`BacktestTrade` несоответствия).
+
+### Урок процесса
+В будущем: после Edit `.ts/.tsx` в `components/` обязательно
+**playwright-скриншот** (а не только `tsc`). После смены Pydantic
+Response с Decimal — **обязательно** проходить чеклист gotcha-01.
+После большого блока изменений (>10 файлов в `app/trading/`) —
+**code-review** через специализированный агент.
+
+---
+
 ## 2026-05-08 — S7R-PAPER-SLTP: PnLSummary toFixed crash после агрегата SessionStats
 
 ### Триггер
