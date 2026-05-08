@@ -10,6 +10,60 @@
 
 ---
 
+## 2026-05-08 — S7R-TG-CLOSE-OWNERSHIP: security audit всех Telegram-команд
+
+### Триггер
+
+После S7R-TG-POSITIONS-FIX заказчик попросил пройтись по всем оставшимся командам Telegram-бота и проверить, что взаимодействие идёт только в рамках того пользователя, который пишет команды.
+
+### Аудит — все команды и callback'и
+
+| Сценарий | Фильтр user_id | Lazy-load | Статус |
+|---|---|---|---|
+| `/start [<token>]` | n/a (привязка) | n/a | OK |
+| `/positions` | ✅ S7R-TG-POSITIONS-FIX | ✅ | OK |
+| `/status` | ✅ S7R-TG-POSITIONS-FIX | n/a | OK |
+| `/balance` | ✅ исходно `BrokerAccount.user_id == user.id` | OK | **OK** |
+| `/close <trade_id>` | ❌ → ✅ (этот фикс) | ⚠️ → ✅ | **Фикс** |
+| `/closeall` (callback `confirm_closeall`) | ✅ S7R-TG-POSITIONS-FIX | ✅ | OK |
+| `/help` | n/a | n/a | OK |
+| callback `open_session:{id}` | ✅ исходно (join Strategy → user_id) | n/a | **OK** |
+| callback `open_chart:{ticker}` | n/a (тикеры публичные) | n/a | OK |
+| callback `cancel_closeall` | n/a | n/a | OK |
+
+### Найденная уязвимость: `/close <trade_id>`
+
+```python
+# было:
+result = await db.execute(select(LiveTrade).where(LiveTrade.id == trade_id))
+trade = result.scalar_one_or_none()
+```
+
+Без фильтра по user_id любой Telegram-пользователь, привязавший аккаунт, мог закрыть **чужую** торговую позицию, передав её ID. Это критично — управление чужими ордерами через бота. Заодно `trade.session.ticker` — потенциальный DetachedInstance (хоть `if trade.session` его и прикрывал, при пустой сессии падало бы по-другому).
+
+### Реализовано
+
+`backend/app/notification/telegram_webhook.py::_handle_close`:
+- Запрос `LiveTrade` через join `TradingSession → StrategyVersion → Strategy`, where `Strategy.user_id == user.id`. Чужая позиция возвращается как `None` → ответ «Позиция не найдена или уже закрыта». Намеренная общая формулировка — не leak'аем существование trade_id у другого пользователя.
+- `selectinload(LiveTrade.session)` — eager-load для `trade.session.ticker`.
+
+### Тесты (`test_telegram_positions.py`, +3 unit'а до 8)
+
+- `TestHandleClose.test_foreign_trade_returns_not_found` — критический кейс: фикстура `other_user_with_filled_trade`, `/close <чужой_id>` → «не найдена», без leak'а.
+- `TestHandleClose.test_no_args_prompts` — без аргумента → подсказка.
+- `TestHandleClose.test_unlinked_chat_rejected` — chat_id не привязан → стандартный отказ.
+
+Прогон: 203/203 backend pytest pass · mypy 0.
+
+### Результат
+
+Все команды Telegram-бота теперь строго привязаны к пользователю, который их отправил:
+- read-only (`/positions`, `/status`, `/balance`) показывают только свои данные;
+- mutating (`/close`, `/closeall`) применяют действия только к своим позициям;
+- callback'и с deep-link'ами (`open_session`) проверяют ownership.
+
+---
+
 ## 2026-05-08 — S7R-TG-POSITIONS-FIX: /positions, /status, /closeall — DetachedInstance + утечка чужих сессий
 
 ### Триггер
