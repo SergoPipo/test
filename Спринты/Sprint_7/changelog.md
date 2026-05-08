@@ -10,6 +10,80 @@
 
 ---
 
+## 2026-05-08 — S7R-APPLY-SYNC: полная синхронизация blocks_json + text_description с применёнными параметрами
+
+### Триггер
+
+После S7R-APPLY-VISIBLE-DIFF (diff-маркер в `text_description`) пользователь резонно отметил: параметры в Grid Search — те же самые, что в схеме и описании, мы знаем их имена и значения, **технических блокеров полноценной синхронизации нет**, есть только объём работы. Мой предыдущий ответ про «слишком сложно» был перестраховкой — пользователь подтвердил: «не важно сколько времени это займёт».
+
+Согласовано:
+1. Дубликаты (одинаковые `name+params`) патчить **обе копии** в blocks_json.
+2. Inline-индикаторы (внутри `entry_signal`/`condition`) — поддерживать.
+3. Если что-то не удалось синхронизировать — **отдельная yellow-нотификация** в UI.
+
+### Реализовано
+
+#### Backend: новый модуль `app/strategy/params_sync.py`
+
+- `_walk_indicators(blocks)` — рекурсивный обход `left/right/condition/conditions`, тот же набор ключей, что в `code_generator._extract_inline_indicators` → не разойдётся со временем.
+- `_dedup_key`, `_ind_var_for_index` — переиспользуем логику генератора кода. Гарантия: `python_name`, который видит Grid Search, ↔ `block.id`, который патчим.
+- `build_param_to_blocks_map(blocks)` → `{python_name: list[block_ref]}`. Дубликаты собираются в одну группу под одним именем — мутация коснётся всех копий.
+- `sync_blocks_params(blocks_json, params)` → `(new_json, unsynced)`. Deep-copy чтобы не трогать исходник. Inline-структура **сохраняется** (патч in-place в исходное дерево, не сплющивание на top-level).
+- `sync_text_description(text, params, blocks)` → regex-патч. Маппинг `[I_x]` → `python_var` строится тем же `_dedup_indicators` + `_ind_var` (сквозная нумерация уникальных индикаторов).
+- `apply_params_to_strategy(blocks, text, params)` → `(new_blocks, new_text, unsynced)`. **Soft-критерий**: параметр считается синхронизированным, если хотя бы один артефакт обновлён. Например, если юзер вручную сломал шаблон описания, regex промахнётся, но блоки всё равно патчатся → юзер видит изменения в Blockly, описание остаётся как есть, но всё равно дополняется audit-маркером.
+
+Поддерживаются:
+- Простые индикаторы (period): SMA, EMA, RSI, ATR, …
+- MACD: `_fast`, `_slow`, `_signal`
+- Stochastic: `_k`, `_d`
+- Bollinger Bands: `_period`, `_dev`
+- Risk: `stop_loss_pct`, `stop_loss_points`, `take_profit_pct`, `take_profit_points`
+- Position size: `position_size_lots`, `position_size_pct`
+
+#### Backend: интеграция в `app/strategy/router.py::create_version_from_params`
+
+- `apply_params_to_strategy(source.blocks_json, source.text_description, params)` перед `service.create_version`.
+- `audit-marker` (`--- Применено из Перебора по сетке ... ---`) **всё ещё добавляется** к описанию — это git-style commit-message, полезный след даже если regex-патч сработал.
+- Новое: `unsynced_params` → расширили `VersionResponse.unsynced_params: list[str] | None = None`. UI показывает yellow notification, если непусто.
+
+#### Frontend
+
+- `api/strategyApi.ts::StrategyVersion.unsynced_params?: string[] | null`.
+- `GridSearchHeatmap.applyParamsToStrategy` после успеха — yellow notification со списком имён, если `unsynced_params` непустой.
+
+### Тесты
+
+`tests/unit/test_strategy/test_params_sync.py` (новый, 23 unit'а):
+- single + два + три RSI с per-type счётчиком (`rsi`, `rsi_2`, `rsi_3`).
+- dedup: две одинаковые копии → один python-параметр, обе мутируются.
+- inline indicator → mutation in-place, исходная структура сохранена.
+- MACD `_fast/_slow/_signal`.
+- stop-loss/take-profit/position-size.
+- неизвестный параметр → unsynced.
+- пустой/невалидный blocks_json → all unsynced.
+- regex текста: один индикатор, два индикатора по `[I_x]`, два одинаковых по индексу, MACD multi-kv, СТОП-ЛОСС/ТЕЙК-ПРОФИТ.
+- свободный текст без `[I_x]`-маркера → blocks патчатся, текст в unsynced (но soft-критерий говорит «синхронизирован»).
+
+`tests/unit/test_strategy/test_version_from_params.py` (расширен, +5 тестов до 11):
+- `test_apply_syncs_blocks_and_text` — полный путь.
+- `test_apply_unsynced_param_returns_in_response` — частичная синхронизация.
+- `test_apply_two_rsis_with_index` — `[I1]/[I2]` правильно идентифицируются.
+- `test_apply_dedup_patches_both_copies` — дубликаты обе.
+- `test_apply_inline_indicator` — inline сохраняется и патчится.
+
+Прогон: backend 145/145 pass · frontend vitest 468/468 · mypy 0 · tsc 0.
+
+### Результат
+
+После «Применить к стратегии» из Grid Search обновляются **все три артефакта**:
+- `generated_code` (уже было — AST-rewrite),
+- `blocks_json` (новое — рекурсивный mutation в-месте, inline сохраняется, дубликаты обе копии),
+- `text_description` (новое — regex по `[I_x]`-шаблонам и risk-блокам),
+
+плюс audit-маркер с diff'ом старое → новое и `parameters_json` со значениями. Если что-то не удалось — yellow notification в UI с конкретным списком имён. Подводный камень «не пересохраняй из блоков, иначе вернутся старые значения» больше не актуален: блоки и так уже обновлены.
+
+---
+
 ## 2026-05-08 — S7R-APPLY-VISIBLE-DIFF: «Применить к стратегии» теперь видно глазами
 
 ### Триггер
