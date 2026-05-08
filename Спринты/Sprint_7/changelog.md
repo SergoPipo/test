@@ -10,6 +10,73 @@
 
 ---
 
+## 2026-05-08 — S7R-PNL-DUAL-PCT (этап A): унификация процентов P&L везде
+
+### Триггер
+
+После S7R-TG-POSITIONS-PNL-FIX выяснилось, что бот и дашборд показывают P&L под тем же названием, но по разным базам:
+
+| | LKOH | SBER |
+|---|---|---|
+| Бот | −370 ₽ (−6.78%) ← **% от стоимости позиции** | −47.16 ₽ (−1.62%) |
+| Дашборд (`SessionCard`) | (−0.38%) ← **% от стартового капитала** | (−0.05%) |
+
+Расхождение на порядок-два, юзер пугается. Обе формулы математически верны, но называли одинаково «P&L %».
+
+Решение по согласованию с заказчиком: показывать **оба процента** во всех трёх местах (бот / `PositionsTable` / `SessionCard`), формат «к позиции / к капиталу».
+
+### Реализовано
+
+#### Telegram-бот
+
+`backend/app/notification/telegram_webhook.py::_format_unrealized_pnl`:
+- Принимает `initial_capital`, считает оба процента: `pct_position = pnl/(entry × qty)*100`, `pct_capital = pnl/initial_capital*100`.
+- Формат:
+  ```
+  P&L (нереализованный): −370.00 ₽
+     −6.78% к позиции · −0.38% к капиталу
+  ```
+- Если `initial_capital` отсутствует (старые данные) — показываем только % к позиции.
+
+#### Backend trading service
+
+`backend/app/trading/schemas.py::PositionResponse`:
+- Новые поля `unrealized_pnl_pct_position` и `unrealized_pnl_pct_capital`.
+
+`backend/app/trading/service.py::_get_active_trade` (или эквивалент функции с расчётом позиций):
+- **Заодно фикшу баг lot_size, который был в этой формуле и в S7R-TG-POSITIONS-PNL-FIX**. Тянем `Instrument.lot_size`, считаем `total_qty = volume_lots × lot_size`, обе % и сумму с учётом lot_size. Без этого фикса дашборд так же занижал P&L в `lot_size` раз для SBER/GAZP.
+
+#### Frontend
+
+`frontend/src/api/types.ts::Position`:
+- Добавлены `unrealized_pnl_pct_position?: number | null`, `unrealized_pnl_pct_capital?: number | null`.
+
+`frontend/src/components/trading/PositionsTable.tsx`:
+- Под суммой ₽ — мелкая строка `−6.78% к позиции · −0.38% к капиталу` (Stack gap=2).
+- Helper `formatPctSigned` (знак, 2 знака после запятой, suffix `%`).
+
+`frontend/src/components/trading/SessionCard.tsx`:
+- К существующему `(−0.38%)` добавлена явная подпись: `(−0.38% к капиталу)`. На уровне сессии «% к позиции» неприменим (агрегат нескольких trades), поэтому только один % с подписью.
+
+### Тесты
+
+Backend: `tests/test_notification/test_telegram_positions.py::test_pnl_shows_both_percents` — ассертит наличие «к позиции» / «к капиталу» в ответе бота, и конкретные значения `9.45% к позиции` / `0.01% к капиталу` для известного фикстурного кейса.
+
+Прогон:
+- Backend pytest 82/82 trading + 13/13 telegram_positions + ничего больше не сломано.
+- Frontend tsc 0, vitest 468/468 (включая старые PositionsTable/SessionCard).
+- mypy 0.
+
+### Результат
+
+P&L теперь читается одинаково везде. Бот и дашборд больше не противоречат друг другу — обе метрики показаны явно. Заодно service.py получил `lot_size`-фикс (раньше unrealized_pnl на дашборде занижался в lot_size раз для SBER/GAZP, ровно как в боте до S7R-TG-POSITIONS-PNL-FIX).
+
+### Что дальше
+
+Подтверждение → перехожу на этап B (Instrument.lot_size sync для существующих и будущих тикеров) → этап C (SL/TP мониторинг в paper-runtime) + ARCH-ревью.
+
+---
+
 ## 2026-05-08 — S7R-TG-POSITIONS-PNL-FIX: lot_size в расчёте unrealized P&L
 
 ### Триггер
