@@ -10,6 +10,115 @@
 
 ---
 
+## 2026-05-08 — S7R-LOT-SIZE-SYNC (этап Б): ленивый backfill Instrument.lot_size
+
+### Триггер
+По плану этапов после S7R-PNL-DUAL-PCT: устранить корень бага «paper-engine
+кладёт lot_size=1 в `volume_rub`, потому что `PaperBrokerAdapter.get_instrument_info`
+всегда возвращает заглушку». Этап А считал unrealized с lot_size из `Instrument`,
+но сама таблица `instruments` для большинства тикеров имела дефолтный
+`lot_size=1`. Этап Б синхронизирует эту таблицу с источником данных.
+
+### Что сделано
+
+**1. Schema + миграция.**
+Добавлено поле `Instrument.lot_size_synced_at: DateTime | None`. NULL = синк
+ещё не выполнялся, при первом обращении helper сходит в источник и проставит
+timestamp. Миграция `f1a2b3c4d5e6_add_instruments_lot_size_synced_at.py`
+(nullable, без `server_default` — backfill не нужен).
+
+**2. Helper `MarketDataService.ensure_lot_size(ticker) -> int`.**
+Источники по приоритету: T-Invest `client.instruments.find_instrument` → MOEX
+ISS. Кешируется в `instruments`; повторный синк не ранее `LOT_SIZE_TTL=7 дней`.
+Никогда не падает: при сбое возвращает кэш или 1, чтобы вызывать в горячих
+путях P&L без try/except на стороне caller.
+
+**3. Новый ISS endpoint для LOTSIZE.**
+`MOEXISSClient.get_instrument_info` через `/iss/securities/{ticker}.json`
+возвращает блок `description` БЕЗ поля LOTSIZE — это известная особенность
+ISS API. Добавлен метод `MOEXISSClient.get_lot_size(ticker)` через рыночный
+endpoint `/iss/engines/stock/markets/shares/securities/{ticker}.json`
+с `iss.only=securities&securities.columns=SECID,LOTSIZE` — возвращает int|None.
+
+**4. Подключение во все 4 точки чтения lot_size:**
+- `app/notification/telegram_webhook.py:_get_lot_size` — теперь делегирует в
+  `MarketDataService.ensure_lot_size`.
+- `app/trading/service.py:_fill_session_card_data` (расчёт `current_pnl_pct_position`).
+- `app/trading/service.py:get_positions` (расчёт unrealized для PositionsTable).
+- `app/trading/engine.py:_create_trade` — paper-runtime создаёт LiveTrade с
+  правильным lot_size в `volume_rub`. Это устраняет корень проблемы: ранее
+  `PaperBrokerAdapter.get_instrument_info` отдавал заглушку 1.
+
+**5. Backfill-скрипт `scripts/backfill_lot_sizes.py`.**
+Прогоняет `ensure_lot_size` по всем тикерам из `trading_sessions` ∪
+`instruments`. Запуск:
+`cd Develop/backend && .venv/bin/python -m scripts.backfill_lot_sizes`.
+Печатает таблицу `TICKER | BEFORE | AFTER | STATUS`.
+
+### Реальный прогон backfill на dev-БД (29 тикеров)
+
+| Группа | Тикеры | LOTSIZE |
+|--------|--------|---------|
+| Сплитнутые голубые фишки (2024–2025) | SBER, SBERP, GAZP, LKOH, ROSN | 1 |
+| Привилегированные/региональные | ASSB, KTSB, KTSBP, KLSB, GAZA, VGSB, VGSBP | 10–10000 |
+| Облигации (RU000A…) | 14 шт. | 1 |
+| Прочее (SBPL, SBUX-RM) | — | 1 |
+
+**Важный фактологический вывод.** После сплитов MOEX 2024–2025 **все
+голубые фишки** (SBER, GAZP, LKOH, ROSN, GMKN) имеют LOTSIZE=1. Это значит,
+что исходная гипотеза «P&L SBER занижен в 10× из-за lot_size» неверна для
+текущего инструмента: lot_size SBER действительно 1. Архитектурное
+исправление формулы (`× lot_size`) корректно и нужно для тикеров с
+LOTSIZE>1 (`ASSB=1000`, `GAZA=10` и т. п.) — но численно для SBER/GAZP
+ничего не меняется. Старые трейды тоже OK: цена SBER снизилась в 10× при
+сплите, lot_size упал с 10 до 1 — итоговая денежная сумма осталась той же.
+
+### Файлы
+- **Новые:**
+  - `Develop/backend/alembic/versions/f1a2b3c4d5e6_add_instruments_lot_size_synced_at.py`
+  - `Develop/backend/scripts/__init__.py`, `Develop/backend/scripts/backfill_lot_sizes.py`
+- **Изменённые:**
+  - `Develop/backend/app/market_data/models.py` — поле `lot_size_synced_at`.
+  - `Develop/backend/app/market_data/service.py` — `ensure_lot_size`, `_fetch_lot_size_from_tinvest`.
+  - `Develop/backend/app/broker/moex_iss/client.py` — метод `get_lot_size`.
+  - `Develop/backend/app/notification/telegram_webhook.py` — `_get_lot_size` через MarketDataService.
+  - `Develop/backend/app/trading/service.py` — два места унифицированы на helper.
+  - `Develop/backend/app/trading/engine.py` — paper-engine create_trade использует helper, а не заглушку PaperBrokerAdapter.
+  - `Develop/backend/tests/unit/test_market_data/test_service.py` — `TestEnsureLotSize` (5 кейсов).
+  - `Develop/backend/tests/test_notification/test_telegram_positions.py` — фикс для свежего `synced_at` (предотвращение сетевых обращений в unit-тесте).
+
+### Тесты
+- `pytest tests/unit/test_market_data/test_service.py::TestEnsureLotSize -v` → **5/5 passed**
+  (ISS-fetch, LKOH=1, T-Invest priority, ISS-failure preserves cache, fresh cache skips fetch).
+- Полный backend suite `pytest tests/ -q` (без integration) → **994 passed / 0 failed** (43.7s).
+- Backfill-скрипт прогнан на dev-БД, 29 тикеров обработано, ошибок нет.
+- `npx tsc --noEmit` (frontend) → 0 errors.
+
+### Контракты и интеграция
+- **Integration verification:** `grep -rn "ensure_lot_size" app/` → 4 production call site
+  (telegram_webhook.py:80, trading/service.py:×2, trading/engine.py). Все потребители — реальный
+  production-код, не только тесты.
+- **Без breaking changes**: helper deleg-fallback на `lot_size=1` идентичен прежнему поведению;
+  существующие трейды в БД не затронуты, `volume_rub` исторических записей не пересчитывается
+  (после сплитов это не нужно — см. выше).
+
+### Stack Gotchas применены
+- **#08 (AsyncSession):** helper использует переданную сессию из caller'а, без отдельных
+  engine.dispose, чтобы избежать повторных connect/disconnect.
+- **#11 (alembic order):** ревизия привязана к head `e8a1f2b3c4d9` через `down_revision`.
+- **Новый паттерн (не Stack Gotcha):** ORM-модели должны быть импортированы ДО первого
+  ORM-запроса, иначе SQLAlchemy не может разрешить relationships. В backfill-скрипте
+  явные `import app.auth.models  # noqa` и др. — без них падало
+  «expression 'User' failed to locate a name».
+
+### Открытые вопросы
+- Этап C (SL/TP мониторинг в paper-runtime) — следующий по плану.
+- Тестовый прогон с реальным `find_instrument` показал, что T-Invest для голубых
+  фишек возвращает `lot=1` (после сплитов), что подтверждает картину MOEX. Если в
+  будущем появится новый эмитент с lot>1 — формула уже готова.
+
+---
+
 ## 2026-05-08 — S7R-PNL-DUAL-PCT (формат: «поз. / кап.»)
 
 ### Триггер
