@@ -10,6 +10,56 @@
 
 ---
 
+## 2026-05-08 — S7R-PNL-DUAL-PCT (правки этапа A после ревью)
+
+### Триггер
+
+Юзер по итогам ревью этапа A:
+1. На странице списка сессий (`SessionCard`) видно только «% к капиталу», а «% к позиции» отсутствует — должно быть оба, как везде.
+2. В `PositionsTable` строка с двумя % была `size="xs"` + `c="dimmed"` → нечитаемая. «Увеличить как минимум в два раза».
+
+### Реализовано
+
+#### Backend
+
+`app/trading/schemas.py::SessionResponse`:
+- Добавлено поле `current_pnl_pct_position: Decimal | None = None`. None если открытых позиций нет — тогда «% к позиции» неопределён.
+
+`app/trading/service.py::_fill_session_card_data`:
+- Считаем `cost = entry × volume_lots × lot_size` для последней активной позиции и `current_pnl_pct_position = unrealized / cost × 100`.
+- **Заодно** добавил `lot_size` в это место (раньше тут тоже `(current - entry) * volume_lots` без lot_size — тот же баг что в `_get_active_trade`, S7R-TG-POSITIONS-PNL-FIX). Теперь `current_pnl` сессии для SBER/GAZP считается правильно.
+
+#### Frontend
+
+`api/types.ts::TradingSession`:
+- Опциональное `current_pnl_pct_position?: number | null`.
+
+`components/trading/SessionCard.tsx`:
+- В строке P&L теперь оба %:
+  ```
+  −380.50 ₽ (−6.78% к позиции · −0.38% к капиталу)
+  ```
+- Если `current_pnl_pct_position` отсутствует (закрытые сессии без открытых позиций) — показываем только «к капиталу» с подписью.
+
+`components/trading/PositionsTable.tsx`:
+- `size="xs" c="dimmed"` → `size="lg" fw={500} c={pnlColor}`. Шрифт от 11px к 16px (~1.5×) + полужирное начертание + цвет, совпадающий с цветом суммы (зелёный/красный) — визуально воспринимается крупнее основной строки, читается с разбегу.
+
+### Тесты
+
+- Backend: 139/139 trading + telegram_notification pass · mypy 0.
+- Frontend: tsc 0, vitest 468/468 (включая существующие PositionsTable/SessionCard).
+
+### Результат
+
+`SessionCard` теперь:
+```
+−380.50 ₽ (−6.78% к позиции · −0.38% к капиталу)
+```
+
+`PositionsTable` строка процентов крупная, цветная, читается без напряга.
+
+---
+
 ## 2026-05-08 — S7R-PNL-DUAL-PCT (этап A): унификация процентов P&L везде
 
 ### Триггер
