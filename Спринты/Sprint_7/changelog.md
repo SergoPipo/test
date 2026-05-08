@@ -10,6 +10,39 @@
 
 ---
 
+## 2026-05-08 — S7R-EXPORT-WIRE: подключение фронта к CSV/PDF экспорту бэктеста (S7 7.3)
+
+### Триггер
+
+Пользователь на странице результатов бэктеста увидел кнопки CSV/PDF в `disabled` с тултипом «Будет реализовано в Sprint 7 (задача 7.3 — экспорт CSV/PDF через WeasyPrint + openpyxl)». Sprint 7 уже подходит к концу, бэкенд экспорта (`backend/app/backtest/export.py` + `GET /api/v1/backtest/{id}/export?format=csv|pdf`) сделан давно, но фронт остался с заглушкой со времён S5.
+
+### Реализовано
+
+`frontend/src/api/backtestApi.ts`:
+- Метод `exportBacktest(backtestId, format)` — `GET /backtest/{id}/export?format=csv|pdf` с `responseType: 'blob'`.
+
+`frontend/src/pages/BacktestResultsPage.tsx`:
+- Удалены `disabled`-кнопки и `<Tooltip>`-обёртки с заглушкой; неиспользуемый импорт `Tooltip` тоже выкинут.
+- Добавлен state `exportingFormat: 'csv' | 'pdf' | null` — на время скачивания соответствующая кнопка показывает Mantine `loading={true}`, вторая блокируется (`disabled={exportingFormat !== null}`), чтобы юзер не давил повторно.
+- Хендлер `handleExport(format)` — паттерн как в `accountStore.downloadTaxReport`:
+  1. Запрос blob через `backtestApi.exportBacktest`.
+  2. Имя файла парсится из `Content-Disposition` (бэкенд шлёт `attachment; filename="backtest_{id}_{ticker}.{ext}"`); fallback — собранное на фронте по тем же полям.
+  3. Триггер скачивания через временный `<a download>`, затем `URL.revokeObjectURL`.
+- Обработка 503 (PDF без WeasyPrint) — отдельный текст в `notifications.show`: «PDF-экспорт недоступен (WeasyPrint не установлен на сервере). Используйте CSV.»
+- testid'ы переименованы: `export-{csv,pdf}-disabled-btn` → `export-{csv,pdf}-btn`.
+
+### Тесты
+
+- vitest: 468/468 pass (тестов на `BacktestResultsPage` не было; e2e-проверка не требовалась — кнопка делегирует в готовый endpoint).
+- tsc: 0 errors.
+- Smoke на работающем backend: `GET /api/v1/backtest/1/export?format=csv` без auth → HTTP 401 (endpoint живой и под аутентификацией, как и должен).
+
+### Результат
+
+Кнопки CSV и PDF на странице бэктеста скачивают файл одним кликом. Sprint 7 задача 7.3 закрыта целиком (бэкенд + фронтенд + tooltip-заглушка убрана).
+
+---
+
 ## 2026-05-08 — S7R-GRID-POLISH: persist grid_result, статус single-из-grid, русификация графиков
 
 ### Триггер
