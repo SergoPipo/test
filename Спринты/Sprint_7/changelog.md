@@ -10,6 +10,56 @@
 
 ---
 
+## 2026-05-08 — S7R-PAPER-SLTP: PnLSummary toFixed crash после агрегата SessionStats
+
+### Триггер
+После замены `/stats`-endpoint на `SessionStatsResponse` страница терминала
+показывала **белый экран** при переходе в торговую сессию. В консоли:
+```
+TypeError: (stats.win_rate ?? 0).toFixed is not a function.
+   In '(stats.win_rate ?? 0).toFixed(1)', '(stats.win_rate ?? 0).toFixed' is undefined
+   PnLSummary.tsx:108
+```
+
+### Причина
+`SessionStatsResponse` объявлен с Pydantic `Decimal` полями (`win_rate`,
+`profit_factor`, `net_pnl_pct`, `avg_trade_pnl`, ...), а Pydantic v2 без
+явного `json_encoders` сериализует Decimal как **string**. Frontend-тип
+`SessionStats.win_rate: number` врёт; в реальности приходит `"0.00"`.
+Оператор `??` не срабатывает на не-null значении, и `.toFixed` нет у
+строки → TypeError → unmount всего поддерева.
+
+Это **тот же класс ошибки**, что я только что починил в
+`OpenPositionPrimitive` (Stack Gotcha #1), но забыл применить ко всем
+местам, обращающимся к новому endpoint.
+
+### Что сделано
+- `PnLSummary.tsx` (`src/components/trading/PnLSummary.tsx`):
+  явный `Number()` coerce для `win_rate` и `profit_factor` + `Number.isFinite`
+  fallback на 0. Теперь даже если backend пришлёт мусор/строку/null,
+  UI рендерится с нулями вместо краша.
+
+### Файлы
+- `Develop/frontend/src/components/trading/PnLSummary.tsx`
+
+### Тесты
+- `npx tsc --noEmit` → 0 errors.
+- Полный backend suite ранее 1015/1015 (изменений в backend нет).
+
+### Верификация
+После рестарта frontend (HMR) страница торговли и вкладка «Статистика»
+должны открываться без TypeError. Метрики LKOH:
+`Win Rate 0.0%, Profit Factor 0.00, P&L -109.16 ₽, Total trades 1`.
+
+### Stack Gotcha #1 урок
+Помечаю: после изменения схемы Pydantic Response нужно **систематически**
+проходить по всем frontend-местам, которые используют этот тип, и
+проверять `.toFixed`/арифметические операции. TypeScript-тип `number`
+формально не запрещает рантайм-string, но выявляется только при первом
+обращении.
+
+---
+
 ## 2026-05-08 — S7R-PAPER-SLTP (этап C): пост-prod-фикс по живой сессии LKOH
 
 ### Триггер
