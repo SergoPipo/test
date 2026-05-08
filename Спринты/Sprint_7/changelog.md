@@ -10,6 +10,96 @@
 
 ---
 
+## 2026-05-08 — S7R-PAPER-SLTP (этап C): пост-prod-фикс по живой сессии LKOH
+
+### Триггер
+Пользователь сообщил: «по LKOH должен сработать стоп-лосс — почему он
+не срабатывает». Диагностика на dev-БД:
+- LKOH открыт по 5458 ₽, цена упала до 5076 ₽ (−7.5%); SL@2% = 5348.84
+  должен был сработать многократно.
+- Trade #2: `entry=5458, sl=NULL, tp=NULL`. Открыт 22 апреля — до этапа C.
+- В стратегии LKOH: `text_description` содержит «СТОП-ЛОСС 2%» и
+  «ТЕЙК-ПРОФИТ 4%», `generated_code` содержит `params = (..., ('stop_loss_pct', 2), ...)`,
+  но `blocks_json` — Blockly Workspace JSON `{"blocks":{"languageVersion":0,"blocks":[...]}}`
+  с **только** `signal_entry/signal_exit` блоками.
+
+Найден **второй блокер этапа C, не пойманный ARCH-ревью**:
+`extract_risk_params` ищет risk только в `blocks_json`, а у AI-стратегий
+их там вообще нет. ARCH рассматривал только template-парсер
+(`block_parser.py`) и пропустил формат от Blockly UI.
+
+### Что сделано
+
+**1. Гибридный `extract_risk_params` с тремя источниками:**
+Новая сигнатура: `extract_risk_params(blocks_json=None, generated_code=None, text_description=None)`.
+Приоритет (для каждого поля независимо):
+1. **`generated_code`** — regex `\(['"]stop_loss_pct['"],\s*(N)\)` — самый
+   надёжный источник, это тот код что исполняется в backtrader.
+2. **`text_description`** — regex «СТОП-ЛОСС\\n2%» (та же схема, что в
+   `params_sync._TEXT_PARAMS_PATTERNS`).
+3. **`blocks_json`** — top-level risk-блоки template-формата (legacy).
+
+**2. `OrderManager._attach_sl_tp` передаёт все 3 поля** в
+`extract_risk_params`. Раньше передавался только `blocks_json` — теперь
+читаются также `generated_code` и `text_description` из StrategyVersion.
+
+**3. Backfill-скрипт `scripts/backfill_open_trades_sl_tp.py`** — для
+существующих open-трейдов с NULL SL/TP. Прогон на dev-БД заполнил оба
+живых трейда:
+- Trade #1 SBER: entry=324.33 → SL=317.84, TP=337.30
+- Trade #2 LKOH: entry=5458.00 → SL=5348.84, TP=5676.32
+
+**4. Тесты** (`tests/test_trading/test_risk_monitor.py`, +5 кейсов):
+- `from_generated_code` — backtrader params tuple;
+- `from_text_description` — «СТОП-ЛОСС 2.5%»;
+- `priority_code_over_text` — code побеждает при конфликте;
+- `partial_text_fills_missing_code` — gaps в одном источнике добиваются другим;
+- `workspace_json_signal_only` — Blockly Workspace без risk-блоков
+  (точная репродукция продакшен-стратегии LKOH).
+
+### Файлы
+- **Изменённые:**
+  - `Develop/backend/app/trading/risk_monitor.py` — `extract_risk_params`
+    с приоритетной логикой 3 источников + helpers
+    `_extract_from_generated_code`, `_extract_from_text_description`,
+    `_extract_from_blocks` (рефакторинг прежнего тела).
+  - `Develop/backend/app/trading/engine.py` — `_attach_sl_tp` передаёт
+    `blocks_json + generated_code + text_description`.
+  - `Develop/backend/tests/test_trading/test_risk_monitor.py` — +5 тестов.
+  - `Develop/stack_gotchas/gotcha-23-paper-engine-no-sl-tp.md` — секция
+    «Поддерживаемые источники SL/TP» полностью переработана: ASCII-список
+    3 источников, явное предупреждение «не работает только blocks_json».
+- **Новые:**
+  - `Develop/backend/scripts/backfill_open_trades_sl_tp.py` —
+    одноразовый backfill для open-трейдов с NULL SL/TP.
+
+### Тесты
+- `pytest tests/test_trading/test_risk_monitor.py -v` → **20/20 passed**
+  (было 15).
+- Полный backend suite `pytest tests/ -q` → **1015 passed / 0 failed** (53s).
+- Backfill прогнан, 2/2 трейда заполнены, БД консистентна.
+
+### Верификация на живой сессии
+После backfill + restart_dev.sh обе сессии в `active`. На следующей
+закрытой 5m-свече LKOH (low=5076 ≤ SL=5348.84) RiskMonitor должен закрыть
+позицию и опубликовать `trade.closed` event с reason=stop_loss.
+
+### Контракты и интеграция
+- **Integration verification:**
+  - `grep -rn "extract_risk_params" app/` → 1 production call site
+    (`engine.py:_attach_sl_tp`). ✅
+  - `_extract_from_generated_code/_extract_from_text_description/_extract_from_blocks`
+    — internal helpers, экспортируются через `extract_risk_params`.
+  - Все 20 тестов покрывают и legacy (только blocks_json), и новый путь
+    (3 источника), backward-compatibility сохранена.
+
+### ARCH-ревью статус
+- Прошлый вердикт: **GO с замечаниями** (после фикса блокера #1).
+- Текущий вердикт: **GO** — блокер #2 (Workspace JSON для AI-стратегий)
+  закрыт, репродукция в тестах, прод-сессия готова к закрытию по SL.
+
+---
+
 ## 2026-05-08 — S7R-PAPER-SLTP (этап C): пост-ARCH правки
 
 ### Триггер
