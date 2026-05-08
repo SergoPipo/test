@@ -10,6 +10,84 @@
 
 ---
 
+## 2026-05-08 — S7R-PAPER-SLTP (этап C): пост-ARCH правки
+
+### Триггер
+ARCH-ревью этапов A/Б/C нашло 1 блокер и 2 средних замечания в этапе C
+(**NO-GO** до фикса). Цель — закрыть блокер и одно из замечаний, чтобы
+вердикт стал **GO с замечаниями**.
+
+### БЛОКЕР: `extract_risk_params` не понимал реальный формат `blocks_json`
+
+`app/strategy/block_parser.py` сериализует `blocks_json` как dict-обёртку
+`{"version": "1.0", "blocks": [...]}` (строки 116, 136 — все
+AI/template-стратегии в БД имеют именно такую форму). Мой helper в
+`risk_monitor.extract_risk_params` обрабатывал только raw-list и для
+dict сразу возвращал пустой `RiskParams()`. Итог: для ВСЕХ production-стратегий
+SL/TP оставались NULL, и RiskMonitor их пропускал.
+
+Интеграционный тест `test_paper_buy_sets_sl_tp_from_blocks_json` обходил
+баг, потому что подсовывал raw-list вручную — ровно ту строку, где живёт
+проблема.
+
+**Исправление** (`app/trading/risk_monitor.py:71-89`): добавлен normalizer
+`if isinstance(blocks, dict): blocks = blocks.get("blocks", [])` — тот же
+паттерн, что в `params_sync.sync_blocks_params:229`. Теперь поддерживаются:
+1. распарсенный list блоков;
+2. dict-обёртка `{"version": "1.0", "blocks": [...]}`;
+3. JSON-строка с любым из форматов 1-2.
+
+**Тест** (`tests/test_trading/test_risk_monitor.py:test_extract_risk_params_dict_wrapper`):
+проверяет dict-объект и его JSON-сериализацию.
+
+### Замечание #2: тест short-TP (зеркальная регрессия)
+
+ARCH указал: для long-TP и short-SL тесты были, но зеркальный кейс
+short-TP не проверялся. Без этого регрессия зеркальной логики при
+рефакторинге `_evaluate` могла остаться незамеченной.
+
+**Тест** (`test_check_sl_tp_short_tp_triggered`): short с TP=90, свеча
+low=89 → закрытие по 90, pnl=(100-90)×10=+100.
+
+### Замечание #3: gotcha-23 обновлён
+
+Добавлено:
+- **Обоснование SL-priority для short**: для long SL ниже entry, для short
+  SL выше entry — в обоих случаях это «худший для трейдера исход» при
+  невосстановимом порядке пробоев.
+- **Предупреждение про high-precision активы**: округление до 8 знаков
+  через `ROUND_HALF_EVEN` для крипты с ценой `~1e-7` и pct=1% даст
+  дельту `<1e-9`, после quantize → 0 → мгновенное закрытие. Для
+  MOEX-рубля проблемы нет; при добавлении крипто перейти на `ROUND_DOWN`
+  (SL) / `ROUND_UP` (TP) или precision=12.
+- **Поддерживаемые форматы blocks_json**: явный список 3 форматов с
+  отсылкой на блокер #1.
+
+### Не закрыто (осознанно перенесено в backlog S8)
+ARCH-ревью отметил ещё 2 низкоприоритетных пункта, не блокирующие приёмку:
+- **Optimistic-lock против double-close** между RiskMonitor и manual
+  `OrderManager.close_position` (Telegram `/close`). Race-окно мало
+  (требует одновременного касания SL и manual-команды), и сейчас нет
+  механизма версионирования в `LiveTrade`.
+- **Metric/alert на `risk_monitor_failed`** — при N≥3 подряд пометить
+  сессию `paused`. Сейчас просто `logger.exception`.
+
+### Файлы
+- `Develop/backend/app/trading/risk_monitor.py` — extract_risk_params dict-нормалайзер.
+- `Develop/backend/tests/test_trading/test_risk_monitor.py` — +2 теста.
+- `Develop/stack_gotchas/gotcha-23-paper-engine-no-sl-tp.md` — обновлено
+  обоснование SL-priority, добавлены п. high-precision и поддерживаемые
+  форматы blocks_json.
+
+### Тесты
+- `pytest tests/test_trading/test_risk_monitor.py` → **15/15 passed** (было 13).
+- Полный suite `pytest tests/ -q` → **1010 passed / 0 failed** (53.1s; +2 от 1008).
+
+### Финальный вердикт ARCH (после фикса): GO с замечаниями
+Этап C принят. Оставшиеся 2 замечания — backlog S8.
+
+---
+
 ## 2026-05-08 — S7R-PAPER-SLTP (этап C): SL/TP-мониторинг в paper-runtime
 
 ### Триггер
