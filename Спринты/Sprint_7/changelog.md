@@ -10,6 +10,121 @@
 
 ---
 
+## 2026-05-08 — S7R-PAPER-SLTP (этап C): SL/TP-мониторинг в paper-runtime
+
+### Триггер
+Закрытие архитектурного gap из S6: `LiveTrade.stop_loss/take_profit` есть в
+схеме, но никто их не выставлял при открытии позиции и не проверял на свечах.
+Paper-позиции при пробое stop-loss оставались открытыми — расходились с
+бэктестом, который backtrader корректно отрабатывает через
+`stop_loss_pct`. Заявленный пользователем сценарий «почему стоп-лосс
+не сработал при −5% на сессии» относится к этому gap, а не к lot_size.
+
+### Что сделано (минимум-полезный план)
+
+**1. Новый модуль `app/trading/risk_monitor.py`:**
+- `RiskParams` (dataclass): `stop_loss_pct`, `take_profit_pct`.
+- `extract_risk_params(blocks_json)` — извлекает риск-параметры из top-level
+  блоков `stop_loss` / `take_profit` (тот же контракт, что в `params_sync.py`).
+  Принимает либо распарсенный список, либо строку JSON.
+- `calc_sl_tp_prices(entry, direction, risk)` — абсолютные цены:
+  long → `SL = entry × (1 - pct/100)`, `TP = entry × (1 + pct/100)`,
+  short — зеркально. Округление до `Numeric(18, 8)`.
+- `RiskMonitor.check_sl_tp(session, candle)` — для каждого открытого trade'а
+  сессии проверяет пересечение по `candle.high/low`, закрывает позицию,
+  считает P&L с lot_size (через `MarketDataService.ensure_lot_size`),
+  публикует `trade.closed` event.
+- **SL имеет приоритет над TP** при касании обоих в одной свече —
+  консервативный сценарий (по 1h/D-свече нельзя восстановить реальную
+  последовательность пробоев).
+
+**2. Интеграция в `OrderManager.process_signal`** (`engine.py`):
+Новый метод `_attach_sl_tp(trade, session)` вызывается в paper-mode сразу
+после `trade.entry_price = signal.price`. Читает `StrategyVersion.blocks_json`,
+рассчитывает абсолютные SL/TP и сохраняет в `trade.stop_loss/take_profit`.
+Любая ошибка → SL/TP остаются NULL (поведение до этапа C); ошибка не
+блокирует открытие сделки.
+
+**3. Интеграция в `runtime._handle_candle`** (`runtime.py`):
+Перед `SignalProcessor` теперь вызывается `RiskMonitor.check_sl_tp`. Если
+уровень пробит — позиция закрывается ДО обработки нового сигнала, что
+сохраняет инвариант `max_concurrent_positions`. Сбой монитора залогирован
+и не блокирует сигнал.
+
+**4. Тесты** (`tests/test_trading/test_risk_monitor.py`, 13 кейсов):
+- extract_risk_params: pct, missing-blocks, JSON-string;
+- calc_sl_tp_prices: long, short, partial (только SL без TP);
+- check_sl_tp: long-SL, long-TP, short-SL, no-cross, SL-priority,
+  skips-without-levels, multiple-open-trades.
+
+**5. Интеграционный тест** (`tests/test_trading/test_order_manager.py`):
+`test_paper_buy_sets_sl_tp_from_blocks_json` — `process_signal` с реальной
+StrategyVersion.blocks_json проставляет SL=98, TP=105 при entry=100, pct=2/5.
+
+**6. Stack Gotcha #23** (`Develop/stack_gotchas/gotcha-23-paper-engine-no-sl-tp.md`):
+описание архитектурного gap, реализованное решение, что не поддерживается
+(stop_loss_points в рублях, trailing-stop, real-broker stop-orders),
+правила «не делать» (close в SignalProcessor, candle.close для проверки,
+RiskMonitor после SignalProcessor). INDEX.md обновлён до version=6.
+
+### Файлы
+- **Новые:**
+  - `Develop/backend/app/trading/risk_monitor.py` (~250 LOC).
+  - `Develop/backend/tests/test_trading/test_risk_monitor.py` (13 тестов).
+  - `Develop/stack_gotchas/gotcha-23-paper-engine-no-sl-tp.md`.
+- **Изменённые:**
+  - `Develop/backend/app/trading/engine.py` — `OrderManager._attach_sl_tp`,
+    вызов в paper-fill ветке.
+  - `Develop/backend/app/trading/runtime.py` — `RiskMonitor.check_sl_tp`
+    перед SignalProcessor в `_handle_candle`.
+  - `Develop/backend/tests/test_trading/test_order_manager.py` — интеграционный тест.
+  - `Develop/stack_gotchas/INDEX.md` — version=6, last_updated=2026-05-08, +строка #23.
+
+### Тесты
+- `pytest tests/test_trading/test_risk_monitor.py -v` → **13/13 passed**.
+- `pytest tests/test_trading/ -q` → **96 passed** (95 baseline + 1 новый интеграционный).
+- Полный backend suite `pytest tests/ -q` (без integration) → **1008 passed / 0 failed** (51.6s).
+  Baseline до этапа C — 994 passed; +14 новых, 0 регрессий.
+
+### Контракты и интеграция
+- **Integration verification:**
+  - `grep -rn "RiskMonitor(" app/` → 1 production call site (`runtime.py:_handle_candle`).
+  - `grep -rn "_attach_sl_tp" app/` → 1 production call site (`engine.py:process_signal` paper-ветка).
+  - `grep -rn "extract_risk_params\|calc_sl_tp_prices" app/` → используются только в
+    `risk_monitor.py` (внутренние) и тестах. ✅ helpers экспортируются для unit-тестов.
+- **Order of operations** в `_handle_candle`:
+  `RiskMonitor.check_sl_tp` (новое) → `SignalProcessor` → `CircuitBreaker` →
+  `OrderManager.process_signal`. Логика «закрыть по SL/TP сначала, потом обрабатывать
+  сигнал» — соответствует backtrader: stop-order исполняется на следующем баре до
+  следующего сигнала.
+
+### Что НЕ реализовано (осознанно, перенесено в backlog)
+1. **`stop_loss_points`** (абсолютный сдвиг в рублях, не процентах) — структура
+   данных та же, но требует точного учёта `min_price_increment` и валюты;
+   будет в S8/S9 при первом реальном кейсе.
+2. **Trailing stop** — динамически подтягивающийся уровень при движении в
+   профит. Требует расширения `LiveTrade` (`trailing_distance`, `trailing_high`).
+3. **Real-broker SL/TP через stop-orders** — отдельная задача после
+   интеграции production T-Invest `OrdersService.PostStopOrder`.
+4. **Closeout reason в БД** — в текущей версии причина закрытия (`stop_loss` /
+   `take_profit`) логируется через `event_bus.publish` payload и `structlog`,
+   но в БД-колонки не пишется (нет колонки `close_reason`). Если потребуется
+   фильтровать по причине в `/positions` history — добавить миграцию.
+
+### Stack Gotchas применены
+- **#08 (AsyncSession):** `RiskMonitor` принимает существующий AsyncSession,
+  без отдельного engine.dispose. `runtime._handle_candle` уже работает в
+  своей `async with self._session_factory() as db` — RiskMonitor получает её.
+- **#11 (alembic drift):** колонок не добавлял (использую существующие
+  `LiveTrade.stop_loss/take_profit/exit_price/pnl`). Миграция не требуется.
+- **#23 (новая):** см. описание выше.
+
+### Открытые вопросы
+- Этап C закрыт. Следующий шаг — ARCH-ревью этапов A/Б/C, после чего
+  пользователь решает, что делать с trailing/points/real-mode SL/TP.
+
+---
+
 ## 2026-05-08 — S7R-LOT-SIZE-SYNC (этап Б): ленивый backfill Instrument.lot_size
 
 ### Триггер
