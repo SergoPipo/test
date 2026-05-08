@@ -10,6 +10,57 @@
 
 ---
 
+## 2026-05-08 — S7R-TG-POSITIONS-PNL-FIX: lot_size в расчёте unrealized P&L
+
+### Триггер
+
+После S7R-TG-POSITIONS-PNL юзер вернулся: «P&L указан неверно. Посмотри какой P&L показывается в каждой торговой сессии».
+
+```
+🟢 LKOH (paper): 1 лот(ов), вход 5 458.00 ₽
+P&L (нереализованный): -370.00 ₽ (-6.78%)   ← LKOH lot_size=1 — ОК
+
+🟢 SBER (paper): 9 лот(ов), вход 324.33 ₽
+P&L (нереализованный): -47.16 ₽ (-1.62%)    ← занижено в 10 раз (SBER lot_size=10)
+```
+
+### Корневая причина
+
+`LiveTrade.volume_lots` хранит количество **лотов**, а цены в `OHLCVCache` — за **1 акцию**. На MOEX типичные размеры лота: SBER=10, GAZP=10, LKOH=1. Без умножения на lot_size unrealized P&L занижается в lot_size раз.
+
+То же самое в `app/trading/service.py:412-414` (`(current_price - entry) * trade.volume_lots`) — этот баг есть и в основном API, но фикс там — отдельная задача (затрагивает несколько endpoint'ов и DTO). В рамках текущего фикса трогаем только Telegram-handler.
+
+### Реализовано
+
+`backend/app/notification/telegram_webhook.py`:
+
+- Новый `_get_lot_size(db, ticker)` — `SELECT lot_size FROM instruments WHERE ticker = ?`. Fallback на `1`, если записи в кэше нет (graceful — формула остаётся корректной для большинства тикеров).
+- `_format_unrealized_pnl(trade, current_price, lot_size)` принимает `lot_size`, формула:
+  - `total_qty = volume_lots × lot_size`
+  - `unrealized = (current − entry) × total_qty` для buy/long, зеркально для sell/short
+  - `cost = entry × total_qty`, `pct = unrealized / cost × 100`
+- `_handle_positions`: подгружает `lot_size` один раз на сессию (один SELECT на тикер, не на каждый trade).
+
+### Тесты
+
+`tests/test_notification/test_telegram_positions.py::test_unrealized_pnl_uses_lot_size`:
+- entry=100.5, lots=10, close=110, lot_size=10 → unrealized = `(110 − 100.5) × 10 × 10 = 950 ₽` (было `95 ₽`).
+- Процент `9.45%` остаётся тем же (cost тоже умножается на lot_size).
+
+Существующий `test_unrealized_pnl_with_current_price` без записи в `Instrument` использует fallback `lot_size=1` и продолжает проходить — формула эквивалентна старой.
+
+Прогон: 207/207 backend pytest pass · mypy 0.
+
+### Результат
+
+`/positions` для SBER 9 лотов с entry=324.33 и close=323.61 (примерные данные пользователя):
+- было: `(323.61 − 324.33) × 9 = −6.48 ₽`
+- стало: `(323.61 − 324.33) × 9 × 10 = −64.80 ₽` (правильно)
+
+P&L теперь совпадает с тем, что показывается в торговой сессии в UI терминала (для paper — там тоже считается через broker с lot_size).
+
+---
+
 ## 2026-05-08 — S7R-TG-POSITIONS-PNL: нереализованный P&L и метка paper/real в /positions
 
 ### Триггер
