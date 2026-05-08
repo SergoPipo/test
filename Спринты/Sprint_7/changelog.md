@@ -10,6 +10,41 @@
 
 ---
 
+## 2026-05-08 — S7R-APPLY-SYNC-FIX: defensive guard для нестандартных blocks_json
+
+### Триггер
+
+После выкладки S7R-APPLY-SYNC юзер нажал «Применить к стратегии» и поймал HTTP 500 на `POST /api/v1/strategy/1/versions/from-params`. Браузер показал CORS-ошибку, но это симптом — при 500 у FastAPI до middleware CORS-заголовков нет, реальная ошибка скрыта.
+
+### Корневая причина
+
+В реальном `blocks_json` пользователя на top-level массива оказались **строки-id** (вероятно нестандартный формат от старой версии или ручной правки). Мой `build_param_to_blocks_map`:
+
+```python
+risk_blocks = [b for b in blocks if b.get("type") == block_type]
+```
+
+падает с `AttributeError: 'str' object has no attribute 'get'`. Unit-тесты этого не ловили — все мокнутые блоки были чистыми dict.
+
+### Реализовано
+
+`backend/app/strategy/params_sync.py` (`build_param_to_blocks_map`):
+- Добавил `isinstance(b, dict)` guard перед `.get("type")`. Незнакомые элементы (строки, None, числа) аккуратно пропускаются.
+
+`tests/unit/test_strategy/test_params_sync.py::test_blocks_contain_string_refs_no_crash`:
+- Регрессионный тест: `blocks` со смешанным содержимым (`dict, str, dict`). Должен не падать; dict-элементы патчатся, строка пропускается без модификации.
+
+### Тесты
+
+- params_sync: 24/24 pass (23 старых + 1 регрессионный).
+- mypy: 0 errors.
+
+### Результат
+
+`POST /versions/from-params` корректно работает на любом формате `blocks_json` (включая legacy/ручные правки) — никаких 500. Если в blocks встретятся незнакомые элементы — они сохраняются на месте, патч применяется только к валидным dict-блокам.
+
+---
+
 ## 2026-05-08 — S7R-APPLY-SYNC: полная синхронизация blocks_json + text_description с применёнными параметрами
 
 ### Триггер
