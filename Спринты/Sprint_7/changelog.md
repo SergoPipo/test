@@ -10,6 +10,48 @@
 
 ---
 
+## 2026-05-08 — S7R-TG-POSITIONS-PNL: нереализованный P&L и метка paper/real в /positions
+
+### Триггер
+
+После S7R-TG-POSITIONS-FIX `/positions` показал список открытых позиций, но P&L везде выводился как «0 ₽ (0%)». Это вводит в заблуждение: `LiveTrade.pnl` обновляется только при закрытии позиции — у открытой он всегда null/0. Также не было видно, paper-режим это или real, что важно — нельзя путать бумажную симуляцию с реальными деньгами.
+
+### Реализовано
+
+`backend/app/notification/telegram_webhook.py`:
+
+- **paper/real в каждой строке.** Формат `🟢 SBER (paper): 10 лот(ов), вход 100.5 ₽`. У одного юзера могут быть одновременно paper и real сессии.
+- **Нереализованный P&L.** Для каждой сессии достаём `last close` из `OHLCVCache` через новый `_get_last_close_price(db, ticker)` (тот же источник, что в `app/trading/service.py::_get_last_price`). Per-trade считаем:
+  - buy/long: `(current - entry) * lots`
+  - sell/short: `(entry - current) * lots`
+  - `unrealized_pct = unrealized / (entry * lots) * 100`
+- **Fallback при отсутствии цены.** Если `OHLCVCache` пуст по тикеру (только что открыли рынок, или в paper-сессии не было ни одной свечи) — выводим «P&L (нереализованный): пока неизвестен», без вводящего в заблуждение «0 ₽ (0%)».
+- Знак (`+` для положительного, без знака для отрицательного), форматирование `_format_decimal`. Заголовок строки P&L явно помечен как «нереализованный» — чтобы не путать с реализованным P&L закрытых сделок.
+
+### Тесты
+
+`tests/test_notification/test_telegram_positions.py` (+3 unit'а до 11):
+- `test_paper_label_in_line` — `(paper)` присутствует в ответе.
+- `test_pnl_unknown_when_no_price` — без OHLCVCache «пока неизвестен», нет лживого «P&L: 0 ₽».
+- `test_unrealized_pnl_with_current_price` — фикстура добавляет свечу `close=110`, проверка `+95 ₽` и `9.45%` (entry=100.5, lots=10, buy).
+
+Прогон: 206/206 backend pytest pass · mypy 0.
+
+### Результат
+
+`/positions` теперь показывает:
+
+```
+📊 Открытые позиции
+
+🟢 SBER (paper): 10 лот(ов), вход 100.5 ₽
+P&L (нереализованный): +95.00 ₽ (+9.45%)
+```
+
+Реальная картина по позиции, без введения юзера в заблуждение нулями. Метка paper/real явно различает бумажную симуляцию и реальные деньги.
+
+---
+
 ## 2026-05-08 — S7R-TG-CLOSE-OWNERSHIP: security audit всех Telegram-команд
 
 ### Триггер
