@@ -10,6 +10,51 @@
 
 ---
 
+## 2026-05-08 — S7R-APPLY-VISIBLE-DIFF: «Применить к стратегии» теперь видно глазами
+
+### Триггер
+
+Пользователь выбирал лучшую строку в Grid Search heatmap, нажимал «Применить к стратегии», получал toast «Версия v86 создана» — но открывал стратегию и **не видел никаких визуальных изменений**: правая панель «Параметры стратегии» по-прежнему показывала «RSI(period=14), стоп-лосс 2%, тейк-профит 4%», как до применения.
+
+### Корневая причина
+
+1. **Source-of-truth для правой панели — `text_description` версии** (свободный текст, генерируется AI или пишется вручную). Backend `create_version_from_params` копировал его из source-версии **как есть** — обновлялся только `generated_code`, а UI читает текст.
+2. **`navigate('/strategies/{id}')` на ту же URL** не триггерит useEffect, если юзер уже на этой странице (heatmap был открыт поверх). `initialLoadDoneRef.current = true` блокировал refetch.
+
+### Реализовано
+
+`backend/app/strategy/router.py` (`create_version_from_params`):
+- Извлекаем старые значения через `extract_strategy_params(source.generated_code)`.
+- Формируем diff `name: old → new`.
+- Дополняем `text_description` блоком:
+  ```
+  --- Применено из Перебора по сетке (2026-05-08) ---
+  - rsi_period: 14 → 18
+  - stop_loss_pct: 2 → 4
+  ```
+  Source-описание сохраняется, блок-маркер добавляется в конец — пользователь сразу видит изменения в правой панели после применения.
+- Заполняем `parameters_json` итоговыми значениями (`{**old_map, **new_params}`) для трейсабилити; пока не используется UI напрямую, но задел под структурированную панель.
+
+`frontend/src/components/backtest/GridSearchHeatmap.tsx`:
+- `applyParamsToStrategy` теперь делает `navigate('/strategies/{id}?applied={versionId}')` — query триггерит refetch на странице редактирования.
+
+`frontend/src/pages/StrategyEditPage.tsx`:
+- В useEffect загрузки добавлена зависимость от `searchParams.get('applied')`. При смене значения — `initialLoadDoneRef.current = false` + `fetchStrategy(id)`.
+- После refetch query-параметр чистится (`setSearchParams(... delete applied, { replace: true })`), чтобы повторный mount/F5 не пытался «применить» снова.
+
+### Тесты
+
+`tests/unit/test_strategy/test_version_from_params.py::test_creates_new_version_with_replaced_params`:
+- Расширены asserts: `text_description` начинается с source-текста, содержит блок «Применено из Перебора по сетке», содержит обе строки diff'а; `parameters_json` парсится и содержит финальные значения.
+
+Прогон: 6/6 pass (все существующие) · mypy 0 errors · tsc 0 errors.
+
+### Результат
+
+После «Применить к стратегии»: переход в редактор, в правой панели сверху виден предыдущий текст описания, ниже — блок-маркер с конкретным diff'ом параметров. Поведение работает и при заходе с другой страницы, и поверх уже открытого `/strategies/{id}`.
+
+---
+
 ## 2026-05-08 — S7R-EXPORT-WIRE: подключение фронта к CSV/PDF экспорту бэктеста (S7 7.3)
 
 ### Триггер
