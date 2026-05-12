@@ -305,3 +305,17 @@
 - **Что сделать на S8:** пройти по каждому warning'у, либо включить отсутствующую dependency в массив deps, либо обернуть колбэки в `useCallback` где нужно, либо добавить осознанный `// eslint-disable-next-line react-hooks/exhaustive-deps -- <причина>`. Для stale ref'ов в cleanup — копировать `.current` в локальную переменную внутри effect, как советует ESLint.
 - **Дополнительно:** включить `--max-warnings 0` в `frontend/package.json` lint-скрипте, чтобы CI блокировал любые НОВЫЕ warnings (предотвращение регрессии).
 - **Приоритет:** low. Не валит CI, не блокирует фичи. Удобно сделать одной волной с `S7R-CI-NODE24-MIGRATION` как «CI gardening» в S8.
+
+### S7R-SANDBOX-ACCOUNT-ID-MISSING — sandbox-аккаунт с account_id=NULL в БД
+
+- **Источник:** Sprint 7 closeout 2026-05-12, обнаружено заказчиком при попытке запуска sandbox-сессии (см. `Sprint_7/changelog.md` запись «S7R-SANDBOX-TRADING-RIGHTS»).
+- **Симптом:** в БД `broker_accounts.id=1` (Сэндбокс) имеет `account_id=NULL` — пустое поле T-Invest sandbox account_id. После фикса `has_trading_rights` для sandbox (`s7/sprint-7` коммит 2dae943) `POST /trading/sessions` проходит, но при первой реальной сделке (`place_order` в T-Invest sandbox API) упадёт — `account_id` обязателен для API call'ов.
+- **Корень:** при создании sandbox-аккаунта (вероятно через FirstRunWizard или Settings → Brokers) T-Invest sandbox API не вернул валидный `account_id`, либо frontend/backend не сохранил его в БД. Также возможно: пользователь добавил аккаунт вручную без полной настройки.
+- **Что сделать на S8:**
+  1. **Audit `app/broker/service.py:register_account`** — проверить, что `account_id` обязательно фетчится через T-Invest API (`SandboxService.OpenSandboxAccount` → возвращает `account_id`) и сохраняется.
+  2. **Pydantic validator:** для `BrokerAccount.account_id` — `nullable=True` сейчас, но при `is_sandbox=True` и `is_active=True` это инвариант: должен быть заполнен. Добавить check constraint или application-level validator.
+  3. **Self-healing UI:** на странице `/account` для broker_account с `account_id=NULL` показать предупреждение «Аккаунт не до конца настроен — нажмите [Получить sandbox-account]» с кнопкой, которая вызывает T-Invest sandbox API и заполняет поле.
+  4. **Pre-flight check в `start_session`:** для sandbox/real проверять `account.account_id is not None` ДО создания сессии. Текущая ошибка возникает позже (на place_order), что путает пользователя.
+  5. **Tests:** unit-тест на ValidationError при попытке создать sandbox-сессию с broker_account.account_id=None.
+- **Приоритет:** medium. Не блокирует запуск сессии (фикс 2dae943), но первая же сделка упадёт. UX-фикс: показывать сразу при попытке запуска, не при первом ордере.
+- **Связь:** дополняет `S7R-API-PAGINATED-TYPE-MISMATCH` (medium-high) — оба про несинхронизированный backend/frontend контракт.
