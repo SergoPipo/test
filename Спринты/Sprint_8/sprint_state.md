@@ -5,8 +5,8 @@
 **Дата планирования:** 2026-05-12
 **Дата старта W0:** 2026-05-12
 **Дата завершения W0:** 2026-05-12 (gate W0 → W1 пройден, все 10 TODO + новый эпик Admin role утверждены)
-**Дата старта W1:** 2026-05-12 (ожидает команды заказчика «старт W1»)
-**Дата завершения W1:** —
+**Дата старта W1:** 2026-05-12
+**Дата завершения W1:** 2026-05-12 (gate W1 → W2 пройден с одним отложенным критерием — coverage P1 для 4 модулей переносится в W2 по архитектурным зависимостям)
 **Дата старта W2:** —
 **Дата завершения W2:** —
 **Дата старта W3:** —
@@ -14,9 +14,127 @@
 
 ## Текущий шаг
 
-**Sprint 8 🔄 W1 IN-PROGRESS (2026-05-12). Все промпты созданы, ветка `s8/sprint-8` готова, ожидает команды «старт W1».**
+**Sprint 8 ✅ W1 ЗАВЕРШЁН (2026-05-12). 5 параллельных потоков (BACK1+BACK2+FRONT1+FRONT2+QA) закрыты. Ожидает команды заказчика «старт W2».**
 
 Sprint 7 финально закрыт со всеми post-S7 closeout-волнами. M3 Phase 1 production-ready.
+
+### W1 финальные метрики (2026-05-12)
+
+| Слой | Baseline | После W1 | Δ |
+|------|----------|----------|---|
+| Backend pytest | 1024 / 0 | **1098 passed / 6 xfailed / 0 failed** | +74 passed, +6 xfailed (contract для W2 SecurityHeadersMiddleware) |
+| Frontend vitest | 468 / 0 | **528 passed / 0 failed** | +60 |
+| Playwright nightly | 142 passed | **157 passed / 1 pre-existing flaky / 6 skipped** | +15 (5 новых + регрессия) |
+| Backend coverage | 71% TOTAL | dispatchers 0→100%, trading/service 51→88%, остальные P1 в W2 | по 2 модулям ≥80% |
+| Frontend lint | 0 err / 9 warn | 0 err / 9 warn (baseline) | W3 cleanup |
+| Backend ruff | 0 issues | 0 issues | — |
+| Backend mypy | 0 errors | 0 errors | — |
+| Bandit | n/a | 0 medium+, 28 low (informational) | новый CI gate |
+| Safety | n/a | 0 reported / 1 documented CVE (protobuf транзитив) | новый CI gate |
+
+### Gate W1 → W2 проверка
+
+| Критерий | Статус | Комментарий |
+|----------|--------|------------|
+| Все medium-high закрыты | ✅ | DRAWING-EDITING (tests), STRATEGY-STATUS-CHANGE-UI, API-PAGINATED-TYPE-MISMATCH, MULTIPLEXER-SINGLETON contract |
+| security_audit_s8.md готов с findings + fixes | ✅ | 3 high → W2 (HEADERS, TELEGRAM-XSS, EMAIL-XSS) с обоснованиями; 7 medium + 2 low в backlog |
+| 6 E2E зелёные | ✅ | 17 Playwright passed + 3 pytest passed (= 20). 2 теста в s7-backtest-analytics skipped на S8R-ANALYTICS-EQUITY-ZONES-TESTID + S8R-ANALYTICS-TRADE-ROW-CLICK (требуют FRONT2 W2) |
+| Coverage P0+P1 advanced до 80% по ≥4 модулям | ⚠️ DEFERRED | 2 из 6 модулей закрыты (P0 dispatchers, P1 trading/service). Остальные 4 P1 (tinvest/adapter, market_data/service, backtest/router, backtest/engine) перенесены в W2 по архитектурной зависимости (adapter нужен MULTIPLEXER-SINGLETON — он готов сейчас, остальные P1 = scope W2 Поток A) |
+| Admin role работает | ✅ | Миграция + dependency + CLI + Sidebar + 14 тестов + smoke whitelist |
+| bandit + safety в CI (medium+ блокирует) | ✅ | Job `security-scan` в `.github/workflows/ci.yml`, .bandit + safety_policy.yml |
+
+### W1 BACK1 (DEV-1) — DONE 2026-05-12
+- Admin role backend каркас (миграция users.is_admin + dependency require_admin + app/admin/router.py + CLI grant_admin + bootstrap первого admin) — контракт C-S8-7 поставлен FRONT2.
+- Coverage P0 `notification/dispatchers.py` 0% → 100% (15 тестов).
+- Coverage P1 `trading/service.py` 51% → 88% (31 тест).
+- Coverage P1 `broker/tinvest/adapter.py` 24% → SKIP до W2 (ждал BACK2 C-S8-6 MULTIPLEXER-SINGLETON; теперь готов к W2 Поток A).
+- Тесты: 1027 → 1087 passed / 0 failed (+60). Ruff/mypy чистые. Alembic up/down/up чистый.
+- Отчёт: `Sprint_8/reports/DEV-1_W1.md`.
+
+### W1 BACK2 (DEV-2) — DONE 2026-05-12
+- 8B.1 bandit/safety в CI (job `security-scan`).
+- 8B.2 `security_audit_s8.md`: 0 critical / 3 high / 7 medium / 2 low. High → W2 fixes.
+- 8B.3 multiplexer singleton — реализация уже была в S7-hotfix через module-level `_singletons`. Зафиксирован contract 6 новыми тестами `test_multiplexer_singleton.py`.
+- 8B.4 require_admin smoke — структурный whitelist-тест `test_admin_routes_protection.py`.
+- Тесты: 1087 → 1098 passed / 6 xfailed / 0 failed (+11 passed +6 xfailed для будущего SecurityHeadersMiddleware).
+- Отчёт: `Sprint_8/reports/DEV-2_BACK2_W1.md`.
+
+### W1 FRONT1 (DEV-3) — DONE 2026-05-12
+- S7R-DRAWING-EDITING уже был реализован S7-hotfix'ами; W1 закрыл gap — 23 unit-теста на `coords.ts`.
+- S7R-DRAWING-INTRADAY-COORDS — фикс рендера через `isSeriesInSequentialMode(series)` + двухветочный `pointToCoord` (logical-first для sequential mode).
+- Файлы: `coords.ts` (изменён), `coords.test.ts` (новый, 23 теста).
+- Тесты: 503 → 528 passed (всё зелёное после параллельных правок).
+- Stack Gotchas: кандидат `gotcha-24-lightweight-charts-sequential-time-axis.md` (для ARCH-ревью W3 8.R).
+- Отчёт: `Sprint_8/reports/DEV-3_FRONT1_W1.md`.
+
+### W1 FRONT2 (DEV-4) — DONE 2026-05-12
+- 8.D.1 API paginated audit (C-S8-5): `PaginatedResponse<T>` + `isPaginatedResponse` + `unwrapPaginated`; silent-bug в `accountApi.getBalanceHistory` пофикшен (BalanceWidget рендерил пустой sparkline). 14 unit-тестов.
+- 8.D.2 ErrorBoundary (S7R-FRONTEND-ERROR-BOUNDARY-MISSING): `components/common/ErrorBoundary.tsx` (class + Mantine fallback + retry/reload). Top-level в App.tsx + per-widget в DashboardPage + ChartPage. 8 тестов.
+- 8.D.3 Strategy status menu (S7R-STRATEGY-STATUS-CHANGE-UI): Mantine Menu + Badge + optimistic update + rollback + toast. 7 тестов.
+- 8.D.4 Admin role frontend (C-S8-7): `AuthUser.is_admin`, Sidebar conditional `IconShield`, ProtectedAdminRoute (redirect+toast), AdminLayout + AdminLandingPage заглушка. Plotly Dash /admin/metrics — W2. 8 тестов.
+- Тесты: 468 → 528 passed / 0 failed (+60). tsc 0 errors, lint 0 errors / 9 warnings (baseline).
+- Stack Gotchas: новый `gotcha-25-api-paginated-type-mismatch.md` (в каталог + INDEX).
+- Отчёт: `Sprint_8/reports/DEV-4_FRONT2_W1.md`.
+
+### W1 QA — DONE_WITH_CONCERNS 2026-05-12
+- 5 Playwright spec'ов + 1 pytest integration:
+  - `s7-export.spec.ts` (3/3), `tests/integration/test_backup_cli.py` (3/3 pytest), `s7-events.spec.ts` (6/6 table-driven через mockWSChannel), `s7-tg-callbacks.spec.ts` (2/2), `s7-backtest-analytics.spec.ts` (3 passed / 2 skipped на блокерах), `s7-bg-backtest.spec.ts` (3/3).
+- Расширен `api_mocks.ts` (+310 строк): `mockWSChannel`, `mockBacktestResults`, `mockBacktestWithTrades`, `mockBacktestRun`, `mockMoexCandles`.
+- Регрессия nightly: 157 passed / 1 pre-existing flaky (`s5-paper-trading pause-resume`) / 6 skipped.
+- Новые блокеры (нужны карточки в backlog):
+  - `S8R-ANALYTICS-EQUITY-ZONES-TESTID` — DOM-overlay для зон equity-curve (canvas pixel-based, нет data-testid).
+  - `S8R-ANALYTICS-TRADE-ROW-CLICK` — rows в `BacktestTrades.tsx` без `onClick`.
+- Новая Stack Gotcha (кандидат): Mantine 0-height bar + Playwright `toBeVisible` → использовать `toBeAttached()`/`count()`.
+- Отчёт: `Sprint_8/reports/QA_W1.md`.
+
+### Что дальше (W2)
+1. Заказчик подтверждает старт W2.
+2. Поток A (BACK1, ~20ч): coverage P1 закрытие (`tinvest/adapter` 24→80%, `market_data/service` 50→80%, `backtest/router` 25→80%, `backtest/engine` 55→80%) + AIChat mock дополнение + performance instrumentation `@timed_event`.
+3. Поток B (BACK2, ~25ч): Event type sync (4 backend в UI + 5 UI publish-sites) + Dashboard widgets backend + S8R-SEC-HEADERS / TELEGRAM-XSS / EMAIL-XSS фиксы.
+4. Поток C (FRONT2, ~22ч): Dashboard widgets frontend + Grid Heatmap entrypoint + widgets unit coverage + **Plotly Dash `/admin/metrics`** + event_type sync UI labels + S8R-ANALYTICS-EQUITY-ZONES-TESTID + TRADE-ROW-CLICK.
+5. Поток D (BACK1, ~10ч): Coverage P2 (router-тесты).
+6. QA: AIChat mock block_xml дополнение (~2ч).
+
+### W1 BACK1 (DEV-1) — DONE 2026-05-12
+- Admin role backend каркас (миграция users.is_admin + dependency require_admin + app/admin/router.py + CLI grant_admin + bootstrap первого admin) — контракт C-S8-7 поставлен FRONT2.
+- Coverage P0 `notification/dispatchers.py` 0% → 100% (15 тестов).
+- Coverage P1 `trading/service.py` 51% → 88% (31 тест).
+- Coverage P1 `broker/tinvest/adapter.py` 24% → SKIP до W2 (ждёт BACK2 C-S8-6 MULTIPLEXER-SINGLETON).
+- Тесты: 1027 → **1087 passed / 0 failed** (+60). Ruff/mypy чистые. Alembic up/down/up чистый.
+- Отчёт: `Sprint_8/reports/DEV-1_W1.md` (9 секций).
+
+### W1 BACK2 (DEV-2) — DONE 2026-05-12
+- **8B.1 bandit/safety в CI:** новый job `security-scan` (`.github/workflows/ci.yml`).
+  Конфиг `.bandit` + `safety_policy.yml`. 3 medium suppressed `# nosec B102` (intentional
+  `exec` в RestrictedPython/Backtrader) + 1 принятый CVE (protobuf транзитив).
+- **8B.2 security_audit_s8.md:** 6 секций, verdict 0 critical / 3 high / 7 medium / 2 low.
+  High: `S8R-SEC-HEADERS` (missing CSP/HSTS/XFO/XCTO/Referrer/Permissions),
+  `S8R-SEC-TELEGRAM-XSS` (no html.escape перед HTML parse_mode),
+  `S8R-SEC-EMAIL-XSS` (аналогично). High рекомендован к фиксу в W2.
+- **8B.3 multiplexer singleton:** root-cause фикс был реализован в S7 hotfix
+  через module-level `_singletons` + `get_or_create_multiplexer` +
+  `shutdown_multiplexers` (lifespan teardown в `app/main.py:196-202`). BACK2
+  зафиксировал contract через 6 новых тестов `test_multiplexer_singleton.py`
+  (same-token=same-id, multi-token=different-id, start-once, shutdown clears
+  + stops, swallow errors, recovery after shutdown).
+- **8B.4 require_admin smoke:** структурный whitelist-тест
+  `test_admin_routes_protection.py` — итерация по `app.routes`, проверка наличия
+  `require_admin` в DI-цепочке каждого `/api/v1/admin/*`. 2 теста (routes_exist
+  + every_admin_route_protected) → защищает от регрессии при добавлении новых
+  admin endpoint'ов (W2 Plotly Dash).
+- Тесты: 1087 → **1098 passed / 6 xfailed / 0 failed** (+11 passed +6 xfailed
+  contract-тестов для будущего SecurityHeadersMiddleware). Ruff 0 issues, mypy 0
+  errors. Bandit 0 medium+, safety 1 documented CVE.
+- Отчёт: `Sprint_8/reports/DEV-2_BACK2_W1.md` (9 секций).
+
+### W1 FRONT1 (DEV-3) — DONE 2026-05-12
+- **S7R-DRAWING-EDITING** — фактически уже реализован S7-hotfix'ами (hit-test, drag, корнеры, keyboard delete, контекстное меню). W1 закрыл gap: 23 unit-теста на `coords.ts` (math и API conversion), документация поведения.
+- **S7R-DRAWING-INTRADAY-COORDS** — реальный фикс рендера: `pointToCoord` теперь детектит sequential-mode через `isSeriesInSequentialMode(series)` и идёт logical-first путём (вместо невалидного `timeToCoordinate(unix)` на индексной оси). `shiftPoint` в sequential mode сохраняет оригинальный `point.t` (не пишет мусор от `synthesizeIsoFromLogical`).
+- Файлы: `src/components/charts/primitives/coords.ts` (изменён), `src/components/charts/primitives/__tests__/coords.test.ts` (новый, 23 теста).
+- Тесты: `pnpm vitest run` → **503 passed / 2 failed** (2 failed — pre-existing flaky timeouts в `client.test.ts`, baseline сам по себе 484/505 без моих изменений; мои +23 чистого прироста). `pnpm tsc --noEmit` → 0 errors. `pnpm lint` → 0 errors / 9 warnings (baseline для W3 cleanup).
+- Cross-DEV: поставщик — нет; потребитель — нет напрямую (косвенно паттерн `sequentialIndex.ts`).
+- Stack Gotchas: кандидат `gotcha-24-lightweight-charts-sequential-time-axis.md` (sequential-mode time-axis = индекс, не unix; `timeToCoordinate(unix)` молча возвращает null) — для ARCH-ревью.
+- Отчёт: `Sprint_8/reports/DEV-3_FRONT1_W1.md` (9 секций).
 
 **Что сделано в W0 на 2026-05-12:**
 - ✅ Preflight checklist пройден (baseline зелёный)
