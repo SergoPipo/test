@@ -10,6 +10,91 @@
 
 ---
 
+## 2026-05-12 — S7R-SANDBOX-UI-CASCADE: sandbox-сессия в UI (badge + chart filter + pending guard)
+
+Каскад из 4 фиксов после того, как заказчик прошёл flow «запустить
+sandbox-сессию → перейти на график». В каждом шаге обнаруживался
+новый недокрытый случай.
+
+### Шаг 1 — `S7R-SANDBOX-TRADING-RIGHTS` (commit 2dae943)
+POST /trading/sessions для sandbox → 422 «не имеет прав на торговлю».
+Корень: `app/trading/service.py:96-100` требовал `has_trading_rights=True`
+для обоих режимов sandbox+real. Sandbox использует виртуальные деньги
+T-Invest, read-only токен корректно работает. Фронт LaunchSessionModal
+уже не требовал has_trading_rights для sandbox — backend разошёлся.
+Фикс: проверка только для `mode == "real"`. +2 теста.
+
+### Шаг 2 — `S7R-SESSION-MODE-BADGE` (commit 4d8bc9e)
+Sandbox-сессия в SessionCard/SessionDashboard рендерилась как «REAL»
+с красным цветом. Корень: бинарная проверка `mode === 'paper' ? 'PAPER'
+: 'REAL'` в двух местах — не учитывала sandbox (добавленный в S7).
+Фикс: новый модуль `sessionMode.ts` с `SESSION_MODE_META`
+(paper=жёлтый/PAPER, sandbox=оранжевый/SANDBOX, real=красный/REAL),
+helper `getSessionModeMeta(mode)` с fallback на серый. Использован
+в SessionCard + SessionDashboard.
+
+### Шаг 3 — `S7R-CHART-POSITIONS-SESSION-FILTER` + `S7R-CHART-PAGE-SANDBOX-BADGE` (commit 194f3f3)
+Заказчик: «перешёл из sandbox-сессии на график — зелёный фон, хотя
+сделок ещё нет; в правом верхнем — REAL вместо SANDBOX».
+- **REAL badge**: третье место бинарной проверки в `ChartPage.tsx:371`
+  (session-banner). Фикс: тот же `getSessionModeMeta()`.
+- **Зелёный фон**: `OpenPositionsLayer` фильтровал positions только по
+  ticker. У пользователя в БД 2 открытых позиции на SBER: paper #1
+  (filled @ 320.22) + sandbox #3 (pending). Открывая график **из**
+  sandbox-сессии (?session=3), пользователь видел фон paper-позиции.
+  Фикс: Layer принимает `sessionId` из URL ?session=N; фильтр стал
+  `p.ticker === ticker && (sessionId == null || p.session_id === sessionId)`.
+  Backend `PositionResponse.session_id` уже возвращал, во frontend
+  `Position` тип добавлен.
+
+### Шаг 4 — `S7R-CHART-PENDING-POSITION-BG` (commit e6e5211)
+После шага 3 SANDBOX badge починен, но фон **всё ещё рисуется**.
+Глубже: у sandbox-сессии есть pending-позиция (id=7 в БД с entry_price=NULL
+до fill). После фикса по session_id pending-позиция корректно проходит
+фильтр (это позиция этой же сессии). В renderer'е:
+```ts
+const yEntry = series.priceToCoordinate(Number(pos.entry_price));
+if (yEntry == null) return;
+```
+`Number(null) = 0`. Для свечной серии в диапазоне 318-326 ₽
+`priceToCoordinate(0)` возвращает координату далеко **ниже** canvas
+(огромное положительное число), а НЕ null. `fillRect` от текущей
+цены до этого y закрашивает весь нижний пол canvas «фантомным» фоном.
+
+Фикс:
+- `OpenPositionsLayer.tsx` фильтр дополнен `p.entry_price != null` —
+  pending не attach'атся вообще.
+- `OpenPositionPrimitive.ts draw()` safety net: `Number.isFinite(entryNum)`
+  + `entry_price != null` ДО priceToCoordinate.
+
+### Результат
+- Sandbox-сессия запускается (HTTP 200)
+- SessionCard, SessionDashboard, ChartPage показывают **оранжевый SANDBOX**
+- График из sandbox-сессии не показывает позиции других сессий по тому
+  же тикеру
+- Pending-позиции не создают фантомный зелёный фон
+- 4 commits в s7/sprint-7: 2dae943 → 4d8bc9e → 194f3f3 → e6e5211
+
+### Stack Gotcha (кандидат на новый)
+**lightweight-charts: priceToCoordinate(0) не возвращает null для свечных
+серий с реальным ценовым диапазоном.** Защищаться от `Number(null)=0`
+надо явным `entry_price != null` и `Number.isFinite()` ДО передачи в
+priceToCoordinate, иначе renderer рисует прямоугольник за пределами
+visible range. Файл-кандидат: `gotcha-26-lightweight-charts-zero-price.md`.
+
+### Тесты
+- pytest tests/test_trading/test_service.py — 12/12 (10+2 регрессии)
+- vitest src/components/{charts,trading,pages} — 118/118
+- tsc 0 errors, ruff/mypy 0 issues
+- CI на s7/sprint-7 — все 4 коммита ✅
+
+### S8 backlog дополнен
+- `S7R-SANDBOX-ACCOUNT-ID-MISSING` (medium) — sandbox-аккаунт с account_id=NULL
+- `S7R-SESSION-RERUN-PAYLOAD-BROKEN` (medium) — кнопка «Запустить заново»
+  не передаёт broker_account_id + timeframe + теряет sandbox в type assertion
+
+---
+
 ## 2026-05-12 — 🏁 SPRINT 7 FINAL CLOSEOUT — post-S7 волны (27.04 → 12.05) в develop
 
 Финальная отметка закрытия Sprint 7. Формальное завершение спринта было
