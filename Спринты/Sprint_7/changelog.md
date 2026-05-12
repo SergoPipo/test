@@ -64,10 +64,39 @@ Error: Process from config.webServer was not able to start. Exit code: 1
   GitHub-runner-е порт свободен — конфликта не будет. Проверять через
   manual workflow_dispatch.
 
+### Каскад фиксов после nightly разблокировался
+После того как nightly Playwright перестал падать на webServer, всплыли
+другие регрессии, которые до этого молча копились:
+
+1. **3 e2e теста после S7-рефакторингов** (commit `fdbad8d`):
+   - `s5r-backtest-launch-trading:159` — CSV/PDF после S7 task 7.3
+     активны (testid `export-csv-btn` вместо `*-disabled-btn`).
+   - `s7-drawing-tools:115` + `:235` — trendline перенесён в
+     `Menu.Dropdown` под `chart-tool-lines` (DrawingToolbar.tsx:206-240),
+     добавлен предварительный click на меню.
+
+2. **backend ruff red с 08.05** (commit `aa4566c`):
+   - F821 в `service.py:587` — forward reference `"SessionStatsResponse"`
+     не разрешался: импорт был внутри тела get_stats. Перенесли
+     `SessionStatsResponse` + `EquityPointResponse` в основной импорт.
+   - F841 в `params_sync.py:318` — мёртвый `text_keys = list(...)`,
+     удалён.
+
+3. **backend mypy 3 ошибки в get_stats** (commit `6a10e60`):
+   - sorted key + `cumulative += t.pnl` — mypy не сужает `datetime|None`/
+     `Decimal|None` через фильтр в генераторе-выражении.
+   - Решение: явный `list[tuple[datetime, Decimal]]` с уже суженными
+     типами + `closed_with_data.sort(key=lambda x: x[0])`.
+
+После всех правок: ruff чист, mypy чист, локально pytest 10/10 на
+test_service.py, nightly Playwright 142 passed.
+
 ### S8 backlog
 - Сделать seed-фикстуру для CI (создание sergopipo + сессии + тестовых
   данных через alembic + pytest fixture) → можно разблокировать
   `s7r-chart-drawings-fix.spec.ts` на CI.
+- Обновить `actions/*` до версий, совместимых с Node.js 24 (deprecation
+  до 16.09.2026, см. GitHub annotation).
 
 ---
 
