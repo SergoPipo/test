@@ -319,3 +319,25 @@
   5. **Tests:** unit-тест на ValidationError при попытке создать sandbox-сессию с broker_account.account_id=None.
 - **Приоритет:** medium. Не блокирует запуск сессии (фикс 2dae943), но первая же сделка упадёт. UX-фикс: показывать сразу при попытке запуска, не при первом ордере.
 - **Связь:** дополняет `S7R-API-PAGINATED-TYPE-MISMATCH` (medium-high) — оба про несинхронизированный backend/frontend контракт.
+
+### S7R-SESSION-RERUN-PAYLOAD-BROKEN — кнопка «Запустить заново» не передаёт sandbox-поля
+
+- **Источник:** Sprint 7 closeout 2026-05-12, обнаружено при фиксе S7R-SESSION-MODE-BADGE (когда смотрел `SessionDashboard.tsx:179`).
+- **Симптом:** на остановленной сессии есть кнопка «Запустить заново» (`IconRestore`). При клике вызывает `startSession(...)` с payload, который не годится для sandbox/real:
+  ```ts
+  // SessionDashboard.tsx:179
+  mode: session.mode as 'paper' | 'real',       // type lie: теряет 'sandbox'
+  // отсутствует broker_account_id
+  // отсутствует timeframe
+  ```
+  - **mode as 'paper' | 'real'** — TypeScript-assertion; на runtime `session.mode='sandbox'` пройдёт в backend (Pydantic `Literal[...]` допускает), но статика врёт.
+  - **broker_account_id отсутствует** — для sandbox/real сессии backend `SessionStartRequest` требует через `model_validator` (schemas.py:42). 422 Unprocessable Entity.
+  - **timeframe отсутствует** — обязательное поле `SupportedTimeframe`. Тоже 422.
+- **Корень:** SessionResponse (`session.broker_account_id`, `session.timeframe`) уже содержит эти поля, но rerun-handler их игнорирует. Контракт rerun не покрыт тестом E2E.
+- **Что сделать на S8:**
+  1. Исправить тип: `mode: session.mode as 'paper' | 'sandbox' | 'real'` или импортировать `SessionMode` из `sessionMode.ts`.
+  2. Передавать в payload `broker_account_id: session.broker_account_id ?? undefined` и `timeframe: session.timeframe`.
+  3. Унифицировать с `LaunchSessionModal.handleSubmit` (одна функция `buildSessionStartRequest(source, overrides)` в `tradingStore.ts`).
+  4. E2E тест: остановить sandbox-сессию → нажать «Запустить заново» → проверить новая сессия с тем же broker_account_id и mode='sandbox'.
+- **Приоритет:** medium. Воспроизводится только при rerun остановленной sandbox/real сессии. Paper rerun работает.
+- **Связь:** дополняет S7R-API-PAGINATED-TYPE-MISMATCH (medium-high) — оба про contract mismatch между frontend и backend Pydantic.
