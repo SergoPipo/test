@@ -63,11 +63,12 @@
 
 ## W2 — Performance + Event sync + закрытие medium (дни 6-9)
 
-### Поток A: Performance + AIChat mock + Coverage P1 закрытие (BACK1, ~24ч)
+### Поток A: Performance + AIChat mock + Coverage P1 закрытие (BACK1, ~20ч)
 - Performance baseline + instrumentation `@timed_event` в `app/common/observability.py` (~4ч)
-- Plotly Dash `/admin/metrics` страница (~4ч) — требует Поток F W1 закрыт
 - AIChat mock — реалистичный block_xml в e2e/fixtures/api_mocks.ts (~2ч) [TODO #2]
 - Coverage P1 (`market_data/service.py`, `backtest/router.py`, `strategy/service.py`, `backtest/engine.py`) (~14ч)
+
+> **Уточнение по решению заказчика (2026-05-12, после W0):** Plotly Dash `/admin/metrics` страница (~4ч) переходит из BACK1 в **FRONT2 (Поток C)** — это admin UI задача. BACK1 обеспечивает только `app/admin/router.py` mount point в W1 (Поток F).
 
 ### Поток B: НОВЫЙ — Event type sync L1 + Dashboard widgets backend (BACK2, ~25ч)
 **Event type sync (~12ч):**
@@ -86,11 +87,12 @@
 - `S7R-WIZARD-TELEGRAM-TEST-BUTTON` — endpoint `POST /api/v1/notifications/telegram/test` (~2ч)
 - `S7R-CONNECTION-EVENTS-MARKET-CLOSED` — фильтр MOEX calendar (~3ч)
 
-### Поток C: Frontend medium + дозакрытие event sync UI (FRONT2, ~18ч)
+### Поток C: Frontend medium + дозакрытие event sync UI + Plotly Dash (FRONT2, ~22ч)
 - 4 widget'а из эпика E (frontend интеграция endpoint'ов из потока B) (~10ч)
 - 4 backend event_types в `EVENT_TYPE_LABELS` (`NotificationSettingsPage.tsx:24`) (~1ч)
 - `S7R-GRID-HEATMAP-ENTRYPOINT` — точка вызова из BG-badge (~2ч)
 - `S7R-WIDGETS-UNIT-COVERAGE` (~4ч)
+- **Plotly Dash `/admin/metrics` страница (~4ч)** — `app/admin/metrics_dash.py` + mount через WSGIMiddleware в `app/admin/router.py` (требует C-S8-7 is_admin + Поток F W1)
 - `S7R-ORDER-MANAGER-REAL-MODE-COVERAGE` (если успеет — иначе W3) (~3ч)
 
 ### Поток D: Coverage P2 (router-тесты) (BACK1, ~10ч)

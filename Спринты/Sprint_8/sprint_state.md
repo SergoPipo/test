@@ -5,7 +5,7 @@
 **Дата планирования:** 2026-05-12
 **Дата старта W0:** 2026-05-12
 **Дата завершения W0:** 2026-05-12 (gate W0 → W1 пройден, все 10 TODO + новый эпик Admin role утверждены)
-**Дата старта W1:** —
+**Дата старта W1:** 2026-05-12 (ожидает команды заказчика «старт W1»)
 **Дата завершения W1:** —
 **Дата старта W2:** —
 **Дата завершения W2:** —
@@ -14,7 +14,7 @@
 
 ## Текущий шаг
 
-**Sprint 8 ✅ W0 ЗАВЕРШЁН (2026-05-12). Gate W0 → W1 пройден. Готов к W1.**
+**Sprint 8 🔄 W1 IN-PROGRESS (2026-05-12). Все промпты созданы, ветка `s8/sprint-8` готова, ожидает команды «старт W1».**
 
 Sprint 7 финально закрыт со всеми post-S7 closeout-волнами. M3 Phase 1 production-ready.
 
@@ -37,44 +37,21 @@ Sprint 7 финально закрыт со всеми post-S7 closeout-волн
 - Performance: structlog + Plotly Dash `/admin/metrics` (W2, под admin role)
 - Deployment guide: Docker compose на Mac mini + launchd + Cloudflare Tunnel SSL (W3)
 
-**Что нужно для запуска W1:**
-1. ⬜ QA создаёт `e2e_test_plan_s8.md` (по §5 arch_design)
-2. ⬜ ARCH создаёт `prompt_DEV-1..N.md` (6 ролей: BACK1, BACK2, FRONT1, FRONT2, QA, OPS) + `prompt_QA.md` + `prompt_UX.md` + `prompt_ARCH_review.md`
-3. ⬜ Создать ветку `s8/sprint-8` в Develop репо
-4. ⬜ Заказчик подтверждает старт W1
-
----
-
-## Инструкция для следующей сессии (создание DEV-промптов)
-
-Когда заказчик скажет «продолжим S8» или «создавай промпты», Claude должен:
-
-1. **Прочитать порядок:**
-   - `Спринты/project_state.md` (где мы — S8 W0 завершён)
-   - `Спринты/Sprint_8/sprint_state.md` (этот файл)
-   - `Спринты/Sprint_8/arch_design_s8.md` целиком (8 секций + §11 решения TODO + §12 готовность)
-   - `Спринты/Sprint_8/execution_order.md` (потоки W1 + Cross-DEV contracts)
-   - `Спринты/prompt_template.md` (шаблон промпта, 11 секций)
-   - `Sprint_7/prompt_DEV-1.md` для образца (опционально)
-
-2. **Создать 9 промптов** по `prompt_template.md`:
-   - `prompt_DEV-1.md` (BACK1) — Coverage P0+P1, T-Invest adapter, Admin role backend, Performance, Coverage P2 (3 волны)
-   - `prompt_DEV-2.md` (BACK2) — Security audit + bandit/safety, MULTIPLEXER-SINGLETON, Event sync publishers, Dashboard endpoints, Notification filter
-   - `prompt_DEV-3.md` (FRONT1) — Charts editing эпик (DRAWING-EDITING + DRAWING-INTRADAY-COORDS), low W3 cleanup
-   - `prompt_DEV-4.md` (FRONT2) — API paginated audit, ErrorBoundary, Strategy status UI, Dashboard widgets, Admin role frontend, Event sync UI labels, Plotly Dash
-   - `prompt_DEV-5.md` (OPS) — Docker compose, launchd plist, deployment_guide.md, README/INSTALL update
+**Что сделано в подготовке к W1 (2026-05-12, сессия после W0):**
+1. ✅ `e2e_test_plan_s8.md` создан (по §5 arch_design — 6 spec'ов с детальными сценариями)
+2. ✅ 9 промптов созданы:
+   - `prompt_DEV-1.md` (BACK1) — Coverage P0+P1+P2, Admin role backend, Performance instrumentation
+   - `prompt_DEV-2.md` (BACK2) — Security audit + bandit/safety, MULTIPLEXER-SINGLETON, Event sync publishers, Dashboard endpoints, Notification market-closed filter
+   - `prompt_DEV-3.md` (FRONT1) — Charts editing эпик (DRAWING-EDITING + DRAWING-INTRADAY-COORDS), W3 lint cleanup
+   - `prompt_DEV-4.md` (FRONT2) — API paginated audit, ErrorBoundary, Strategy status UI, Dashboard widgets, Admin role frontend, Event sync UI labels, **Plotly Dash /admin/metrics** (перемещён из BACK1)
+   - `prompt_DEV-5.md` (OPS) — Docker compose + Mac mini deployment + Cloudflare Tunnel + node-24 + final docs
    - `prompt_QA.md` — 6 missing E2E (5 Playwright + 1 pytest integration) + AIChat mock + регрессия nightly
    - `prompt_UX.md` — W3 финальный юзабилити-тест + ui_checklist_s8.md
-   - `prompt_ARCH_design.md` (W0) — УЖЕ СОЗДАН, не трогать
-   - `prompt_ARCH_review.md` — 8.R по образцу Sprint_6_Review/code_review.md
-
-3. **Создать `e2e_test_plan_s8.md`** — 6 spec'ов с детальными сценариями (§5 arch_design).
-
-4. **Создать ветку `s8/sprint-8` в Develop репо.**
-
-5. **Обновить sprint_state.md** — переход «W0 ЗАВЕРШЁН» → «🔄 W1 IN-PROGRESS».
-
-**Ожидаемый объём работы:** 9 файлов промптов × ~200-300 строк = ~2500 строк. Лучше через `general-purpose` subagent с детальным брифингом, либо в свежей сессии с большим контекстом.
+   - `prompt_ARCH_design.md` (W0) — уже был создан
+   - `prompt_ARCH_review.md` — 8.R финальное ревью по образцу Sprint_6_Review/code_review.md
+3. ✅ Обновлён `execution_order.md`: Plotly Dash перемещён из W2 Поток A (BACK1) в W2 Поток C (FRONT2) — по уточнению заказчика
+4. ✅ Ветка `s8/sprint-8` создана в Develop репо и запушена на origin
+5. ⬜ Заказчик подтверждает старт W1
 
 ## Цели спринта (M4)
 
