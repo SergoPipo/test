@@ -567,15 +567,73 @@ async def test_trade_opened_delivers_to_3_channels(...):
 
 ## 11. ⚠️ TODO summary — нужны решения заказчика перед W1
 
-1. **#30 `S5R-BLOCKLY-MODE-B`** — реализовать или удалить?
-2. **#29 `S6R-AICHAT-APPLY-MOCK`** — дополнить мок или удалить skip?
-3. **§2.4 Coverage gate в CI** — включить `--cov-fail-under=80` в W3 S8 или в S9?
-4. **§3.6 Security audit instrument** — добавить `bandit` + `safety` в CI?
-5. **§4.5 Lighthouse CI** — подключить в `playwright-nightly.yml`?
-6. **§4.5 Prometheus/Grafana export** — scope S8 или S9?
-7. **§5.2 `s7-backup.spec.ts`** — Playwright (child_process) или pytest integration?
-8. **§5.3 `s7-events.spec.ts`** — реализовать `_test/emit-event` endpoint?
-9. **§6.4 13-й event_type** — найти/удалить/добавить?
+### Batch 1 — ✅ принято 2026-05-12
+
+1. **#30 `S5R-BLOCKLY-MODE-B`** → ✅ **удалить 2 spec'а** (`mode B modal opens`, `check button is disabled`). Фича удалена из UI в S5/S6, spec'ы зомби.
+2. **#29 `S6R-AICHAT-APPLY-MOCK`** → ✅ **дополнить мок в W2 (~2ч)**. QA добавляет реалистичный `block_xml` в мок AI-ответа, snimaет skip.
+3. **§6 13-й event_type** → ✅ **полная синхронизация UI и EVENT_MAP в W2 (новый эпик, ≈12ч)**.
+   - 4 типа в EVENT_MAP, но не в UI: `session_started`, `session_stopped`, `order_placed`, `trade_filled` → добавить в `EVENT_TYPE_LABELS` (`NotificationSettingsPage.tsx:24`).
+   - 5 типов в UI, но не в EVENT_MAP: `session_recovered`, `backtest_completed`, `daily_stats`, `corporate_action`, `price_alert` → подключить publish-сайты:
+     - `session_recovered` — после graceful restart NS восстанавливает live-сессии (S6, нужен publish)
+     - `backtest_completed` — `app/backtest/jobs.py:226` (есть `done` publish, добавить EVENT_MAP entry)
+     - `daily_stats` — нужно определить когда публикуется (конец торгового дня?)
+     - `corporate_action` — `app/corporate_actions/` detect job
+     - `price_alert` — `app/market_data/price_alert_monitor.py`
+   - **Новый эпик L1 в W2:** Event type sync. BACK2 (publishers) + FRONT2 (labels).
+
+### Batch 2 — ✅ принято 2026-05-12
+
+4. **§2.4 Coverage gate в CI** → ✅ **в W3 S8 после довода** до 80% (P0+P1+P2 в W1-W2). Добавить `--cov-fail-under=80` в `.github/workflows/ci.yml` backend job. Защита от регрессии.
+5. **§3.6 Security audit instrument** → ✅ **`bandit` + `safety` в W1**. Setup в ci.yml (~30 мин), default-policy: medium+ блокирует PR. Возможные исключения через `.banditignore` / `safety policy`.
+6. **§4.5 Lighthouse CI** → ✅ **нет, performance вручную**. В W1 — структурированный baseline (Chrome DevTools + structlog timing), в W2 — pytest-benchmark на критических путях. Без +2 мин к nightly workflow.
+7. **§4.5 Prometheus/Grafana export** → ✅ **в S8 — structlog + Plotly Dash страница `/admin/metrics`** (~4ч в W2). Mac mini single-user сценарий: внутри приложения, без отдельных Docker контейнеров. Prometheus + Grafana отложить на S9 если объёмы вырастут.
+
+### Новый эпик из batch 2 — ✅ принят 2026-05-12
+
+**Эпик N — Admin role + admin panel (W1, ~11ч)**
+
+- BACK1: миграция БД `is_admin: bool = False` (alembic ≈50 строк, ~2ч)
+- BACK1: dependency `require_admin` в `app/auth/dependencies.py` + новый module `app/admin/router.py` (~3ч)
+- FRONT2: `useAuthStore.user.is_admin`, `Sidebar` conditional пункт, `ProtectedAdminRoute` (~2ч)
+- BACK1: CLI `python -m app.cli.users grant_admin <username>` (~1ч)
+- Bootstrap первого админа: FirstRunWizard → `is_admin=True` для первого зарегистрированного (как `needs_setup` сейчас)
+- Тесты: 1 unit + 2 integration (грант, blocking non-admin, FirstRunWizard) (~3ч)
+
+**Блокирует другие задачи S8:**
+- TODO #6 → `/admin/metrics` Plotly Dash (W2)
+- TODO #4 → security audit smoke-проверка `require_admin` на admin-endpoints (W1)
+- Будущие admin-функции (rotate master key, view all users) → S9
+
+### Batch 3 — ⬜ ожидает решения
+
+8. **§5.2 `s7-backup.spec.ts`** — Playwright (child_process) или pytest integration?
+9. **§5.3 `s7-events.spec.ts`** — реализовать `_test/emit-event` endpoint?
 10. **§7.2 Deployment target** — Docker + systemd / Kubernetes / Bare-metal?
 
-После ответов — обновлю этот документ + перейду к созданию prompt_DEV-1..N.md.
+### Batch 3 — ✅ принято 2026-05-12
+
+8. **§5.2 `s7-backup.spec.ts`** → ✅ **pytest integration test**. Создать `tests/integration/test_backup_cli.py` с `subprocess.run()` вместо Playwright spec. Backup — backend CLI, не UI. Удалить упоминание `s7-backup.spec.ts` из QA плана.
+9. **§5.3 `s7-events.spec.ts`** → ✅ **Mock WS frame из Playwright**. Использовать `page.route` для WS endpoint и подсовывать frames из fixture. Без backend изменений. Уже знакомый паттерн в `api_mocks.ts`. Не вводить `_test/emit-event` endpoint.
+10. **§7.2 Deployment target** → ✅ **Docker compose на Mac mini**. `docker-compose.yml` (backend uvicorn + frontend nginx + sqlite volume) + launchd plist для auto-start. SSL через Cloudflare Tunnel (или self-signed). Deployment guide для Mac mini сценария.
+
+---
+
+## 12. ✅ Все TODO разрешены — готовность к W1
+
+Все 10 TODO + новый эпик Admin role приняты заказчиком 2026-05-12.
+
+**Финальный scope S8:**
+- 30 backlog карточек + новые эпики:
+  - **L1 — Event type sync** (W2, ~12ч): 4 backend в UI + 5 UI publish-sites
+  - **N — Admin role + admin panel** (W1, ~11ч): is_admin + require_admin + /admin/metrics
+- 6 E2E spec'ов (один из них вынесен в pytest integration): `s7-export`, **`tests/integration/test_backup_cli.py`**, `s7-events`, `s7-tg-callbacks`, `s7-backtest-analytics`, `s7-bg-backtest`
+- Coverage план P0+P1+P2 → CI gate в W3
+- Security аудит + bandit/safety в CI с W1
+- Performance: structlog + Plotly Dash `/admin/metrics` (W2)
+- Deployment: Docker compose + Mac mini guide (W3)
+
+**Финальный объём:** ≈155ч с эпиками admin + event sync (vs 130ч изначально). Уложимся в 12-13 рабочих дней.
+
+### Gate W0 → W1 ✅ ПРОЙДЕН
+
+Следующий шаг: создание `prompt_DEV-1..N.md`, `prompt_QA.md`, `e2e_test_plan_s8.md`, обновление `execution_order.md`.

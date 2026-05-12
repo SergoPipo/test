@@ -61,3 +61,44 @@
 10. Deployment target — Docker + systemd / Kubernetes / Bare-metal?
 
 После ответов — создание prompt_DEV-1..N.md + prompt_QA.md + e2e_test_plan_s8.md.
+
+---
+
+## 2026-05-12 — W0 ЗАВЕРШЁН, gate W0 → W1 пройден
+
+### Что
+Все 10 TODO утверждены заказчиком + введён новый эпик **Admin role + admin panel**:
+
+| TODO | Решение |
+|---|---|
+| #1 Blockly mode B | Удалить 2 spec'а (фича удалена в S5/S6) |
+| #2 AIChat apply mock | Дополнить мок в W2 (~2ч) |
+| #3 Coverage gate | Включить `--cov-fail-under=80` в W3 S8 |
+| #4 Security tools | `bandit` + `safety` в CI с W1 |
+| #5 Lighthouse | Нет, performance вручную |
+| #6 Performance mon | structlog + Plotly Dash `/admin/metrics` (W2) |
+| #7 backup spec | pytest integration, не Playwright |
+| #8 events spec | Mock WS frame из Playwright |
+| #9 13/12 event_type | Полная синхронизация UI ↔ EVENT_MAP в W2 (~12ч) |
+| #10 Deployment | Docker compose на Mac mini + launchd + Cloudflare Tunnel |
+| **NEW** | **Admin role + admin panel в W1 (~11ч)** |
+
+### Findings W0
+
+- **Coverage 71% TOTAL** (12679 строк, 3632 непокрыто) — gap до 80% = ≈1140 строк
+- **Critical-path coverage gaps:** `notification/dispatchers.py` 0%, `broker/tinvest/adapter.py` 24%, `backtest/router.py` 25%, `trading/service.py` 51%, `market_data/service.py` 50%, `strategy/service.py` 52%
+- **Event type discrepancy:** UI имеет 13, EVENT_MAP 12, расхождение в обе стороны:
+  - В UI, но не в backend (5): session_recovered, backtest_completed, daily_stats, corporate_action, price_alert
+  - В backend, но не в UI (4): session_started, session_stopped, order_placed, trade_filled
+- **Roles model отсутствует:** в `users` таблице нет `is_admin` → admin/user разделение требуется для production (новый эпик)
+
+### Файлы изменены/созданы
+- `Sprint_8/arch_design_s8.md` — расширен секциями 11-12 (решения по TODO + готовность к W1)
+- `Sprint_8/execution_order.md` — финальная разбивка W1/W2/W3 потоков с новыми эпиками + 9 Cross-DEV contracts
+- `Sprint_8/sprint_state.md` — текущий шаг «W0 ЗАВЕРШЁН»
+
+### Что дальше (W1 запускается)
+1. ARCH создаёт prompt_DEV-1..N.md (6 ролей), prompt_QA.md, prompt_UX.md, prompt_ARCH_review.md
+2. QA создаёт `e2e_test_plan_s8.md` по §5 arch_design
+3. Создать ветку `s8/sprint-8` в Develop репо
+4. Заказчик подтверждает старт W1 → начало 5 параллельных потоков (A/B/C/D/E/F)

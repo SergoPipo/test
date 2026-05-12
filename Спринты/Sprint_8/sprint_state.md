@@ -4,7 +4,7 @@
 
 **Дата планирования:** 2026-05-12
 **Дата старта W0:** 2026-05-12
-**Дата завершения W0:** — (черновик arch_design_s8.md готов, ожидает утверждения заказчика по 10 TODO)
+**Дата завершения W0:** 2026-05-12 (gate W0 → W1 пройден, все 10 TODO + новый эпик Admin role утверждены)
 **Дата старта W1:** —
 **Дата завершения W1:** —
 **Дата старта W2:** —
@@ -14,22 +14,34 @@
 
 ## Текущий шаг
 
-**Sprint 8 🔄 W0 IN-PROGRESS (2026-05-12). Черновик `arch_design_s8.md` готов, ожидает утверждения заказчика по 10 TODO.**
+**Sprint 8 ✅ W0 ЗАВЕРШЁН (2026-05-12). Gate W0 → W1 пройден. Готов к W1.**
 
 Sprint 7 финально закрыт со всеми post-S7 closeout-волнами. M3 Phase 1 production-ready.
 
 **Что сделано в W0 на 2026-05-12:**
 - ✅ Preflight checklist пройден (baseline зелёный)
 - ✅ Coverage report собран: TOTAL 71%, цель 80%, gap ≈1140 строк
-- ✅ 13 event_type аудит — фактически 12 в EVENT_MAP, publishers grep'ом сверены
+- ✅ 13 event_type аудит — **discrepancy 12 в EVENT_MAP / 13 в UI / 5 «молчаливых» типов**
 - ✅ Paginated endpoints аудит: 2 endpoint'а (`/trading/sessions`, `/trading/sessions/{id}/trades`)
-- ✅ `arch_design_s8.md` создан (581 строка, 8 секций, 30 карточек × роли × часы)
+- ✅ `arch_design_s8.md` создан (8 секций + 12 разделов = 660+ строк)
+- ✅ Все 10 TODO утверждены заказчиком + новый эпик **Admin role + admin panel (W1)**
+- ✅ `execution_order.md` обновлён с финальной разбивкой потоков W1/W2/W3 (≈155ч)
+- ✅ Cross-DEV contracts таблица — 9 контрактов опубликованы
 
-**Что нужно для gate W0 → W1:**
-1. Заказчик утверждает `arch_design_s8.md`
-2. Заказчик отвечает на 10 TODO из секции 11 документа
-3. QA создаёт `e2e_test_plan_s8.md` (по §5 arch_design)
-4. Создаются `prompt_DEV-1..N.md` + `prompt_QA.md` после ответов на TODO
+**Утверждённый scope S8 (W0 → W1):**
+- 30 backlog карточек (3 medium-high, ~10 medium, ~10 low)
+- 2 новых эпика: **Admin role + admin panel** (W1, ~11ч), **Event type sync** (W2, ~12ч)
+- 6 missing E2E (5 Playwright + 1 pytest integration для backup CLI)
+- Coverage P0 + P1 + P2 (TOTAL 71% → 80%) с CI gate в W3
+- Security audit + `bandit` + `safety` в CI с W1
+- Performance: structlog + Plotly Dash `/admin/metrics` (W2, под admin role)
+- Deployment guide: Docker compose на Mac mini + launchd + Cloudflare Tunnel SSL (W3)
+
+**Что нужно для запуска W1:**
+1. ⬜ QA создаёт `e2e_test_plan_s8.md` (по §5 arch_design)
+2. ⬜ ARCH создаёт `prompt_DEV-1..N.md` (6 ролей: BACK1, BACK2, FRONT1, FRONT2, QA, OPS) + `prompt_QA.md` + `prompt_UX.md` + `prompt_ARCH_review.md`
+3. ⬜ Создать ветку `s8/sprint-8` в Develop репо
+4. ⬜ Заказчик подтверждает старт W1
 
 ## Цели спринта (M4)
 
