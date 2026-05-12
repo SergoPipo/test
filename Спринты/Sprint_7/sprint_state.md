@@ -15,7 +15,28 @@
 
 ## Текущий шаг
 
-**Sprint 7 ✅ ЗАВЕРШЁН (PASS WITH NOTES, 2026-04-26). M3 Phase 1 feature-complete.**
+**🏁 Sprint 7 ЗАКРЫТ ОКОНЧАТЕЛЬНО (2026-05-12). M3 Phase 1 production-ready.**
+
+Формальное завершение было **2026-04-26 (ARCH 7.R PASS WITH NOTES)**.
+После этого 16 рабочих дней шли **post-S7 closeout-волны** — фиксы при
+реальной эксплуатации заказчиком и разблокировка nightly CI.
+
+**Финальный итог 2026-05-12** (см. `changelog.md` запись «🏁 SPRINT 7 FINAL CLOSEOUT»):
+- 17 задач + 7.R закрыты в W3 (26.04)
+- ~30 S7R-* post-S7 closeout записей (27.04 → 12.05)
+- M3 Phase 1 production-ready: известные регрессии устранены
+- CI на `develop` ✅, Playwright nightly ✅
+- Финальные тесты: 750 backend unit / 468 frontend vitest / 142 Playwright
+
+**Что перенесено в Sprint 8 (`Sprint_8_Review/backlog.md`):** 25+ карточек
+(3 medium-high, ~10 medium, ~10 low) — не блокеры.
+
+**Старт Sprint 8:** см. `Sprint_8/README.md` и `Sprint_8/sprint_state.md`.
+Готов к W0 ARCH-design.
+
+---
+
+### Прошлый «Текущий шаг» (закрытие 7.R на 26.04, сохранён для контекста)
 
 ARCH 7.R вердикт: **PASS WITH NOTES** (см. `arch_review_s7.md`). 17 задач + 7.R закрыты. 11 DEFERRED-S8 карточек в `Sprint_8_Review/backlog.md` (1 medium-high, 5 medium, 5 low — не блокеры). Готов к S8.
 

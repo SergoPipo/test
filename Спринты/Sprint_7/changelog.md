@@ -10,6 +10,100 @@
 
 ---
 
+## 2026-05-12 — 🏁 SPRINT 7 FINAL CLOSEOUT — post-S7 волны (27.04 → 12.05) в develop
+
+Финальная отметка закрытия Sprint 7. Формальное завершение спринта было
+2026-04-26 (ARCH 7.R PASS WITH NOTES). После этого 16 рабочих дней шли
+post-S7 closeout-волны — фиксы, выявленные при реальной эксплуатации
+заказчиком и при разблокировке nightly Playwright workflow.
+
+### Хронология post-S7 (по тематическим блокам)
+
+**2026-04-27 — Multiplexer + Telegram spam hotfix:**
+- NS cooldown 15 мин (defense-in-depth)
+- multiplexer singleton hotfix (`get_or_create_multiplexer(token)` + lifespan)
+- ActivePositionsWidget runtime crash (defensive `Array.isArray ? ... : data.items ?? []`)
+- AccountPage default sandbox selection fix
+
+**2026-04-30 → 2026-05-08 — Grid Search + applySync полировка:**
+- persist grid_result, статус single-из-grid, русификация графиков
+- applyParams + автоподстановка параметров стратегии
+- applySync blocks_json + text_description
+- defensive guard для нестандартных blocks_json
+
+**2026-05-08 — Paper SL/TP + lot_size + chart drawings:**
+- S7R-PAPER-SLTP этап C: SL/TP-мониторинг в paper-runtime
+- S7R-LOT-SIZE-SYNC этап Б: ленивый backfill Instrument.lot_size
+- chart drawings backlog: context menu + display_order, position-edit modal
+- OHLCV timeframe filter (intraday cache фильтр)
+
+**2026-05-08 — Telegram-команды:**
+- /closeall, /close inline-list, /balance broker selection priority
+- snapshot strategy_name в TradingSession
+- ownership audit всех TG-команд
+- /positions unrealized P&L + paper/real метка (lot_size в формуле)
+- /positions, /status — DetachedInstance + утечка чужих сессий
+
+**2026-05-08 — P&L формат:**
+- S7R-PNL-DUAL-PCT — два % (к позиции / к капиталу) везде
+- PnLSummary toFixed crash на Decimal-string из /stats
+
+**2026-05-09 — Chart price scale + maркеры:**
+- S7R-CHART-PRICE-SCALE-AND-OOR-DRAWINGS: сжатие Y-шкалы и фантомные drawings
+- S7R-TRADE-MARKER-EXACT-PRICE: маркеры сделок на точной (time, price)
+- S7R-OHLCV-TIMEFRAME-FILTER: stale current_price + live update полосы позиции
+
+**2026-05-10:**
+- S7R-CLOSE-EXIT-PRICE: OrderManager.close_position записывает exit/PnL
+- S7R-CHART-PAGE-FETCH-POSITIONS: фон позиции после refresh
+- S7R-BACKTEST-EXPORT-RU: русские заголовки CSV/PDF + auto-landscape (план piped-meandering-sunrise)
+- S7R-EQUITY-PER-TRADE: equity-curve по сделкам (вместо daily_stats) + backfill
+
+**2026-05-12 (финальные волны):**
+- S7R-EQUITY-BY-INDEX: ось X = порядковый номер сделки (BusinessDay + barSpacing)
+- S7R-NIGHTLY-CI-MOCKS: nightly Playwright без backend на CI (моки + skip s7r-chart-drawings)
+- e2e регрессии: CSV/PDF активны, trendline в Menu.Dropdown, test_handle_close_no_args
+- ruff F821 (SessionStatsResponse) + F841 (text_keys)
+- mypy 3 ошибки в get_stats (non-None narrowing)
+- backtest export: № = порядковый номер сделки + вычислять duration_bars
+
+### Финальные тестовые показатели
+
+| Слой | До closeout (S7 baseline) | После (2026-05-12) | Дельта |
+|------|---------------------------|---------------------|--------|
+| Backend pytest unit | 750 / 0 | **750 / 0** | стабильно |
+| Backend pytest всех | ~1019 / 0 | **~1019 / 0** | стабильно |
+| Frontend vitest | 394 / 0 | **468 / 0** | +74 (post-S7 тесты) |
+| Frontend tsc | 0 errors | **0 errors** | стабильно |
+| Backend ruff | 0 issues | **0 issues** | стабильно |
+| Backend mypy | 0 errors | **0 errors** | стабильно |
+| Playwright nightly | 119 / 0 / 17 | **142 / 0 / 3** | +23 passed, −14 skip |
+| CI на develop | ❌ красный с 08.05 | **✅ зелёный** | разблокирован |
+| CI nightly Playwright | ❌ падал на webServer | **✅ зелёный** | разблокирован |
+
+### Архитектурное состояние M3 Phase 1
+
+Все 4 категории post-S7 работы относятся к **исправлениям, найденным при
+реальной эксплуатации**, не к новым фичам. Архитектура M3 Phase 1
+(feature-complete) сохранена. Феатура-фриз S7 → S8 не нарушен.
+
+### Что переходит в Sprint 8
+
+Полный список — `Sprint_8_Review/backlog.md` (25+ карточек). Краткая
+сводка по приоритетам:
+
+- **Medium-high (3):** drawing editing (drag), strategy status UI, API paginated type mismatch
+- **Medium (~10):** 6 missing E2E, error boundary, dashboard health/sparkline, sparkline-24h endpoint, wizard TG test, drawing intraday coords, grid heatmap entrypoint, order-manager real-mode coverage, multiplexer singleton root cause
+- **Low (~10):** CI Node 24 migration, lint warnings cleanup, health WS migration, multicurrency, autocollapse, mantine tooltip, connection events market closed, strategy status enum drift, strategy status paused filter
+
+### Финальный вердикт по Sprint 7
+
+**✅ Sprint 7 закрыт окончательно. M3 Phase 1 production-ready.**
+Готов к Sprint 8 (M4 Production-ready: coverage 80% / security / perf /
+regression / docs / 8.R).
+
+---
+
 ## 2026-05-12 — S7R-NIGHTLY-CI-MOCKS: nightly Playwright без backend на CI
 
 ### Триггер

@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-04-26 (Sprint 7 — ✅ ЗАВЕРШЁН, ARCH 7.R PASS WITH NOTES; готов к старту S8 — feature freeze + стабилизация)
+> Последнее обновление: 2026-05-12 (Sprint 7 — 🏁 ЗАКРЫТ ОКОНЧАТЕЛЬНО после ~30 post-S7 closeout волн; Sprint 8 ⏸️ ИНИЦИАЛИЗИРОВАН, ожидает W0 ARCH-design)
 
 ---
 
-## Текущий спринт: **Sprint 7 — ✅ ЗАВЕРШЁН** (PASS WITH NOTES, 2026-04-26). M3 Phase 1 feature-complete. Готов к S8.
+## Текущий спринт: **Sprint 8 — ⏸️ ИНИЦИАЛИЗИРОВАН** (2026-05-12). Стабилизация (M4 Production-ready). Ожидает W0 ARCH-design.
 
 ## Прогресс по спринтам
 
@@ -22,56 +22,60 @@
 | **Sprint_5_Review_2** | **Chart hardening — 5 треков патч-цикла** | **✅ закрыт (ARCH: ПРИНЯТ)** | **Трек 4:** 401 fix (cleanup+guard+gotcha-16). **Трек 5:** TF-aware upsertLiveCandle. **Трек 3:** sequential-index mode intraday. **Трек 1:** prefetch свечей при логине (warm cache). **Трек 2:** верификация агрегации 1m→D/1h/4h (12 тестов, багов нет). ARCH-ревью: 15 проверок, 14 OK, 1 minor. Тесты: 238 frontend + 623 backend = 861 total, 0 failures. | Sprint_5_Review_2/arch_review_s5r2.md |
 | **S6** | **Уведомления + Security** | **✅ завершён** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade (beta117), Stream Multiplex, E2E infra, Security tests. 685 backend + 250 frontend + 10 E2E S6 = **945 тестов**. Доп. работы сессий 22-24.04: карточки сессий (Decimal, unrealized P&L), CB fixes (commit, trading hours, downtime), маркеры сделок на графике, правила плагинов в CLAUDE.md, Playwright автологин. | Sprint_6/arch_review_s6.md |
 | **Sprint_6_Review** | **Промежуточное ревью M3: code review + UI-проверки + документация** | **✅ завершён (PASS, 2026-04-24)** | **Code review (8 разделов, 6 fixes).** **E2E регрессия:** 107→119 passed (0 failed). **3 code fixes** обнаружены только при E2E/визуальной верификации: AISettingsPage (`providers??[]` + `toLocaleString` guard), marketDataStore (`candles=[]` default). **Визуальная верификация S6:** 6 скриншотов, 5/6 OK. **EVENT_MAP фикс:** 8 publish-сайтов (runtime.py + engine.py) — 5 event_type теперь корректно подставляют `{strategy_name}`/`{ticker}`/`{direction}`/`{volume}`/`{pnl}`. **Документация:** ФТ/ТЗ/development_plan актуализированы за S5+S6. Итого: **11 FIXED + 1 FP + 3 перенесены в S7** (NS singleton, 5 event_type, inline-кнопки Telegram). **Milestone M3 достигнут.** | Sprint_6_Review/code_review.md, backlog.md |
-| **S7** | **Should-фичи + переносы + AI-команды** | **✅ завершён (PASS WITH NOTES, 2026-04-26)** | **17 задач + 7.R закрыты.** Phase 1 feature-complete (M3 Phase 1 достигнут). Версионирование стратегий, Grid Search (multiprocessing.Pool, hard cap 1000), CSV/PDF экспорт (WeasyPrint), drawing tools (5 типов), дашборд-виджеты, first-run wizard (5 шагов), backup/restore (CLI + APScheduler), AI слэш-команды (5 команд), фоновые бэктесты (cap=3 + бейдж), WS-сессии (без polling), 5 новых event_type (MR.5), Telegram callbacks. **Тесты: backend 885/0, frontend 394/0, Playwright 136/0/3** (+17 vs S6 baseline 119). **Stack Gotchas созданы:** #19/#20/#21/#22. **DEFERRED-S8:** 11 карточек (1 medium-high, 5 medium, 5 low) — не блокеры. ФТ v2.4 / ТЗ v1.4 / development_plan обновлены. | Sprint_7/arch_review_s7.md |
-| S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
+| **S7** | **Should-фичи + переносы + AI-команды + post-S7 closeout** | **🏁 закрыт окончательно (2026-05-12)** | **17 задач + 7.R + ~30 post-S7 closeout волн.** Формально завершён 2026-04-26 (ARCH 7.R PASS WITH NOTES, M3 Phase 1 feature-complete). 27.04 → 12.05 — 16 рабочих дней post-S7 closeout: multiplexer singleton hotfix, paper SL/TP мониторинг, telegram positions/balance/close polish, P&L dual % формат, Grid Search + applySync полировка, chart drawings backlog (context menu, position-edit, trade markers exact-price), OHLCV timeframe filter, close_position exit/PnL fix, S7R-EQUITY-PER-TRADE + EQUITY-BY-INDEX (BusinessDay-индексы), S7R-BACKTEST-EXPORT-RU (русские заголовки + auto-landscape + DejaVu), S7R-NIGHTLY-CI-MOCKS (Playwright без backend на CI), ruff F821/F841 + mypy non-None narrowing. **Финальные тесты: 750 backend unit / 468 frontend vitest / 142 Playwright nightly, CI на develop ✅.** **DEFERRED-S8:** 25+ карточек (3 medium-high, ~10 medium, ~10 low) — не блокеры. | Sprint_7/arch_review_s7.md + Sprint_7/changelog.md (запись «🏁 SPRINT 7 FINAL CLOSEOUT 2026-05-12») |
+| **S8** | **Стабилизация (M4 Production-ready)** | **⏸️ инициализирован (2026-05-12), ожидает W0** | scaffold готов: `Sprint_8/{README, sprint_state, execution_order, preflight_checklist, prompt_ARCH_design, changelog}.md`. Следующий шаг — заказчик подтверждает старт W0, ARCH-агент создаёт `arch_design_s8.md`. Цели M4: Coverage ≥ 80%, security audit, performance testing (dashboard < 2с, signal→order < 500мс, TG < 3с), 6 missing E2E spec'ов, закрытие 25+ S8 backlog карточек, документация, 8.R sign-off. | Sprint_8/sprint_state.md |
 
 **Легенда:** ⬜ не начат · 🔄 в процессе · ✅ завершён · ⚠️ завершён с замечаниями
 
 ## Что делать дальше
 
 ```
-ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 7 — ✅ ЗАВЕРШЁН (PASS WITH NOTES, 2026-04-26)
+ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 8 — ⏸️ ИНИЦИАЛИЗИРОВАН (2026-05-12), ожидает W0
 
-  Финальный вердикт ARCH 7.R: PASS WITH NOTES
-    - 17 задач + 7.R закрыты
-    - M3 Phase 1 feature-complete
-    - Тесты: backend 885/0, frontend 394/0, Playwright 136/0/3
-    - MR.5 (5 event_type): ✅ FIXED — все publish-сайты в production
-    - C1–C9 контракты: ✅ опубликованы и интегрированы
-    - 11 карточек DEFERRED-S8 (не блокеры)
-    - ФТ v2.4 / ТЗ v1.4 / development_plan обновлены
-    - Stack Gotchas: #19/#20/#21/#22 созданы; INDEX.md v5
-    - ui_checklist_s7.md создан UX W3
+  Sprint 7 закрыт окончательно (см. Sprint_7/sprint_state.md «🏁 SPRINT 7
+  ЗАКРЫТ ОКОНЧАТЕЛЬНО» и changelog.md «🏁 SPRINT 7 FINAL CLOSEOUT»).
 
-  Файлы 7.R:
-    - Sprint_7/arch_review_s7.md (полный отчёт по 8 разделам)
-    - Sprint_7/reports/ARCH_S7_review.md (краткая 8-секционная сводка)
-    - Sprint_7/changelog.md (финальная запись «7.R PASS WITH NOTES»)
-    - Sprint_7/sprint_state.md (✅ завершён)
-    - Sprint_8_Review/backlog.md (+11 DEFERRED-S8 карточек)
-    - Develop/stack_gotchas/gotcha-22-*.md + INDEX.md v5
-    - Sprint_7/ux/backtest_overview_analytics.md (testid drift синхронизирован с кодом)
+  Sprint 8 scaffold готов:
+    - Sprint_8/README.md (точка входа + цели M4)
+    - Sprint_8/sprint_state.md (текущий шаг, план волн, baseline)
+    - Sprint_8/execution_order.md (W0/W1/W2/W3 + приоритеты backlog)
+    - Sprint_8/preflight_checklist.md (чек окружения до W0)
+    - Sprint_8/prompt_ARCH_design.md (стартовая задача для ARCH)
+    - Sprint_8/changelog.md (заготовка)
+    - Sprint_8_Review/backlog.md (25+ карточек источник)
 
-СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Запуск Sprint 8 — feature freeze + стабилизация (M4 Production-ready)
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: W0 ARCH-design phase
 
-  S8 цели:
-    1. Coverage ≥ 80% по каждому модулю (unit + integration)
-    2. Security audit (crypto, sandbox escape, CSRF, headers, brute-force)
-    3. Performance testing (дашборд < 2с, сигнал→ордер < 500мс, Telegram < 3с)
-    4. Регрессия E2E (полный прогон + добавление spec'ов из S7R-E2E-*)
-    5. Закрытие 11 DEFERRED-S8 карточек (приоритет: medium-high → medium → low)
-    6. UX финальный юзабилити-тест + UX-баги
+  1. Заказчик подтверждает старт W0 спринта.
+  2. Пройти preflight_checklist.md (тестовый baseline, CI зелёный).
+  3. Запустить ARCH-агента с prompt_ARCH_design.md.
+  4. ARCH создаёт arch_design_s8.md:
+     - Приоритезация 25+ backlog карточек по DEV-ролям
+     - Coverage план (модули < 80% → план довода)
+     - Security audit план (crypto/sandbox/CSRF/headers/brute-force)
+     - Performance plan (метрики из ТЗ + методология)
+     - 6 missing E2E spec'ов (S7R-E2E-7.3/7.9/7.13/7.14/7.16/7.17)
+     - 13 event_type верификация (см. раздел «S8 Review» ниже)
+     - Cross-DEV contracts таблица
+     - Wave breakdown W1/W2/W3
+  5. Создать prompt_DEV-1..N.md и prompt_QA.md, e2e_test_plan_s8.md.
+  6. Заказчик утверждает arch_design_s8.md (gate W0 → W1).
+
+  Цели M4 (8 направлений):
+    1. Coverage ≥ 80% по каждому модулю
+    2. Security audit (crypto, sandbox, CSRF, headers, brute-force)
+    3. Performance (dashboard < 2с, signal→order < 500мс, TG < 3с)
+    4. E2E регрессия + 6 missing spec'ов
+    5. Закрытие S8 backlog (3 medium-high обязательно)
+    6. UX финальный юзабилити-тест
     7. Документация (README, deployment guide, итоговый changelog)
     8. 8.R финальное ARCH-ревью + sign-off
 
-  Подготовка к S8 (до старта спринта):
-    - Прочитать Sprint_8_Review/backlog.md (карточки S7 переносов)
-    - Прочитать Sprint_7/arch_review_s7.md (контекст, что в каком состоянии)
-    - Прочитать Документация по проекту/development_plan.md §«Спринт 8»
-
-ВЕТКИ ПОСЛЕ S7 (НЕ закоммичено ARCH-ом, заказчик коммитит сам):
-  - Корневой Test (docs/sprint-7-plan): обновления документации, ARCH 7.R отчёты, project_state, changelog, sprint_state, ui_checklist_s7, backlog S8
-  - Develop/ (s7/sprint-7): gotcha-22 + INDEX.md v5 (ARCH 7.R единственная правка)
+ВЕТКИ НА СТАРТЕ S8:
+  - Корневой Test: docs/sprint-7-plan (содержит Sprint_8/ scaffold +
+    финальный closeout S7); после W0 рекомендуется новая docs/sprint-8.
+  - Develop/: develop (синхронизирован, CI ✅); рабочая ветка S8 пока не
+    создана — будет s8/sprint-8 в W1.
 ```
 
 ## Ключевые решения (кросс-спринтовые)
