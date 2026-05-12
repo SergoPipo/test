@@ -43,6 +43,39 @@ Sprint 7 финально закрыт со всеми post-S7 closeout-волн
 3. ⬜ Создать ветку `s8/sprint-8` в Develop репо
 4. ⬜ Заказчик подтверждает старт W1
 
+---
+
+## Инструкция для следующей сессии (создание DEV-промптов)
+
+Когда заказчик скажет «продолжим S8» или «создавай промпты», Claude должен:
+
+1. **Прочитать порядок:**
+   - `Спринты/project_state.md` (где мы — S8 W0 завершён)
+   - `Спринты/Sprint_8/sprint_state.md` (этот файл)
+   - `Спринты/Sprint_8/arch_design_s8.md` целиком (8 секций + §11 решения TODO + §12 готовность)
+   - `Спринты/Sprint_8/execution_order.md` (потоки W1 + Cross-DEV contracts)
+   - `Спринты/prompt_template.md` (шаблон промпта, 11 секций)
+   - `Sprint_7/prompt_DEV-1.md` для образца (опционально)
+
+2. **Создать 9 промптов** по `prompt_template.md`:
+   - `prompt_DEV-1.md` (BACK1) — Coverage P0+P1, T-Invest adapter, Admin role backend, Performance, Coverage P2 (3 волны)
+   - `prompt_DEV-2.md` (BACK2) — Security audit + bandit/safety, MULTIPLEXER-SINGLETON, Event sync publishers, Dashboard endpoints, Notification filter
+   - `prompt_DEV-3.md` (FRONT1) — Charts editing эпик (DRAWING-EDITING + DRAWING-INTRADAY-COORDS), low W3 cleanup
+   - `prompt_DEV-4.md` (FRONT2) — API paginated audit, ErrorBoundary, Strategy status UI, Dashboard widgets, Admin role frontend, Event sync UI labels, Plotly Dash
+   - `prompt_DEV-5.md` (OPS) — Docker compose, launchd plist, deployment_guide.md, README/INSTALL update
+   - `prompt_QA.md` — 6 missing E2E (5 Playwright + 1 pytest integration) + AIChat mock + регрессия nightly
+   - `prompt_UX.md` — W3 финальный юзабилити-тест + ui_checklist_s8.md
+   - `prompt_ARCH_design.md` (W0) — УЖЕ СОЗДАН, не трогать
+   - `prompt_ARCH_review.md` — 8.R по образцу Sprint_6_Review/code_review.md
+
+3. **Создать `e2e_test_plan_s8.md`** — 6 spec'ов с детальными сценариями (§5 arch_design).
+
+4. **Создать ветку `s8/sprint-8` в Develop репо.**
+
+5. **Обновить sprint_state.md** — переход «W0 ЗАВЕРШЁН» → «🔄 W1 IN-PROGRESS».
+
+**Ожидаемый объём работы:** 9 файлов промптов × ~200-300 строк = ~2500 строк. Лучше через `general-purpose` subagent с детальным брифингом, либо в свежей сессии с большим контекстом.
+
 ## Цели спринта (M4)
 
 | # | Цель | Критерий приёмки |
