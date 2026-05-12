@@ -3,8 +3,8 @@
 > Обновляется после каждого этапа.
 
 **Дата планирования:** 2026-05-12
-**Дата старта W0:** —
-**Дата завершения W0:** —
+**Дата старта W0:** 2026-05-12
+**Дата завершения W0:** — (черновик arch_design_s8.md готов, ожидает утверждения заказчика по 10 TODO)
 **Дата старта W1:** —
 **Дата завершения W1:** —
 **Дата старта W2:** —
@@ -14,9 +14,22 @@
 
 ## Текущий шаг
 
-**Sprint 8 ⏸️ ИНИЦИАЛИЗИРОВАН (2026-05-12). Ожидает W0 ARCH-design.**
+**Sprint 8 🔄 W0 IN-PROGRESS (2026-05-12). Черновик `arch_design_s8.md` готов, ожидает утверждения заказчика по 10 TODO.**
 
-Sprint 7 финально закрыт со всеми post-S7 closeout-волнами (см. `Sprint_7/changelog.md` и `Sprint_7/sprint_state.md`). M3 Phase 1 production-ready. Готов к M4 Production-ready.
+Sprint 7 финально закрыт со всеми post-S7 closeout-волнами. M3 Phase 1 production-ready.
+
+**Что сделано в W0 на 2026-05-12:**
+- ✅ Preflight checklist пройден (baseline зелёный)
+- ✅ Coverage report собран: TOTAL 71%, цель 80%, gap ≈1140 строк
+- ✅ 13 event_type аудит — фактически 12 в EVENT_MAP, publishers grep'ом сверены
+- ✅ Paginated endpoints аудит: 2 endpoint'а (`/trading/sessions`, `/trading/sessions/{id}/trades`)
+- ✅ `arch_design_s8.md` создан (581 строка, 8 секций, 30 карточек × роли × часы)
+
+**Что нужно для gate W0 → W1:**
+1. Заказчик утверждает `arch_design_s8.md`
+2. Заказчик отвечает на 10 TODO из секции 11 документа
+3. QA создаёт `e2e_test_plan_s8.md` (по §5 arch_design)
+4. Создаются `prompt_DEV-1..N.md` + `prompt_QA.md` после ответов на TODO
 
 ## Цели спринта (M4)
 
