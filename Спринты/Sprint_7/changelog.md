@@ -10,6 +10,725 @@
 
 ---
 
+## 2026-05-12 — S7R-NIGHTLY-CI-MOCKS: nightly Playwright без backend на CI
+
+### Триггер
+Заказчик: «получаю ошибки на почту от GitHub Playwright (nightly, work
+hours MSK)». Все 5 nightly runs с 2026-05-08 12:04 UTC фейлились за
+~52 секунды с одинаковой ошибкой:
+```
+[WebServer] /usr/bin/python3: No module named uvicorn
+Error: Process from config.webServer was not able to start. Exit code: 1
+```
+
+### Корень
+[playwright.config.ts](Develop/frontend/playwright.config.ts) пытался
+поднять backend через `python3 -m uvicorn app.main:app`, а workflow
+[playwright-nightly.yml](Develop/.github/workflows/playwright-nightly.yml)
+ставил **только** фронтенд (`cd frontend && pnpm install`). Backend deps
+не было — uvicorn отсутствовал, webServer fail-fast до первого теста.
+
+Дополнительно: env-переменная `TEST_USER_PASSWORD: ${{ secrets... }}`
+показывалась в логе как пустая, но реально она **никем не используется** —
+все 25 из 30 spec'ов уже на моках (`e2e/fixtures/api_mocks.ts`),
+4 MIXED тоже мокают `/auth/*` endpoints, и только
+`s7r-chart-drawings-fix.spec.ts` требовал реальный backend.
+
+### Решение: моки вместо реального backend на CI
+Не ставим backend в workflow вообще — все API-запросы перехватывает
+`page.route` через моки. Frontend Vite сам себе достаточен.
+
+1. **`playwright.config.ts`**: webServer теперь условный.
+   `process.env.CI` → только Vite на 5173. Локально — backend + Vite
+   как было.
+2. **`playwright-nightly.yml`**: убраны `TEST_USER_LOGIN/PASSWORD`
+   (не использовались), оставлено `CI: "true"`. Секрет
+   `TEST_USER_PASSWORD` заводить **не надо**.
+3. **`s7r-chart-drawings-fix.spec.ts`**: `test.skip(!!process.env.CI,
+   'requires real backend + DB seed')` — единственный тест, который
+   делает реальный логин через `playwright_login.sh` и идёт на
+   `/chart/LKOH?session=2`. На CI без seed-данных он бы всё равно
+   падал; локально работает как раньше.
+
+### Файлы
+- `frontend/playwright.config.ts` — webServer conditional.
+- `.github/workflows/playwright-nightly.yml` — убраны лишние env.
+- `frontend/e2e/s7r-chart-drawings-fix.spec.ts` — skip на CI.
+
+### Verification
+- `npx tsc --noEmit` — 0 errors.
+- Локально `npx playwright test e2e/dashboard.spec.ts e2e/auth.spec.ts`
+  — **10 passed**.
+- CI-режим (`CI=true`) локально не тестировался: dev сервер на 5173
+  занят, а в CI-ветке `reuseExistingServer: false`. На чистом
+  GitHub-runner-е порт свободен — конфликта не будет. Проверять через
+  manual workflow_dispatch.
+
+### S8 backlog
+- Сделать seed-фикстуру для CI (создание sergopipo + сессии + тестовых
+  данных через alembic + pytest fixture) → можно разблокировать
+  `s7r-chart-drawings-fix.spec.ts` на CI.
+
+---
+
+## 2026-05-12 — S7R-EQUITY-BY-INDEX: ось X = порядковый номер сделки
+
+### Триггер
+Заказчик после S7R-EQUITY-PER-TRADE: «Выводить на временной ветке в том
+таймфрейме результаты сделок бессмысленно. Не нужно привязываться к
+временной шкале. Подряд идут сделки с указанием значений. Только
+вертикальная шкала P&L». Стандартный «Equity Curve by Trade #» как в
+TradingView/MyFxBook. Выбран вариант A (минимально-инвазивный, без новых
+зависимостей); если не подойдёт — переделаем на recharts (вариант Б).
+
+### Что сделано
+В [PnLSummary.tsx](Develop/frontend/src/components/trading/PnLSummary.tsx):
+
+1. **time → BusinessDay по индексу**. UTCTimestamp `idx+1` (или
+   `(idx+1)*86400`) lightweight-charts интерпретирует как «настоящие
+   секунды/дни» и при 2-3 точках жмёт их в один right-bar, независимо
+   от `fitContent` и `setVisibleLogicalRange`. BusinessDay
+   (`{year:2020, month:1, day:idx+1}`) даёт дискретные категории, между
+   которыми гарантирован tick.
+2. **`barSpacing` + `rightOffset`** явно: `barSpacing =
+   max(40, width/(N+1))`, `rightOffset = 0.5`. Растягивает N точек на
+   всю ширину canvas — без этого даже BusinessDay прижимался к правой
+   стороне. ResizeObserver пересчитывает barSpacing при изменении ширины.
+3. **`timeScale.tickMarkFormatter`** возвращает `#N`, где N извлекается
+   из BusinessDay через `(date - BASE_DATE) / 86400000 + 1`.
+4. **`localization.timeFormatter`** — crosshair-tooltip
+   `«Сделка #N · 08.05.2026, 17:23:14»`. Реальные unix-времена
+   сохраняются в `realTimes[]` до рендера; в tooltip — `new Date(ts *
+   1000).toLocaleString('ru-RU')`.
+5. **Подзаголовок-объяснение** под графиком: «X — порядковый номер,
+   Y — сумма P&L всех сделок до этой точки. Время закрытия — в подсказке.»
+
+Бэкенд и контракт `EquityPointResponse {time, value}` не тронуты —
+изменения локальны в одной React-компоненте.
+
+### Что не сработало (отрицательные результаты для будущего)
+- `time: (idx+1)` (микро-UTCTimestamp) — точки в одну позицию справа.
+- `time: (idx+1)*86400` (1-day stride) — то же.
+- `fitContent()` — игнорирует малую плотность.
+- `setVisibleLogicalRange({from:-0.5, to:N-0.5})` — без `barSpacing`
+  не растягивает.
+- BusinessDay без `barSpacing` — точки тоже жмутся в right-bar.
+
+### Verification
+- `npx tsc --noEmit` — 0 errors.
+- `npx vitest run src/components/trading` — **36 passed**.
+- Одноразовый Playwright тест (моки: 2 закрытых сделки, P&L −49.23 / +0.45)
+  → скриншот: точки #1 на левой трети и #2 на правой трети canvas,
+  между ними наклонная линия, ось X с подписями «#1, #2». Тест-файл
+  вынесен из репо после проверки (artifact в `/tmp/`).
+
+### S8 backlog
+- Если вариант A не зайдёт — переехать на `recharts` с категориальной
+  осью X (вариант Б из обсуждения 2026-05-12).
+- Кастомный HTML-tooltip с P&L текущей сделки + кумулятивным P&L
+  одновременно (сейчас в crosshair только дата, значение читается с
+  правой шкалы).
+- Опционально: убрать last-value-priceLine (пунктирная горизонталь на
+  уровне последнего значения) через `priceLineVisible:false` у series —
+  при 2 точках она визуально доминирует.
+
+### Новая Stack Gotcha (для `Develop/stack_gotchas/`)
+- **lightweight-charts: <5 точек прижимаются к right-bar.** Симптом:
+  на equity-curve с 2-3 точками все маркеры в одной X-позиции справа,
+  ось X — без подписей. Решение: BusinessDay time + явный `barSpacing
+  = width/(N+1)` + `rightOffset = 0.5`. `fitContent`/
+  `setVisibleLogicalRange`/UTCTimestamp не помогают.
+
+---
+
+## 2026-05-10 — S7R-EQUITY-PER-TRADE: equity-curve по сделкам + backfill daily_stats
+
+### Триггер
+Заказчик: «во вкладке "Статистика" формально 3 сделки, но на графике одна
+полоска. Что я там должен увидеть?». Скриншот SBER session 1 показывал
+Equity Curve с одной красной вертикальной полоской на значении 0.45,
+несмотря на 2 закрытых сделки и `Суммарный P&L = -48.78 ₽`.
+
+### Корни (двух разных проблем)
+1. **Equity-curve строилась по `daily_stats`**, не по сделкам. При 2 trades
+   в разные дни на графике 2-3 точки, lightweight-charts при таком малом
+   N рисует невыразительную линию.
+2. **Исторический баг в `daily_stats`**: на 2026-05-08 для SBER session 1
+   `pnl=0` вместо `-49.23`. Trade #1 закрылся 2026-05-08 17:23 ещё ДО фикса
+   `OrderManager.close_position` (S7R-CLOSE-EXIT-PRICE 2026-05-08), и
+   `_update_daily_stat()` тогда вызывался без `pnl` (default = 0). Я тогда
+   вручную бэкфиллил `live_trades.pnl=-49.23`, но `daily_stats` не трогал.
+   Кумулятивная кривая выходила `0 → 0 → 0.45` — видна только последняя
+   точка как «полоска». Аналогично сломанные данные у LKOH session 2 на
+   2026-05-08 (`pnl=0` при реальном `-109.16`) и 2026-05-09 (`pnl=0` при `+71.5`).
+
+### Что сделано
+1. **`TradingService.get_stats`** в [service.py](Develop/backend/app/trading/service.py):
+   equity-curve строится по closed `LiveTrade`, отсортированным по `closed_at`.
+   Каждая точка = `(closed_at_unix_sec, накопит. PnL)`. При коллизии секунд
+   (например `/closeall` закрывает 2 позиции в одну секунду) второй точке
+   добавляется `+1 сек` — иначе lightweight-charts ругается на дубликаты time.
+   Удалён неиспользуемый импорт `time as dt_time`.
+2. **3 новых теста** в [test_service.py](Develop/backend/tests/test_trading/test_service.py)
+   класс `TestTradingServiceStats`:
+   - `test_get_stats_equity_curve_by_trades` — 3 trade с известными pnl,
+     проверка кумулятивной последовательности и монотонности времени.
+   - `test_get_stats_equity_curve_dedup_same_second` — две сделки в одну
+     секунду → второй time = первый + 1.
+   - `test_get_stats_empty_when_no_closed_trades` — пустая сессия → `equity_curve == []`.
+3. **Backfill `daily_stats`** одноразовым SQL UPDATE в `data/terminal.db`:
+   ```sql
+   UPDATE daily_stats SET pnl = (SUM(lt.pnl) WHERE date matches),
+                         trades_closed = COUNT(...)
+   ```
+   Затронуты 4 строки: SBER 2026-05-08 (0 → -49.23), LKOH 2026-05-08
+   (0 → -109.16), LKOH 2026-05-09 (0 → +71.5). Старая daily-логика
+   больше не используется в get_stats, но инвариант данных сохраняем —
+   `_update_daily_stat()` всё ещё пишет туда из close_position.
+4. **`PnLSummary.tsx`** в [PnLSummary.tsx](Develop/frontend/src/components/trading/PnLSummary.tsx):
+   - LineSeries дополнен `pointMarkersVisible: true`, `pointMarkersRadius: 4`,
+     `crosshairMarkerVisible: true` — каждая точка-сделка теперь явно видна.
+   - Заголовок изменён с `«Equity Curve»` на `«Накопительный P&L по
+     сделкам (N)»` + подзаголовок-объяснение «X — момент закрытия,
+     Y — сумма P&L всех сделок до этой точки».
+
+### Файлы
+- `backend/app/trading/service.py` — get_stats: equity по trades, не по daily.
+- `backend/tests/test_trading/test_service.py` — +3 теста.
+- `backend/data/terminal.db` — backfill daily_stats (вне git).
+- `frontend/src/components/trading/PnLSummary.tsx` — pointMarkers + русский
+  заголовок с подсказкой.
+
+### Результат
+- `pytest tests/test_trading/test_service.py -v` — **10 passed** (7 существующих
+  + 3 новых).
+- `npx tsc --noEmit` — 0 errors.
+- `npx vitest run src/components/trading` — **36 passed**.
+- На вкладке «Статистика» теперь: ломаная линия с маркерами на каждую
+  закрытую сделку (для SBER session: точка1 -49.23 → точка2 -48.78),
+  при наведении tooltip с датой и значением.
+
+### S8 backlog
+- **Histogram per-trade + Win/Loss donut** — память
+  `project_s7_interactive_zones.md` упоминала. Сейчас сделана только
+  cumulative line. Добавить как два дополнительных графика рядом.
+- **`_update_daily_stat` — депрекейт?** Раз equity-curve больше не использует
+  daily_stats, можно удалить вызовы в close_position. Но другие потребители
+  (отчёты, dashboard) могут зависеть. Проверить отдельно.
+
+---
+
+## 2026-05-10 — S7R-CHART-PAGE-FETCH-POSITIONS: фон позиции исчезал после refresh
+
+### Триггер
+Заказчик: «если, находясь на странице с графиком, привязанным к торговой
+сессии, обновлю страницу, перестаёт показываться зелёный или красный фон
+от текущей сделки».
+
+### Корень
+`ChartPage.tsx` НЕ вызывал `fetchPositions(sessionId)` при mount — только
+`fetchSessions()` для дропдауна. Расчёт был на то, что юзер пришёл с
+`/trading`, где `SessionDashboard` уже наполнил `tradingStore.positions`.
+После refresh `/chart/...?session=N` Zustand-store начинается пустым,
+`OpenPositionsLayer` фильтрует `positions.filter(p => p.ticker === ticker)` →
+пусто → primitive не attach'ится → нет fill rectangle. Дополнительно: WS
+канал `trades:{sessionId}` тоже не был подписан, поэтому live-обновления
+(закрытие сделки из TG-бота / другой вкладки) не приходили.
+
+### Что сделано
+В [ChartPage.tsx](Develop/frontend/src/pages/ChartPage.tsx) добавлено:
+1. **Подписка store-методов** `fetchPositions`, `addTradeFromWS`,
+   `updatePositionFromWS` через `useTradingStore` (паттерн из SessionDashboard).
+2. **`useEffect` с `fetchPositions(sessionId)`** на каждое изменение
+   `sessionId` — наполняет `positions` сразу после mount/refresh.
+3. **`useWebSocket('trades:{sessionId}', ...)`** — подписка с обработкой
+   тех же событий, что в SessionDashboard:
+   - `trade.filled` / `trade.closed` → `addTradeFromWS(...)` +
+     `fetchPositions(sessionId)` (обновить список открытых).
+   - `position.update` → `updatePositionFromWS(...)` (для PnL обновлений).
+   События `session.*` не нужны на ChartPage — там нет дашборда.
+4. Импорты: `useWebSocket` + типы `Position`, `LiveTrade`.
+
+### Файлы
+- `frontend/src/pages/ChartPage.tsx` — +30 строк (импорты, useEffect,
+  useCallback, useWebSocket).
+
+### Результат
+- `npx tsc --noEmit` — 0 errors.
+- `npx vitest run src/pages` — 12 passed (3 файла).
+- Поведение: после refresh `/chart/SBER?session=2` зелёный/красный fill
+  для открытой позиции рисуется сразу. При закрытии сделки через TG-бота
+  (или другую вкладку) primitive исчезает без необходимости refresh.
+
+---
+
+## 2026-05-10 — S7R-BACKTEST-EXPORT-RU: русские заголовки и auto-landscape PDF
+
+### Триггер
+Заказчик: «при выгрузке backtest в CSV/PDF всё на английском, в PDF таблица
+обрезается». Расследование: `app/backtest/export.py` имел snake_case-ключи
+(`backtest_id`, `entry_date`, `pnl_pct` — 21 поле метрик + 13 колонок trades)
+как заголовки CSV/PDF; PDF генерировался WeasyPrint в A4 portrait по умолчанию,
+и 13 колонок не помещались. Шрифт `Helvetica` не покрывает кириллицу — но
+поскольку всё было на английском, эта проблема скрывалась.
+
+### Что сделано
+1. **Словари переводов** в `export.py`: `_METRIC_LABELS_RU` (21 ключ) и
+   `_TRADE_COLUMN_LABELS_RU` (13 ключей) — все поля переведены, единицы
+   измерения добавлены: «Чистая прибыль, ₽», «Макс. просадка, %», «P&L, ₽»,
+   «Длит., баров» и т.п. Module-level `assert` на синхронность
+   `_TRADE_COLUMN_LABELS_RU` ↔ `_TRADE_COLUMNS` — упадёт при импорте, если
+   колонку добавили без перевода.
+2. **Auto-orientation для PDF**: новый `_choose_orientation(num_columns)` —
+   `≥9 колонок → landscape`, иначе portrait. Текущие 13 колонок trades
+   гарантированно дают landscape. `generate_pdf()` и `_render_html()`
+   принимают опциональный `orientation` (None → auto).
+3. **Кириллица в PDF**: добавлен FOSS-шрифт `DejaVu Sans` (BSD-like, ~1.5 МБ
+   regular + bold) в `app/backtest/fonts/`. CSS `@font-face` подключает
+   через `Path.as_uri()` → `file:///abs/path/...` URL. WeasyPrint резолвит
+   без `base_url`. Helvetica убран из CSS.
+4. **CSS PDF**:
+   - `@page { size: A4 {orientation}; margin: 1.2cm 1cm; @bottom-right { ... } }` —
+     pagination footer «N / M».
+   - `table-layout: fixed; word-wrap: break-word; overflow-wrap: anywhere;` —
+     длинные даты переносятся, не выходят за колонку.
+   - `thead { display: table-header-group; }` — шапка таблицы повторяется
+     на каждой странице (важно для 50+ сделок).
+   - `tr { page-break-inside: avoid; }` — строка не режется между страницами.
+5. **CSV**: заголовки переведены (`"Метрика","Значение"`, `"Сделки"`, потом
+   13 русских колонок). Разделитель `,` и `utf-8-sig` BOM сохранены —
+   совместимость с Excel-RU не сломана.
+6. **pyproject.toml**:
+   - `[tool.setuptools.package-data] "app.backtest" = ["fonts/*.ttf",
+     "fonts/LICENSE.txt"]` — TTF попадают в дистрибутив.
+   - `[project.optional-dependencies].dev += ["pypdf>=5.0"]` — для теста
+     извлечения текста из PDF.
+
+### Файлы
+- `backend/app/backtest/export.py` — переписан целиком.
+- `backend/app/backtest/fonts/DejaVuSans.ttf` (757 КБ) и `DejaVuSans-Bold.ttf`
+  (706 КБ) — FOSS BSD-like, скачан с
+  `github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37`.
+- `backend/app/backtest/fonts/LICENSE.txt` — лицензия (8.8 КБ).
+- `backend/pyproject.toml` — package-data + pypdf в dev.
+- `backend/tests/unit/test_backtest/test_export.py` — 2 существующих теста
+  обновлены (`"ticker"` → `"Тикер"`, `"#trades"` → `"Сделки"`), 4 новых:
+  `test_csv_has_russian_headers`, `test_choose_orientation`,
+  `test_render_html_landscape_for_default_columns`, `test_pdf_supports_cyrillic`.
+
+### Результат
+- `pytest tests/unit/test_backtest/test_export.py -v` — **12 passed**.
+- `test_pdf_supports_cyrillic` валидирует кириллицу через `pypdf.extract_text()`
+  — assert `"Тикер"`, `"GAZP"`, `"Бэктест"` в декодированном тексте PDF.
+
+### S8 backlog
+- **CSV для tax-отчётов** уже на русском — но шрифт в реализации tax PDF
+  (если будет добавлен) тоже потребует DejaVu. Стоит вынести `fonts/`
+  и `_font_face_css()` в `app/common/pdf_fonts.py` для переиспользования.
+- **Configurable orientation в UI**: сейчас auto, но для очень узких
+  отчётов «3-НДФЛ» может понадобиться force portrait — параметр в
+  query-string `?orientation=portrait`.
+- **WeasyPrint cache fontconfig**: первый PDF после установки шрифта
+  медленный (~2 сек) — кеш `~/.cache/fontconfig` строится. В CI учесть
+  таймаут на первом прогоне.
+
+---
+
+## 2026-05-09 — S7R-CHART-PRICE-SCALE-AND-OOR-DRAWINGS: сжатие Y-шкалы и фантомные drawings
+
+### Триггер
+Заказчик: «график сильно сжат, рисунки Long Position не на своём месте».
+На скриншоте: Y-шкала растянута 4920–5760 (≈840 ₽), а свечи сжаты в полоску
+5040–5160. В верхней части висит Long Position-прямоугольник «L +2.02% R/R 2.00»
+из апреля (когда LKOH был ≈5460), хотя апрельских свечей в видимом окне нет.
+
+### Корни (двух багов)
+1. **`priceScale('right').applyOptions({ autoScale: false })`** в
+   `CandlestickChart` после `setVisibleRange` (commit от Sprint 2,
+   feat: lazy loading). Y-диапазон фиксировался на момент initial setData —
+   с учётом всех загруженных за месяц баров, включая апрельские по 5460.
+   Когда LKOH сполз на 5100, шкала оставалась 4920–5760, и видимые
+   свечи визуально «сжимались».
+2. **`pointToCoord` в `coords.ts`** при `timeToCoordinate(t) == null`
+   безусловно делал fallback на `logicalToCoordinate(point.logical)`.
+   Если drawing был сохранён с `logical=N` от старого набора данных
+   (апрель), а сейчас в чарте 100 баров мая — `logical=N` указывает на
+   ЧУЖОЙ бар. Drawing рисовался в произвольном месте (вверху чарта на
+   стале старой цене 5460), хотя его время вне видимых данных. Комментарий
+   в самом файле уже предупреждал об этой проблеме («logical-after-reload»),
+   но fallback стоял безусловный.
+
+### Что сделано
+1. **`CandlestickChart.tsx`** — убрал `applyOptions({ autoScale: false })`.
+   Lightweight-charts теперь сама пересчитывает Y-диапазон под видимые
+   бары на каждом scroll/zoom (стандартное поведение TradingView).
+2. **`coords.ts:pointToCoord`** — logical-fallback ТОЛЬКО для
+   forward-extrapolation (`logical >= series.data().length`, например
+   end-точка long_position синтезирована «в будущее»). Если `logical`
+   попадает в текущий dataset, но `time` не нашёл бар — drawing скрывается
+   (не рисуется), потому что это значит drawing из другого временного
+   диапазона.
+
+### Файлы
+- `frontend/src/components/charts/CandlestickChart.tsx` — удалён фикс
+  Sprint 2 с `autoScale: false`.
+- `frontend/src/components/charts/primitives/coords.ts` — `pointToCoord`
+  гейт по `series.data().length`.
+
+### Верификация Playwright
+- Создан `e2e/s7r-chart-drawings-fix.spec.ts` — реальный логин через
+  `scripts/playwright_login.sh` (sergopipo) + переход на
+  `/chart/LKOH?timeframe=5m&session=2`. Скриншот в
+  `e2e/screenshots/s7r-hotfix/lkoh-5m-after-fix.png` подтверждает:
+  - Y-шкала 5070–5190 (≈120 ₽) вместо 4920–5760.
+  - Long Position-прямоугольник из апреля **не отрисован**.
+  - Маркеры «Buy/Sell 5147.50» на своих местах.
+- `npx tsc --noEmit` — 0 errors.
+- `vitest run src/components/charts` — **70 passed**.
+
+### S8 backlog
+- **Forward-extrapolation для long_position end** — сейчас работает
+  через `logical >= dataLen`, но это хрупкое условие. Лучше — хранить
+  end как relative offset от entry в барах (а не абсолютный logical),
+  тогда extrapolation не зависит от текущего dataset.
+- **«Прыгание» при streaming** — autoScale=true может слегка дёргать
+  Y-шкалу при каждом WS-tick'е, если новый close выходит за текущий
+  диапазон. В TradingView это решено through margin-pct в priceScale.
+  Если заметно — настроить `priceScale.margins` или включить debounced fit.
+
+---
+
+## 2026-05-09 — S7R-TRADE-MARKER-EXACT-PRICE: маркеры сделок на точной (time, price)
+
+### Триггер
+После прошлого фикса заказчик прислал второй скриншот: маркеры
+«Buy 5147.50» и «Sell 5147.50» рисуются ВЫШЕ или НИЖЕ свечи на ~10–15 px,
+хотя сама свеча в той же временной точке имеет close ≈ 5148. Заказчик:
+«цена не доходила в эти места!». Лейбл показывает корректную цену, но
+визуально стрелка стоит мимо.
+
+### Корень
+Стандартный API `series.setMarkers(SeriesMarker[])` lightweight-charts
+поддерживает только `position: 'aboveBar' | 'belowBar' | 'inBar'` —
+маркер привязан к bar'у, а не к точной цене. Поле `price` в `SeriesMarker`
+отсутствует в API. Поэтому даже при правильных данных визуальное место
+маркера не совпадает с лейблом.
+
+### Что сделано
+1. **Новый `TradeMarkerPrimitive`** (`primitives/TradeMarkerPrimitive.ts`):
+   - Свой `IPrimitivePaneRenderer`, рисует на canvas через
+     `useMediaCoordinateSpace`.
+   - Координаты: `chart.timeScale().timeToCoordinate(time)` для X,
+     `series.priceToCoordinate(price)` для Y. Время берётся в формате
+     серии (sequential index или UTC sec) — переиспользует существующий
+     `tradeTimeValue` без изменений.
+   - Стрелка рисуется наконечником **в точную цену**, тело и подпись
+     уходят в сторону от свечи (Buy → вниз, Sell → вверх). Полупрозрачная
+     подложка под текстом для читаемости поверх свечей и сетки.
+   - `zOrder: 'top'` — поверх всех остальных primitive'ов.
+2. **`CandlestickChart.tsx`**:
+   - `tradeToMarkers` упрощён: 3 уровня `SeriesMarker` (стрелка + Buy/Sell + цена)
+     → 1 объект `TradeMarkerData { time, price, kind, id }`.
+   - `rebuildMarkers` вместо `createSeriesMarkers / setMarkers` теперь
+     attach'ит `TradeMarkerPrimitive` один раз и зовёт `setMarkers()` на нём.
+   - Удалён импорт `createSeriesMarkers`, `ISeriesMarkersPluginApi`, `SeriesMarker`.
+   - Финальный фильтр маркеров на валидность sequential index сохранён —
+     primitive просто пропустит точку с null-координатой, но без mapping
+     `timeScale.timeToCoordinate` может вернуть мусор.
+
+### Файлы
+- `frontend/src/components/charts/primitives/TradeMarkerPrimitive.ts` — новый.
+- `frontend/src/components/charts/CandlestickChart.tsx` — переезд на primitive.
+
+### Результат
+- `tsc --noEmit` — 0 errors.
+- `vitest run src/components/charts` — **70 passed**.
+- На графике: стрелка точно указывает наконечником на entry/exit-цену,
+  лейбл «Buy 5147.50» ↔ visual y совпадают.
+
+---
+
+## 2026-05-09 — S7R-OHLCV-TIMEFRAME-FILTER: stale current_price + live update полосы открытой позиции
+
+### Триггер
+Заказчик закрыл обе сессии через `/closeall` в TG-боте, и сразу появилась
+новая сессия. На графике LKOH:
+1. **Полоса OpenPositionPrimitive** для текущей позиции уехала вниз на
+   ~60 ₽ от entry_price (видно как широкий красный fill, который
+   не соответствует свечам ~5150).
+2. **Маркер «Sell 5087.50»** для только что закрытой сделки (#3) отрисован
+   на сегодняшней 13:02 свече, у которой close ≈ 5147.50 — лейбл и
+   визуальное место не сходятся.
+
+### Корневая причина
+1. `OHLCVCache`-запросы в `service._get_last_price`, `service.get_positions`,
+   `engine.OrderManager.close_position` шли БЕЗ фильтра по `timeframe` —
+   `ORDER BY timestamp DESC LIMIT 1` мог вернуть значение из произвольного
+   таймфрейма. На момент `/closeall` (2026-05-09 10:02:25 UTC) кэш для
+   LKOH был неполный: 5m-стрим ещё не успел догнаться, и latest по `timestamp`
+   оказался **2026-05-08 17:50 5m close=5087.50**. exit_price ушёл в БД
+   stale-значением, и `Position.current_price` для нового trade #5
+   (entry=5147.50) тоже получил 5087.50 → live PnL = −60 ₽.
+2. `Position.current_price` обновляется только в `fetchPositions()` (mount/SSE),
+   на новых свечах НЕ освежается. После того как кэш догнался до 5147.50,
+   фронт всё равно держал старое значение.
+
+### Что сделано
+1. **`service._get_last_price(ticker, timeframe=None)`** — добавлен
+   аргумент `timeframe`. Запрос фильтрует `OHLCVCache.timeframe == timeframe`,
+   если задан. Caller `_fill_session_card_data` теперь передаёт `resp.timeframe`.
+2. **`service.get_positions`** — inline-запрос к `OHLCVCache` дополнен
+   `where(OHLCVCache.timeframe == session.timeframe)`.
+3. **`engine.OrderManager.close_position`** — аналогично фильтрует по
+   `trade_session.timeframe`. Без фильтра при stale-кэше exit_price
+   уходил мусором.
+4. **Frontend live PnL** в `OpenPositionPrimitive`:
+   - Новые методы `setLivePrice(price)` / `getLivePrice()` /
+     `computeLivePnl()`. Live-цена приоритетнее `pos.current_price`.
+   - `fillColor(currentPriceOverride?)` — sign определяется live-ценой,
+     иначе fall back на `pos.unrealized_pnl`.
+   - `PositionAxisView.text()` — выводит live PnL, если есть.
+5. **`OpenPositionsLayer`** — подписан на `useMarketDataStore.candles[len-1].close`,
+   на каждое изменение пробрасывает `setLivePrice(close)` во все
+   привязанные primitive'ы. Re-paint canvas через `attachedParam.requestUpdate()`.
+6. **Бэкфилл trade #3 (LKOH)** через sqlite3:
+   - `exit_price=5147.50` (close 10:00 UTC 5m-свечи на момент закрытия),
+   - `pnl=71.50 ₽` (было 11.50),
+   - `pnl_pct=1.4086%`.
+
+### Файлы
+- `backend/app/trading/service.py` — `_get_last_price` сигнатура,
+  `get_positions` inline-запрос, передача `resp.timeframe` в `_fill_session_card_data`.
+- `backend/app/trading/engine.py` — `OrderManager.close_position` фильтр по timeframe.
+- `frontend/src/components/charts/primitives/OpenPositionPrimitive.ts` —
+  live price API, computeLivePnl, fillColor с override.
+- `frontend/src/components/charts/OpenPositionsLayer.tsx` —
+  подписка на marketDataStore + setLivePrice.
+- `backend/data/terminal.db` — бэкфилл trade #3 (вне git).
+
+### Результат
+- `py_compile` — OK.
+- `pytest tests/test_trading/ tests/test_notification/` — **160 passed**.
+- `tsc --noEmit` — 0 errors.
+- `vitest run src/components/charts` — **70 passed**.
+- На графике LKOH:
+  - Маркер «Sell» теперь отрисуется с лейблом 5147.50 на свече ~5147.50
+    (после reload page → fetchTrades увидит обновлённый exit_price).
+  - Полоса OpenPositionPrimitive живо обновляется на каждом candle WS-tick.
+
+### S8 backlog
+- **Stale cache при close**: filter по timeframe — это defense-in-depth.
+  Если 5m-стрим действительно молчит >N минут — exit_price всё равно
+  будет stale. Реальное решение: `MarketDataService.fetch_last_price` с
+  обращением к T-Invest live (или к runtime listener'у, у которого свечи
+  в памяти).
+- **Backend WS push для Position**: сейчас фронт сам считает live PnL
+  (защитный coerce от stale `Position.current_price`). Корректнее —
+  бэкенд публикует `position.update` на каждой свече сессии, фронт читает.
+- **Markers vs price labels**: lightweight-charts маркер привязан к bar'у
+  (aboveBar/belowBar), а лейбл — текст. При несовпадении exit_price и
+  close-а соответствующей свечи лейбл будет выглядеть «не на месте».
+  Альтернатива — `IPriceLine` или custom primitive для маркеров. Большой
+  рефакторинг — вне S7.
+
+---
+
+## 2026-05-08 — S7R-CLOSE-EXIT-PRICE: `OrderManager.close_position` не записывал exit/PnL
+
+### Триггер
+Заказчик закрыл сделку SBER через Telegram-бота, но в торговой сессии
+не отображались сведения о выходе. Диагностика: trade #1 в БД был
+`status='closed'`, `closed_at=…`, но `exit_price=NULL` и `pnl=NULL`.
+Уведомление в БД содержало `'SBER: P&L 0 ₽'` — подтверждение, что
+PnL посчитан как 0 из-за отсутствия `exit_price`.
+
+### Корень
+`OrderManager.close_position` (engine.py:994) тупо ставил `status='closed'`
++ `closed_at`, ничего больше. Не вычислял `exit_price`, `pnl`, `pnl_pct`,
+не обновлял `paper_portfolio` (балансы и blocked_amount), `_update_daily_stat`
+вызывался без `pnl` (значение по умолчанию = 0). При этом
+`RiskMonitor._apply_close` уже умел корректно закрывать позицию для SL/TP —
+эту логику можно было переиспользовать.
+
+### Что сделано
+1. **Полный close-flow в `close_position`:**
+   - Подгружаем `TradingSession` (для ticker и mode).
+   - Берём `exit_price` из последнего бара `OHLCVCache` для тикера; если
+     кэш пустой (рынок ещё не открыт / нет T-Invest стрима) — fallback
+     на `entry_price` (PnL=0) с warning-логом.
+   - Берём `lot_size` через `MarketDataService.ensure_lot_size`.
+   - Для `mode='paper'` — вызываем `PaperBrokerAdapter.place_order(
+     direction='sell', price=exit_price, quantity=filled_lots)` — он
+     возвращает proceeds в `paper_portfolio.balance` и эмулирует slippage.
+     Зеркально для short.
+   - Применяем `RiskMonitor._apply_close(trade, exit_price, reason, lot_size)` —
+     ставит `status='closed'`, `exit_price`, `exit_signal_price`,
+     `closed_at`, `pnl`, `pnl_pct` по единой формуле PnL.
+   - `_update_daily_stat(session_id, trades_closed=1, pnl=trade.pnl)` —
+     теперь PnL за день обновляется с реальным значением.
+   - Event `trade.closed` публикуется с полями `exit_price`, `pnl`, `reason`.
+2. **Бэкфилл существующего trade #1 (SBER)** через sqlite3:
+   `exit_price=318.86`, `pnl=−49.23 ₽`, `pnl_pct=−1.69%` (из последнего
+   бара 1h в кэше на момент закрытия).
+
+### Файлы
+- `backend/app/trading/engine.py` — `OrderManager.close_position`
+  переписан полностью.
+- `backend/data/terminal.db` — бэкфилл trade #1 (вне git).
+
+### Результат
+- `py_compile` — OK.
+- `pytest tests/test_trading/` — **103 passed**.
+- На trade #1 теперь видны exit_price, pnl, pnl_pct.
+- Бэкенд авто-перезагрузился через `--reload`.
+
+### S8 backlog
+- **Real-mode close**: текущая реализация эмулирует только paper —
+  для `mode='real'` ордер брокеру не отправляется. Нужна обвязка
+  через `SignalProcessor` с post-fill callback (как `process_signal`
+  делает на открытие). Сейчас это **не регрессия** — был тот же
+  поведение до фикса, но теперь это явный TODO.
+- **Race с RiskMonitor**: если SL/TP сработает одновременно с ручным
+  закрытием — возможен двойной close. Нужен optimistic-lock на
+  `LiveTrade.status` (compare-and-swap).
+- **SBER lot_size=1 в БД** — должно быть 10. `ensure_lot_size`
+  закэшировал неверное значение. Отдельно проверить, что T-Invest
+  возвращает (или ISS).
+
+---
+
+## 2026-05-08 — S7R-TG-CLOSE-PICKER: `/close` без аргумента → inline-список
+
+### Триггер
+Заказчик: «команда close выдаёт ошибку — нужно указать ID, неудобно.
+Сделай так, чтобы при /close система давала на выбор, какую позицию закрыть».
+Доп. итерация — добавить P&L в рублях прямо на кнопках, чтобы было
+видно состояние позиции до закрытия.
+
+### Что сделано
+1. **`/close` без аргумента** — теперь не отвечает «Укажите ID», а строит
+   inline-клавиатуру с кнопками на каждую `filled` позицию пользователя.
+   Формат кнопки: `🟢 SBER (paper) #5 · 10 лот @ 250.00 ₽ · P&L: +1 500 ₽`
+   (или `−370 ₽` со знаком unicode-минуса при отрицательном PnL,
+   `P&L: —` если нет current_price). Внизу — кнопка «❌ Отмена».
+1.1 **P&L в рублях** — расчёт через новый helper
+   `_compute_unrealized_pnl_rub(trade, current_price, lot_size)`,
+   вынесенный из `_format_unrealized_pnl` (DRY: и `/positions`, и picker
+   считают одинаково — `(current − entry) × volume_lots × lot_size`,
+   зеркально для sell). `current_price` тянется из OHLCVCache,
+   `lot_size` — из `instruments` (тот же путь, что в `/positions`).
+2. **Callback `close_pos:{trade_id}`** — клик по кнопке вызывает
+   `_execute_close_position`: ownership-check (Strategy.user_id), затем
+   `OrderManager.close_position(trade_id, reason="telegram")`, ответ
+   редактируется на `✅ Позиция #N (TICKER) — ордер на закрытие отправлен`.
+3. **Callback `cancel_close`** — кнопка «❌ Отмена» в клавиатуре.
+4. **Обратная совместимость** — `/close <id>` продолжает работать как раньше.
+5. **Help-текст** — обновил на `/close — выбрать позицию для закрытия (или /close <id>)`.
+
+### Файлы
+- `backend/app/notification/telegram_webhook.py`:
+  - `_handle_close` — без args вызывает `_show_close_picker`.
+  - Новый `_show_close_picker` — собирает кнопки из открытых позиций.
+  - Новый `_execute_close_position` — обрабатывает callback (дублирует
+    ownership + close из `_handle_close`, но работает с CallbackQuery).
+  - `_handle_callback` — добавлены ветки `close_pos:` и `cancel_close`.
+  - Help-строка обновлена.
+- `backend/tests/test_notification/test_telegram_positions.py` —
+  `test_no_args_prompts` → `test_no_args_shows_picker_when_no_positions`
+  (поведение изменилось: нет позиций → «Нет открытых позиций для закрытия»).
+
+### Результат
+- `py_compile` — OK.
+- `pytest tests/test_notification/` — **57 passed**.
+- Бэкенд авто-перезагрузился через `--reload`. На `/close` теперь приходит
+  список кнопок с открытыми позициями.
+
+---
+
+## 2026-05-08 — S7R-TG-BALANCE: молчание `/balance` при нескольких brokers
+
+### Триггер
+Заказчик: бот на `/balance` ничего не отвечает (молчание).
+В логах — `sqlalchemy.exc.MultipleResultsFound` на `_handle_balance:465`,
+`scalar_one_or_none()` падает потому что у `user_id=1` два активных
+`broker_accounts`: «Сэндбокс» (sandbox) и «Только для чтения» (real).
+Эксепшен пробрасывался **выше** `try/except` (он начинался ниже на
+строке 473 — селект делался до него), и Telegram-framework просто
+проглатывал ошибку → пользователь получал тишину.
+
+### Что сделано
+1. **Расширил try/except** — теперь весь блок (включая SQL-запрос
+   broker_accounts) обёрнут. Любая будущая ошибка → корректный ответ
+   `❌ Ошибка получения баланса: ...` вместо молчания.
+2. **Заменил `scalar_one_or_none()` на `.scalars().all()` + явный приоритет:**
+   - real + `has_trading_rights` + `account_id` (главный торговый счёт)
+   - real + `account_id` (read-only real)
+   - sandbox + `account_id`
+   - иначе → «Брокер не подключён»
+
+### Файлы
+- `backend/app/notification/telegram_webhook.py` — `_handle_balance`,
+  блок `select(BrokerAccount).where(user_id=, is_active=True)` →
+  выбор первого по приоритету.
+
+### Результат
+- `py_compile` — OK.
+- `pytest tests/test_notification/` — **57 passed**.
+- Бэкенд авто-перезагрузился через `--reload`. На `/balance` теперь
+  ответ — баланс read-only счёта «Только для чтения» (id=2119503304).
+
+### Замечание
+У того же пользователя `is_active=1` для sandbox без `account_id`
+оставлено как есть — frontend это уже фильтрует (см.
+`feedback_review_docs.md` про `AccountPage`). На всякий случай в
+приоритете sandbox идёт **последним**.
+
+---
+
+## 2026-05-08 — S7R-TG-STRATEGY-NAME: snapshot имени стратегии в TradingSession
+
+### Триггер
+Заказчик: бот на `/status` возвращает `✅ Без названия — LKOH (5m) — Paper`.
+Диагностика: поле `trading_sessions.strategy_name` (denormalized snapshot)
+было пустым у обеих сессий; стратегия реально называется «Тестовая».
+Frontend это спасает JOIN-fallback'ом (`service.list_sessions`), а Telegram-бот
+читал `s.strategy_name` напрямую и показывал заглушку.
+
+### Что сделано
+1. **Snapshot при создании сессии** — `engine.start_session` теперь
+   подгружает `Strategy.name` через `JOIN strategy_versions` и записывает
+   в `TradingSession.strategy_name`. Раньше поле оставалось `""` (default
+   модели), и любой потребитель без JOIN'а видел пустоту.
+2. **Fallback в Telegram-боте** — добавлен `_resolve_strategy_names(db, version_ids)`,
+   который одним SQL-запросом возвращает `{version_id: name}` map. В
+   `_handle_status` имя выбирается по приоритету:
+   `s.strategy_name → map[version_id] → "(удалённая стратегия)"`.
+3. **Бэкфилл существующих сессий** — `UPDATE trading_sessions SET
+   strategy_name=(SELECT s.name ...) WHERE strategy_name=''` через sqlite3
+   CLI на `data/terminal.db`. Затронуты id=1 (SBER) и id=2 (LKOH) —
+   обе получили `strategy_name='Тестовая'`.
+
+### Файлы
+- `backend/app/trading/engine.py` — JOIN на Strategy в `start_session`,
+  передача `strategy_name=` в конструктор `TradingSession`.
+- `backend/app/notification/telegram_webhook.py` — новый метод
+  `_resolve_strategy_names`, fallback-логика в `_handle_status`.
+- `backend/data/terminal.db` — бэкфилл (вне git).
+
+### Результат
+- Тесты: `pytest tests/test_trading/test_engine.py tests/test_trading/test_service.py
+  tests/test_notification/` — **76 passed**.
+- `py_compile` обоих модулей — OK.
+- На `/status` теперь отображается `✅ Тестовая — LKOH (5m) — Paper`
+  (после авторестарта uvicorn `--reload` от правок).
+
+### S8 backlog
+- Аналогичный snapshot для `LiveTrade.strategy_name` — сейчас в bot'е через
+  `trade.session.ticker` показываются тикеры, не имена стратегий. Если
+  понадобится — отдельной задачей.
+
+---
+
 ## 2026-05-08 — S7R-PROCESS: системные правки после ретро по плагинам и code-review
 
 ### Триггер
