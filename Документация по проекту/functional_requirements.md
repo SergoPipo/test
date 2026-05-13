@@ -11,7 +11,7 @@
 
 | Версия | Дата | Спринт | Ключевые изменения |
 |--------|------|--------|-------------------|
-| 2.5 | 2026-05-13 | S8 W3 | M4 Production-ready: admin role + admin panel + Plotly Dash metrics, security headers (CSP/HSTS/XFO/...), event sync (EVENT_MAP 12→17, EVENT_TYPE_LABELS 13), dashboard widgets (Health/Sparkline/Balance/ActivePositions), performance instrumentation (@timed_event), `/api/v1/health` extended fields |
+| 2.5 | 2026-05-13 | S8 W3 | M4 Production-ready: admin role + admin panel + Plotly Dash metrics, security headers (CSP/HSTS/XFO/...), event sync (EVENT_MAP 12→17, EVENT_TYPE_LABELS 13→17), dashboard widgets (Health/Sparkline/Balance/ActivePositions), performance instrumentation (@timed_event), `/api/v1/health` extended fields |
 | 2.4 | 2026-04-26 | S7 R | Feature-complete Phase 1 (drawing tools editing, grid search, AI commands, background backtests) |
 | 2.3 | 2026-04-15 | S6 R | Notifications fully integrated, paper trading SL/TP |
 | ... | | | (см. git log по этому файлу) |
@@ -23,7 +23,7 @@
 | Авторизация | **Роль администратора (admin)** — `users.is_admin` + bootstrap первого зарегистрированного, CLI `grant_admin`, Sidebar `IconShield` для админов, `ProtectedAdminRoute` | S8 W1 |
 | Безопасность | Заголовки CSP / HSTS / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy (SecurityHeadersMiddleware) | S8 W2 |
 | Безопасность | XSS-protection в Telegram + Email диспетчерах: `html.escape` на user-content до HTML parse_mode | S8 W2 |
-| Уведомления | EVENT_MAP расширен до 17 ключей (+ session_recovered, backtest_completed, daily_stats, corporate_action, price_alert); EVENT_TYPE_LABELS 13 ключей (UI ↔ backend синхронизированы) | S8 W2 |
+| Уведомления | EVENT_MAP расширен до 17 ключей (+ session_recovered, backtest_completed, daily_stats, corporate_action, price_alert); EVENT_TYPE_LABELS 17 ключей (UI ↔ backend синхронизированы) | S8 W2 |
 | Dashboard | 4 виджета: HealthWidget (cb_state/tinvest/scheduler), SparklineWidget (mini-chart по recent ticker), BalanceWidget (баланс + sparkline since first activity), ActivePositionsWidget | S8 W2 |
 | Admin panel | `/api/v1/admin/metrics` — Plotly Dash панель с performance графиками (signal→order, dashboard LCP, Telegram, backtest jobs). Auth через `AdminAuthASGIMiddleware` (JWT + is_admin) | S8 W2 |
 | Performance | `@timed_event` декоратор + 3 hot-path сайта (signal.process, order.place, telegram.handle). Метрики собираются в structlog для admin metrics | S8 W2 |

@@ -341,3 +341,87 @@
   4. E2E тест: остановить sandbox-сессию → нажать «Запустить заново» → проверить новая сессия с тем же broker_account_id и mode='sandbox'.
 - **Приоритет:** medium. Воспроизводится только при rerun остановленной sandbox/real сессии. Paper rerun работает.
 - **Связь:** дополняет S7R-API-PAGINATED-TYPE-MISMATCH (medium-high) — оба про contract mismatch между frontend и backend Pydantic.
+
+---
+
+# Sprint 8 W4 carry-over (2026-05-13)
+
+> После закрытия S8 W3 + 8.R (ARCH: PASS WITH NOTES, M4 Production-ready) W4 финализирующая волна
+> закрыла 12 из 18 carry-over. Остальные 6 + 1 (новый из W4) переносятся в Sprint_8_Review для
+> проверки решений и тестирования.
+
+## Закрыто в W4 (12 + 1 partial)
+
+| Карточка | Кем | Результат |
+|----------|-----|-----------|
+| `S8R-SEC-AUTH-RATE-TIGHTEN` | BACK2 W4 | `/auth/login` 60 → 5 req/min, `LOGIN_RATE_LIMIT_PER_MINUTE` config, тест переписан под 423/429 |
+| `S8R-W4-E2E-ANALYTICS-UNSKIP` | OPS W4 | 2 `test.skip` в `s7-backtest-analytics.spec.ts` сняты |
+| `S8R-CLIENT-TEST-FLAKY` | FRONT2 W4 | `client.test.ts` axios timeout исправлен (vi.useFakeTimers) |
+| `S8R-UX-DASH-4COL-OVERFLOW` | FRONT2 W4 | `SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}` |
+| `S8R-UX-ADMIN-LANDING-EMPTY` | FRONT2 W4 | AdminLandingPage: snapshot сессий + ошибок + grant_admin UI |
+| `S8R-UX-DRAWING-LEGACY-BACKFILL` | FRONT1 W4 | `drawingsMigration.ts` helper + `chartDrawingsStore` миграция |
+| `S8R-W4-GOTCHA-24-MISSING` | OPS W4 | `gotcha-24-lightweight-charts-sequential-time-axis.md` зарегистрирован, INDEX v9 |
+| `S8R-W4-DOCS-FT-EVENT-COUNT` | OPS W4 | FT v2.5 EVENT_TYPE_LABELS `13 → 17` |
+| `S8R-UX-PLOTLY-DARK-THEME` | OPS W4 | Verified — уже реализовано W2 FRONT2 (`template='plotly_dark'` × 4 в metrics_dash.py) |
+| `S8R-UX-WIZARD-TG-NO-ARIA` | OPS W4 | ARIA labels для PasswordInput / TextInput / Button в Wizard step 4 |
+| `S8R-UX-WIZARD-TG-TEST-DISABLED-HINT` | OPS W4 | Mantine Tooltip с подсказкой когда test-button disabled |
+| `S8R-W4-COV-BACKTEST-ROUTER` | (W3 фикс) | `.coveragerc concurrency=greenlet,thread` дал реальное 87% (≥80% gate пройден) |
+| `S8R-W4-TEST-EVENT-DELIVERY-E2E` (partial) | BACK2 W4 | 17 параметризованных тестов написаны, infrastructure готова. `StaleDataError` в async session fixtures → xfailed (strict=False). Доводка → `S8R-SR-TEST-EVENT-DELIVERY-FIX-FIXTURES` ниже |
+
+## Переносится в Sprint_8_Review (6 + 1 новый)
+
+### S8R-SR-PERF-BASELINE-MEASUREMENTS (medium, ~6ч)
+
+- **Источник:** ARCH 8.R notes (W3 финал). Carry-over `S8R-W4-PERF-BASELINE-MEASUREMENTS`.
+- **Что:** прогнать `pytest-benchmark` для 3 hot-path и зафиксировать p95 baseline:
+  - `SignalProcessor.process_candle` (signal→order pipeline) — цель ТЗ < 500мс p95.
+  - `TInvestAdapter.place_order` (broker call) — часть signal→order p95.
+  - `TelegramWebhookHandler.process_update` — цель ТЗ < 3с p95.
+  - Dashboard LCP < 2с — через Chrome DevTools / Lighthouse на реальном frontend (не pytest).
+- **Что сделать:**
+  1. Добавить `pytest-benchmark` в `pyproject.toml [project.optional-dependencies.test]`.
+  2. Создать `tests/test_performance/test_benchmarks.py` с 3 тестами @benchmark.
+  3. Прогон с реальной БД (in-memory async session). Зафиксировать в `Sprint_8_Review/perf_baseline.md`.
+  4. Frontend LCP — отдельный Lighthouse CLI run, отчёт в тот же файл.
+- **Приоритет:** medium. Не блокер M4 (PASS WITH NOTES без этого), но критично для ТЗ-валидации перед production rollout.
+
+### S8R-SR-COV-MARKET-DATA-SERVICE (medium, ~4ч)
+
+- **Источник:** ARCH 8.R `S8R-COV-MARKET-DATA-SERVICE`.
+- **Что:** `app/market_data/service.py` 78% → ≥80% (398 строк / 89 непокрыто → 79).
+- **Untested:** `_fetch_lot_size_from_tinvest` happy-path (tinkoff AsyncClient context-manager), `get_or_fetch_logo_isin` commit-fail rollback.
+- **Приоритет:** medium. TOTAL coverage уже 84.83% — per-module gap не блокер.
+
+### S8R-SR-COV-STRATEGY-SERVICE (medium, ~3ч)
+
+- **Источник:** ARCH 8.R `S8R-W4-COV-STRATEGY-SERVICE`.
+- **Что:** `app/strategy/service.py` 68% → ≥80% (215 строк / 68 непокрыто → ~43).
+- **Приоритет:** medium (low относительно TOTAL).
+
+### S8R-SR-MULTICURRENCY-TOGGLE (medium, ~6ч)
+
+- **Источник:** DEV-4 W3 SKIP → перенос. `S7R-MULTICURRENCY-TOGGLE`.
+- **Что:** переключение USD/RUB в `BalanceWidget` + persisted в `useSettingsStore`.
+- **Endpoint:** `/api/v1/market-data/usd-rate` (нужно создать) или mock 90 RUB/USD.
+- **Приоритет:** medium. Production-ready usability, не блокер.
+
+### S8R-SR-DOCKER-COMPOSE-VALIDATE (informational)
+
+- **Источник:** OPS W3+W4 не имеет docker CLI в DEV-окружении.
+- **Что:** реальный `docker compose build` на хосте с docker. YAML структурно валиден (yaml.safe_load OK), semantic validation требует runtime.
+- **Когда:** при первом Mac mini deployment.
+- **Приоритет:** informational.
+
+### S8R-SR-PLAYWRIGHT-NIGHTLY-RERUN (informational)
+
+- **Источник:** OPS W4 не успел.
+- **Что:** финальный полный Playwright nightly прогон перед production rollout (`CI=true npx playwright test`). Ожидаемо 158+ passed + 2 ранее snycьн (если `S8R-W4-E2E-ANALYTICS-UNSKIP` активен) = 160 / 3 skipped.
+- **Когда:** prerelease (перед Mac mini deployment).
+- **Приоритет:** informational.
+
+### S8R-SR-TEST-EVENT-DELIVERY-FIX-FIXTURES (medium, ~3ч, новый из W4)
+
+- **Источник:** BACK2 W4 написал 17 параметризованных тестов доставки event_type через 3 канала, но async session fixtures падают `sqlalchemy.orm.exc.StaleDataError: UPDATE statement on table 'notifications' expected to update 1 row(s); 0 were matched`. Помечены `pytest.mark.xfail(strict=False)`.
+- **Что:** исправить session-scoped fixtures в `tests/test_notification/test_event_delivery_e2e.py` — устранить race condition между `event_bus.subscribe`/`unsubscribe` и `session.flush` на `Notification` объекте.
+- **Гипотеза:** конфликт между `db_session` фикстурой из `conftest.py` и singleton `event_bus` асинхронным listener — нужен явный `await session.commit()` или session.expire_all().
+- **Приоритет:** medium. Без этого 17 тестов не активны, EVENT_MAP=17 sync проверяется только структурно (через `test_event_sync_publishers.py`).
