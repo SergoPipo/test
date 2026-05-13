@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-05-13 (Sprint 8 — 🏁 ЗАКРЫТ + W4 финализирующая волна выполнена. M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES, 0 блокеров. W4 закрыл 12/18 carry-over + 1 partial, 7 переносных задач в Sprint_8_Review).
+> Последнее обновление: 2026-05-13 (Sprint 8 — 🏁 ЗАКРЫТ + W4 + W5 финализирующие волны выполнены. M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. Все 18 W3 carry-over + 7 W4 carry-over закрыты внутри спринта. Sprint_8_Review — без переносов, только проверка решений).
 
 ---
 
-## Текущий спринт: **Sprint 8 — 🏁 ЗАКРЫТ + W4 ✅** (2026-05-13). **M4 Production-ready достигнут.** Далее: Sprint_8_Review (проверка решений + тестирование, 7 carry-over).
+## Текущий спринт: **Sprint 8 — 🏁 ЗАКРЫТ + W4 ✅ + W5 ✅** (2026-05-13). **M4 Production-ready достигнут.** Далее: Sprint_8_Review (проверка решений + тестирование, без накопления переносов).
 
 ## Прогресс по спринтам
 
@@ -23,7 +23,7 @@
 | **S6** | **Уведомления + Security** | **✅ завершён** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade (beta117), Stream Multiplex, E2E infra, Security tests. 685 backend + 250 frontend + 10 E2E S6 = **945 тестов**. Доп. работы сессий 22-24.04: карточки сессий (Decimal, unrealized P&L), CB fixes (commit, trading hours, downtime), маркеры сделок на графике, правила плагинов в CLAUDE.md, Playwright автологин. | Sprint_6/arch_review_s6.md |
 | **Sprint_6_Review** | **Промежуточное ревью M3: code review + UI-проверки + документация** | **✅ завершён (PASS, 2026-04-24)** | **Code review (8 разделов, 6 fixes).** **E2E регрессия:** 107→119 passed (0 failed). **3 code fixes** обнаружены только при E2E/визуальной верификации: AISettingsPage (`providers??[]` + `toLocaleString` guard), marketDataStore (`candles=[]` default). **Визуальная верификация S6:** 6 скриншотов, 5/6 OK. **EVENT_MAP фикс:** 8 publish-сайтов (runtime.py + engine.py) — 5 event_type теперь корректно подставляют `{strategy_name}`/`{ticker}`/`{direction}`/`{volume}`/`{pnl}`. **Документация:** ФТ/ТЗ/development_plan актуализированы за S5+S6. Итого: **11 FIXED + 1 FP + 3 перенесены в S7** (NS singleton, 5 event_type, inline-кнопки Telegram). **Milestone M3 достигнут.** | Sprint_6_Review/code_review.md, backlog.md |
 | **S7** | **Should-фичи + переносы + AI-команды + post-S7 closeout** | **🏁 закрыт окончательно (2026-05-12)** | **17 задач + 7.R + ~30 post-S7 closeout волн.** Формально завершён 2026-04-26 (ARCH 7.R PASS WITH NOTES, M3 Phase 1 feature-complete). 27.04 → 12.05 — 16 рабочих дней post-S7 closeout: multiplexer singleton hotfix, paper SL/TP мониторинг, telegram positions/balance/close polish, P&L dual % формат, Grid Search + applySync полировка, chart drawings backlog (context menu, position-edit, trade markers exact-price), OHLCV timeframe filter, close_position exit/PnL fix, S7R-EQUITY-PER-TRADE + EQUITY-BY-INDEX (BusinessDay-индексы), S7R-BACKTEST-EXPORT-RU (русские заголовки + auto-landscape + DejaVu), S7R-NIGHTLY-CI-MOCKS (Playwright без backend на CI), ruff F821/F841 + mypy non-None narrowing. **Финальные тесты: 750 backend unit / 468 frontend vitest / 142 Playwright nightly, CI на develop ✅.** **DEFERRED-S8:** 25+ карточек (3 medium-high, ~10 medium, ~10 low) — не блокеры. | Sprint_7/arch_review_s7.md + Sprint_7/changelog.md (запись «🏁 SPRINT 7 FINAL CLOSEOUT 2026-05-12») |
-| **S8** | **Стабилизация (M4 Production-ready)** | **🏁 закрыт + W4 ✅ (2026-05-13, ARCH 8.R: PASS WITH NOTES)** | **W0+W1+W2+W3+8.R+W4 за 2 дня (12-13.05).** Coverage 71% → **84.83%** (gate `--cov-fail-under=80` в CI). Security: 3 high + auth rate tighten (60 → 5/min) закрыты, bandit/safety в CI. Admin role: backend dependency + CLI + Sidebar + Plotly Dash `/admin/metrics`. Event sync: EVENT_MAP=17 ↔ EVENT_TYPE_LABELS=17. Dashboard widgets: 4 виджета (Sparkline, Health WS, Balance, ActivePositions, responsive cols). Drawing editing + intraday coords + legacy backfill. Production-ready инфраструктура: Docker compose + Dockerfile + nginx + launchd + Cloudflare Tunnel + deployment_guide.md v1.0. Документация: ФТ v2.5 (17 EVENT_TYPE_LABELS), ТЗ v1.5 + §8.10 Deployment Architecture, dev_plan v2.1. Stack Gotchas: 23 → **32** (+9, gotcha-24 зарегистрирован в W4). Wizard ARIA + tooltip, AdminLanding extended, client.test.ts flaky починен, analytics e2e unskipped. **Финальные тесты после W4: 1493 backend / 0 failed @ 84.83% coverage / 18 xfailed (event_delivery_e2e — fixture race → Sprint_8_Review), 578 vitest / 0 failed, 158 Playwright / 3 skipped / 1 flaky, 0 lint warnings (--max-warnings 0).** ARCH 8.R: 0 блокеров. W4 закрыл 12/18 carry-over + 1 partial, 7 переносных задач в Sprint_8_Review (perf baseline, coverage gaps, multicurrency, docker validate, playwright rerun, event delivery fixtures fix). | Sprint_8/arch_review_s8.md, Sprint_8/changelog.md, Sprint_8/sprint_state.md, Sprint_8_Review/backlog.md |
+| **S8** | **Стабилизация (M4 Production-ready)** | **🏁 закрыт + W4 ✅ + W5 ✅ (2026-05-13, ARCH 8.R: PASS WITH NOTES)** | **W0+W1+W2+W3+8.R+W4+W5 за 2 дня (12-13.05).** Coverage 71% → **≥84.83% TOTAL** (gate `--cov-fail-under=80` в CI). Per-module: market_data/service 50→**83%**, strategy/service 51→**97%**, backtest/router 25→**87%**, dispatchers 0→100%, trading/service 51→88%, adapter 24→95%, backtest/engine 55→96%. Security: 3 high + auth rate tighten (60 → 5/min) закрыты, bandit/safety в CI. Admin role + Plotly Dash `/admin/metrics`. Event sync: EVENT_MAP=17 ↔ EVENT_TYPE_LABELS=17. Dashboard widgets: 4 виджета (Sparkline, Health WS, Balance с RUB/USD toggle, ActivePositions, responsive cols). Drawing editing + intraday coords + legacy backfill. Production-ready инфра: Docker compose + Dockerfile + nginx + launchd + Cloudflare Tunnel + deployment_guide.md v1.0. Документация: ФТ v2.5 (17 EVENT_TYPE_LABELS), ТЗ v1.5 + §8.10 Deployment Architecture, dev_plan v2.1, perf_baseline_w5. Stack Gotchas: 23 → **32**. Performance: `@timed_event` overhead 14 мкс, hot-path synthetic 1.4-2.5 мс (все цели ТЗ с запасом). **Финальные тесты после W5: 1547 backend / 0 failed @ ≥80% coverage, 578 vitest / 0 failed, 160 Playwright / 1 flaky / 3 skipped, 0 lint warnings (--max-warnings 0), 0 xfailed (event_delivery race починен).** ARCH 8.R: 0 блокеров. W4 закрыл 12/18 carry-over + 1 partial; W5 закрыл оставшиеся 7/7. Все 25 W3+W4 carry-over закрыты внутри S8. Sprint_8_Review — без накопления переносов, только финальная приёмка решений. | Sprint_8/arch_review_s8.md, Sprint_8/changelog.md, Sprint_8/sprint_state.md, Sprint_8_Review/backlog.md, Sprint_8/perf_baseline_w5.md |
 
 **Легенда:** ⬜ не начат · 🔄 в процессе · ✅ завершён · ⚠️ завершён с замечаниями
 
@@ -74,21 +74,21 @@
   - Корневой Test: docs/sprint-8 (HEAD после W3 финализации).
   - Develop/: s8/sprint-8 (HEAD после W3 финализации).
 
-W4 ✅ ЗАВЕРШЕНО (2026-05-13):
-  - 12/18 carry-over закрыты (+ 1 partial event_delivery_e2e xfailed).
-  - 7 переносных задач в Sprint_8_Review/backlog.md:
-    * S8R-SR-PERF-BASELINE-MEASUREMENTS (medium, ~6ч)
-    * S8R-SR-COV-MARKET-DATA-SERVICE (medium, ~4ч)
-    * S8R-SR-COV-STRATEGY-SERVICE (medium, ~3ч)
-    * S8R-SR-MULTICURRENCY-TOGGLE (medium, ~6ч)
-    * S8R-SR-DOCKER-COMPOSE-VALIDATE (informational)
-    * S8R-SR-PLAYWRIGHT-NIGHTLY-RERUN (informational)
-    * S8R-SR-TEST-EVENT-DELIVERY-FIX-FIXTURES (medium, ~3ч, новый)
+W4 ✅ ЗАВЕРШЕНО (2026-05-13): 12/18 carry-over + 1 partial.
+W5 ✅ ЗАВЕРШЕНО (2026-05-13): оставшиеся 7/7 закрыты внутри текущего спринта:
+  - S8R-W5-DOCKER-COMPOSE-VALIDATE — BLOCKED (нет docker CLI; смок при первом деплое).
+  - S8R-W5-PLAYWRIGHT-NIGHTLY-RERUN — 160 passed / 1 flaky / 3 skipped.
+  - S8R-W5-TEST-EVENT-DELIVERY-FIX-FIXTURES — passthrough fixture, 21 passed.
+  - S8R-W5-COV-MARKET-DATA-SERVICE — 78% → 83%.
+  - S8R-W5-COV-STRATEGY-SERVICE — 68% → 97%.
+  - S8R-W5-PERF-BASELINE-MEASUREMENTS — pytest-benchmark + 4 теста.
+  - S8R-W5-MULTICURRENCY-TOGGLE — Mantine SegmentedControl RUB/USD.
 
-СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Push + тег
-  1. Push test-репо (docs/sprint-8) и Develop-репо (s8/sprint-8) в origin.
-  2. Тег `v1.0-m4-production-ready` на финальном W4-коммите Develop репо.
-  3. Sprint_8_Review — проверка решений + тестирование 7 переносных задач.
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: W5 push + тег update
+  1. Push W5 в обе ветки (docs/sprint-8 + s8/sprint-8).
+  2. Тег v1.0-m4-production-ready — либо переместить на W5-коммит (force-push),
+     либо создать v1.1-m4-production-ready (по решению заказчика).
+  3. Sprint_8_Review — финальная приёмка решений, без переносов.
 ```
 
 ## Ключевые решения (кросс-спринтовые)

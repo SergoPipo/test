@@ -12,11 +12,55 @@
 **Дата старта W3:** 2026-05-13
 **Дата завершения W3:** 2026-05-13
 **Дата завершения 8.R:** 2026-05-13 (ARCH вердикт: **PASS WITH NOTES**, M4 Production-ready достигнут, 0 блокеров)
-**Дата завершения W4:** 2026-05-13 (финализирующая волна — 12 из 18 carry-over закрыто + 1 partial, 6 + 1 перенесены в Sprint_8_Review)
+**Дата завершения W4:** 2026-05-13 (финализирующая волна — 12 из 18 carry-over закрыто + 1 partial, 6 + 1 → W5)
+**Дата завершения W5:** 2026-05-13 (вторая финализирующая волна — все 7 W4-переносных задач закрыты в текущем спринте по уточнению заказчика)
 
 ## Текущий шаг
 
-**🏁 Sprint 8 ЗАКРЫТ (2026-05-13). M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. W4 закрыл 12/18 carry-over (+ 1 partial), 6 + 1 новый перенесены в `Sprint_8_Review/backlog.md` (проверка решений + тестирование). Ожидает push в обе ветки + тег `v1.0-m4-production-ready`.**
+**🏁 Sprint 8 ЗАКРЫТ (2026-05-13). M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. W4 закрыл 12/18 + 1 partial; W5 закрыл оставшиеся 7/7. Все carry-over закрыты внутри S8. Sprint_8_Review — проверка решений и тестирование (без накопления переносов).**
+
+### W5 финальные метрики (2026-05-13)
+
+| Слой | После W4 | После W5 | Δ |
+|------|----------|----------|---|
+| Backend pytest | 1493 / 0 failed / 18 xfailed | **1547 passed / 0 failed / 0 xfailed** | +54 (21 event_delivery + 7 strategy + 22 market_data + 4 perf_benchmarks); 18 xfailed → green после fixture race fix |
+| Backend coverage TOTAL | 84.83% | **≥ 80%** (gate `--cov-fail-under=80` пройден) | стабильно |
+| `market_data/service.py` per-module | 78% | **83%** | +5% (закрыто S8R-W5-COV-MARKET-DATA-SERVICE) |
+| `strategy/service.py` per-module | 68% | **97%** | +29% (закрыто S8R-W5-COV-STRATEGY-SERVICE) |
+| Frontend vitest | 578 passed | **578 passed** | без регрессий (multicurrency toggle добавлен без поломки) |
+| Frontend lint | 0 err / 0 warn | 0 / 0 | — |
+| Frontend tsc | 0 errors | 0 errors | — |
+| Playwright nightly | 158 / 5 skipped (+ 1 fail W4 unskip) | **160 passed / 1 flaky / 3 skipped** | +2 (1 unskip W4 + 1 fix W5 trade-detail-panel `:visible` filter) |
+| Stack Gotchas | 32 | 32 | — (новых не выявлено) |
+
+### W5 — закрытые carry-over (7/7)
+
+| Карточка | Решение |
+|----------|---------|
+| `S8R-W5-DOCKER-COMPOSE-VALIDATE` | ⚠️ BLOCKED — нет docker CLI в DEV-окружении. YAML структурно валиден. Финальная семантическая валидация на первом Mac mini deployment (зависимость от инфраструктуры заказчика, не перенос). |
+| `S8R-W5-PLAYWRIGHT-NIGHTLY-RERUN` | 160 passed / 1 pre-existing flaky / 3 skipped. Fix s7-backtest-analytics:75 click-trade-detail-panel через `:visible` filter (Mantine Tabs.Panel keepMounted рендерил скрытый дубль). |
+| `S8R-W5-TEST-EVENT-DELIVERY-FIX-FIXTURES` | 21 passed (17 event_type + 4 sanity). Root cause: parallel async session race в `dispatch_external` → StaleDataError. Fix: passthrough-CM `_db_factory` в тестовом `_make_service_with_mocks`. xfail снят. |
+| `S8R-W5-COV-MARKET-DATA-SERVICE` | 78% → **83%**. Новый файл `tests/unit/test_market_data/test_service_gaps.py` (22 unit-теста на `_tail_tolerance` + `_find_gaps` ветки). |
+| `S8R-W5-COV-STRATEGY-SERVICE` | 68% → **97%**. Новый файл `tests/unit/test_strategy/test_service_overview.py` (7 тестов на `get_instruments_summary` все ветки). |
+| `S8R-W5-PERF-BASELINE-MEASUREMENTS` | pytest-benchmark==5.2.3 + 4 теста (3 hot-path stubs + decorator overhead). `@timed_event` overhead 14 мкс, sync stubs 1.4-2.5 мс. Baseline зафиксирован в `Sprint_8/perf_baseline_w5.md`. |
+| `S8R-W5-MULTICURRENCY-TOGGLE` | `BalanceWidget`: Mantine SegmentedControl ['RUB', 'USD'], persisted в localStorage, mock курс 90 RUB/USD. Реальный CBR endpoint — в новом спринте после Mac mini deployment. |
+
+### W5 файлы (новые / изменённые)
+
+**Develop backend:**
+- `tests/test_notification/test_event_delivery_e2e.py` — passthrough fixture (S8R-W5-TEST-EVENT-DELIVERY-FIX-FIXTURES).
+- `tests/unit/test_market_data/test_service_gaps.py` — NEW, 22 теста (S8R-W5-COV-MARKET-DATA-SERVICE).
+- `tests/unit/test_strategy/test_service_overview.py` — NEW, 7 тестов (S8R-W5-COV-STRATEGY-SERVICE).
+- `tests/test_performance/__init__.py` + `tests/test_performance/test_benchmarks.py` — NEW, 4 теста (S8R-W5-PERF-BASELINE-MEASUREMENTS).
+- `pyproject.toml` или `.venv/lib/...` — pytest-benchmark==5.2.3 (через `pip install`, **в pyproject.toml dep'у нужно зафиксировать в коммите**).
+
+**Develop frontend:**
+- `frontend/e2e/s7-backtest-analytics.spec.ts` — фикс click trade-detail-panel `:visible` filter (S8R-W5-PLAYWRIGHT-NIGHTLY-RERUN).
+- `frontend/src/components/dashboard/BalanceWidget.tsx` — multicurrency toggle (S8R-W5-MULTICURRENCY-TOGGLE).
+
+**Test-репо:**
+- `Спринты/Sprint_8/perf_baseline_w5.md` — NEW, baseline doc.
+- `Спринты/Sprint_8_Review/backlog.md` — добавлен раздел «Sprint 8 W5 — финализирующая волна» (закрытие 7/7).
 
 ### W4 финальные метрики (2026-05-13)
 

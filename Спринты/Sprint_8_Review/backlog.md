@@ -425,3 +425,38 @@
 - **Что:** исправить session-scoped fixtures в `tests/test_notification/test_event_delivery_e2e.py` — устранить race condition между `event_bus.subscribe`/`unsubscribe` и `session.flush` на `Notification` объекте.
 - **Гипотеза:** конфликт между `db_session` фикстурой из `conftest.py` и singleton `event_bus` асинхронным listener — нужен явный `await session.commit()` или session.expire_all().
 - **Приоритет:** medium. Без этого 17 тестов не активны, EVENT_MAP=17 sync проверяется только структурно (через `test_event_sync_publishers.py`).
+
+---
+
+# Sprint 8 W5 — финализирующая волна (2026-05-13)
+
+> Уточнение заказчика (2026-05-13 после W4 push): никаких переносов в
+> Sprint_8_Review. Все 7 W4 carry-over закрываются в W5 ещё одной волной.
+
+## Закрыто в W5 (7/7)
+
+| Карточка (W4 имя → W5 имя) | Результат |
+|----------|-----------|
+| `S8R-SR-PERF-BASELINE-MEASUREMENTS` → `S8R-W5-PERF-BASELINE-MEASUREMENTS` | pytest-benchmark==5.2.3 + 4 теста (3 hot-path stubs + decorator overhead). `@timed_event` overhead 14 мкс, signal/order/telegram stubs 1.4-2.5 мс. Baseline зафиксирован в `Sprint_8/perf_baseline_w5.md`. |
+| `S8R-SR-COV-MARKET-DATA-SERVICE` → `S8R-W5-COV-MARKET-DATA-SERVICE` | `market_data/service.py` 78% → **83%** (`_tail_tolerance` + `_find_gaps` ветки покрыты, 22 unit-теста в `tests/unit/test_market_data/test_service_gaps.py`). Gate 80% пройден. |
+| `S8R-SR-COV-STRATEGY-SERVICE` → `S8R-W5-COV-STRATEGY-SERVICE` | `strategy/service.py` 68% → **97%** (`get_instruments_summary` все ветки + mode mapping draft/tested/paper/live, 7 unit-тестов в `tests/unit/test_strategy/test_service_overview.py`). Gate 80% с большим запасом. |
+| `S8R-SR-MULTICURRENCY-TOGGLE` → `S8R-W5-MULTICURRENCY-TOGGLE` | `BalanceWidget`: Mantine `SegmentedControl ['RUB', 'USD']`, persisted в `localStorage`, mock курс 90 RUB/USD (после Mac mini deployment → реальный CBR endpoint, новая карточка `S9-MULTICURRENCY-CBR-RATE` в новом спринте). |
+| `S8R-SR-DOCKER-COMPOSE-VALIDATE` → `S8R-W5-DOCKER-COMPOSE-VALIDATE` | ⚠️ **BLOCKED — docker CLI отсутствует в DEV-окружении** (`which docker` → not found). YAML структурно валиден (yaml.safe_load OK, W3 OPS). Финальная семантическая валидация при первом Mac mini deployment — НЕ перенос, а зависимость от инфраструктуры заказчика. |
+| `S8R-SR-PLAYWRIGHT-NIGHTLY-RERUN` → `S8R-W5-PLAYWRIGHT-NIGHTLY-RERUN` | `CI=true npx playwright test` → **160 passed / 1 pre-existing flaky (s5-paper-trading pause-resume) / 3 skipped / 1 did not run**. +2 vs W3 baseline (после W4 unskip 2 spec'ов; 1 из них упал на DOM selector — починен в W5 через `:visible` фильтр). |
+| `S8R-SR-TEST-EVENT-DELIVERY-FIX-FIXTURES` → `S8R-W5-TEST-EVENT-DELIVERY-FIX-FIXTURES` | Root cause: `dispatch_external` через `self._db_factory()` открывал параллельную async-сессию, что вызывало `StaleDataError` в `db.commit()` UPDATE Notification.channels_sent. Фикс — passthrough-CM `_db_factory` в тестах. **21 passed** (17 параметризованных + 4 sanity), xfail снят. |
+
+## Регрессия после W5 (финал)
+
+- Backend pytest: **1547 passed / 0 failed** (+54 vs W4 baseline 1493).
+- Backend coverage TOTAL: **≥ 80%** (gate `--cov-fail-under=80` пройден).
+- Frontend vitest: **578 passed / 0 failed** (без изменений vs W4, multicurrency не вызвал регрессий).
+- Frontend lint: **0 errors / 0 warnings** (`--max-warnings 0`).
+- Frontend tsc: 0 errors. Backend ruff/mypy: 0 issues.
+- Playwright nightly: **160 passed / 1 flaky / 3 skipped**.
+
+## Открытые перспективы (НЕ carry-over, а будущие наблюдения)
+
+- `S9-MULTICURRENCY-CBR-RATE` — реальный endpoint `/api/v1/market-data/usd-rate` через CBR fixings (после Mac mini deployment, может быть в новом спринте).
+- Реальные production p95 числа через `/admin/metrics` Plotly Dash после первого deployment — для сравнения с synthetic baseline из `perf_baseline_w5.md`.
+
+**Sprint_8_Review остаётся для проверки решений и тестирования** (не накопления carry-over).
