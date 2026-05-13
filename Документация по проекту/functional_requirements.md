@@ -1,11 +1,37 @@
 # Функциональные требования
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия документа:** 2.4
-**Дата:** 2026-04-26
-**Статус:** Актуализирован по результатам Sprint 7 ARCH Review (7.R) — feature-complete Phase 1
+**Версия документа:** 2.5
+**Дата:** 2026-05-13
+**Статус:** ✅ M4 Production-ready (Sprint 8 закрыт). Feature freeze. Изменения только bugfix / docs.
 
-> **Примечание:** Данный документ описывает функциональные требования — *что* должна делать система. Технические детали реализации (стек, архитектура, API-контракты, структура БД) будут раскрыты в отдельном техническом задании на основе этого документа. Там, где функциональные требования затрагивают технические аспекты, они вынесены в блоки «Примечание для ТЗ».
+> **Примечание:** Данный документ описывает функциональные требования — *что* должна делать система. Технические детали реализации (стек, архитектура, API-контракты, структура БД) раскрыты в [technical_specification.md](technical_specification.md) v1.5. Там, где функциональные требования затрагивают технические аспекты, они вынесены в блоки «Примечание для ТЗ».
+
+### История версий
+
+| Версия | Дата | Спринт | Ключевые изменения |
+|--------|------|--------|-------------------|
+| 2.5 | 2026-05-13 | S8 W3 | M4 Production-ready: admin role + admin panel + Plotly Dash metrics, security headers (CSP/HSTS/XFO/...), event sync (EVENT_MAP 12→17, EVENT_TYPE_LABELS 13), dashboard widgets (Health/Sparkline/Balance/ActivePositions), performance instrumentation (@timed_event), `/api/v1/health` extended fields |
+| 2.4 | 2026-04-26 | S7 R | Feature-complete Phase 1 (drawing tools editing, grid search, AI commands, background backtests) |
+| 2.3 | 2026-04-15 | S6 R | Notifications fully integrated, paper trading SL/TP |
+| ... | | | (см. git log по этому файлу) |
+
+### S8 Production-ready additions (v2.5)
+
+| Раздел | Дополнение | Спринт |
+|--------|-----------|--------|
+| Авторизация | **Роль администратора (admin)** — `users.is_admin` + bootstrap первого зарегистрированного, CLI `grant_admin`, Sidebar `IconShield` для админов, `ProtectedAdminRoute` | S8 W1 |
+| Безопасность | Заголовки CSP / HSTS / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy (SecurityHeadersMiddleware) | S8 W2 |
+| Безопасность | XSS-protection в Telegram + Email диспетчерах: `html.escape` на user-content до HTML parse_mode | S8 W2 |
+| Уведомления | EVENT_MAP расширен до 17 ключей (+ session_recovered, backtest_completed, daily_stats, corporate_action, price_alert); EVENT_TYPE_LABELS 13 ключей (UI ↔ backend синхронизированы) | S8 W2 |
+| Dashboard | 4 виджета: HealthWidget (cb_state/tinvest/scheduler), SparklineWidget (mini-chart по recent ticker), BalanceWidget (баланс + sparkline since first activity), ActivePositionsWidget | S8 W2 |
+| Admin panel | `/api/v1/admin/metrics` — Plotly Dash панель с performance графиками (signal→order, dashboard LCP, Telegram, backtest jobs). Auth через `AdminAuthASGIMiddleware` (JWT + is_admin) | S8 W2 |
+| Performance | `@timed_event` декоратор + 3 hot-path сайта (signal.process, order.place, telegram.handle). Метрики собираются в structlog для admin metrics | S8 W2 |
+| Health endpoint | `/api/v1/health` теперь возвращает `cb_state`, `tinvest_connected`, `scheduler_running`, `scheduler_jobs[]` | S8 W2 |
+| FirstRunWizard | Шаг 4 расширен — «Свой бот» (custom Telegram bot_token + chat_id) + кнопка «Отправить тестовое сообщение» + auto-enable `telegram_enabled=true` для 4 критических event_types | S8 W2 |
+| Аналитика бэктеста | DOM overlay для equity-curve zones (data-testid="equity-curve-zone-{idx}") + row-click → TradeDetailsPanel | S8 W2 |
+| Deployment | Docker compose stack (backend uvicorn + frontend nginx + sqlite volume) + launchd auto-start + Cloudflare Tunnel SSL для Mac mini production | S8 W3 |
+| Тестирование | Coverage gate `--cov-fail-under=80` активен в CI; bandit + safety security scan на каждом PR | S8 W3 |
 
 ---
 

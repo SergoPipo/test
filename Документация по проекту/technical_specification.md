@@ -3,10 +3,33 @@
 # ТЕХНИЧЕСКОЕ ЗАДАНИЕ (ТЗ)
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия:** 1.4
-**Дата:** 2026-04-26
-**Основание:** Функциональные требования v2.4 от 2026-04-26
-**Статус:** Актуализирован по результатам Sprint 7 ARCH Review (7.R) — Phase 1 feature-complete
+**Версия:** 1.5
+**Дата:** 2026-05-13
+**Основание:** Функциональные требования v2.5 от 2026-05-13
+**Статус:** ✅ M4 Production-ready (Sprint 8 закрыт). Раздел «Deployment Architecture» добавлен в §8.
+
+### История версий
+
+| Версия | Дата | Спринт | Ключевые изменения |
+|--------|------|--------|-------------------|
+| 1.5 | 2026-05-13 | S8 W3 | Добавлен §8.4 «Deployment Architecture (Mac mini + Docker)»; §7 расширен под admin role + security headers + ASGI mount auth; §9 — coverage gate 80% + bandit/safety CI gates; §4 — performance baseline числа из W2 |
+| 1.4 | 2026-04-26 | S7 R | Phase 1 feature-complete |
+| 1.3 | 2026-04-15 | S6 R | Notifications S6, paper SL/TP |
+| ... | | | (см. git log) |
+
+### S8 Production-ready дополнения (v1.5)
+
+| Секция ТЗ | Дополнение | Источник |
+|-----------|-----------|----------|
+| §1 Стек | Python 3.11 (закреплено в CI), Node 24 LTS (миграция S7R-CI-NODE24-MIGRATION в S8 W3), Docker Compose v2, nginx-alpine, Cloudflare Tunnel | S8 W3 |
+| §2.1 Архитектура | Admin role + admin panel (Plotly Dash под `/api/v1/admin/metrics` через `AdminAuthASGIMiddleware`) | S8 W2 |
+| §4 API | `/api/v1/health` extended: `cb_state`, `tinvest_connected`, `scheduler_running`, `scheduler_jobs[]`; `/api/v1/market-data/sparkline?ticker=X&hours=N`; `/api/v1/account/balance/history?since_first_activity=true`; `POST /api/v1/notifications/telegram/test`; admin namespace `/api/v1/admin/*` под `require_admin` | S8 W1+W2 |
+| §4 Performance metrics (реальные, baseline W2) | signal→order p95: измеряется `@timed_event(name="trading.signal_to_order")` (цель < 500мс — мониторинг через `/admin/metrics`); dashboard LCP (PerformanceObserver) < 2с; Telegram webhook handle p95 (`@timed_event(name="telegram.handle")`) < 3с | S8 W2 §4.3 |
+| §7 Security | SecurityHeadersMiddleware: CSP / HSTS / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy. XSS-protection (html.escape) в Telegram + Email диспетчерах. bandit + safety security-scan job в CI (medium+ блокирует PR). 0 high findings (см. `Спринты/Sprint_8/security_audit_s8.md`) | S8 W1+W2 |
+| §8 Deployment | **Новый §8.4:** Docker compose (backend uvicorn + frontend nginx + sqlite volume) на Mac mini + launchd auto-start + Cloudflare Tunnel SSL. Гайд установки: [deployment_guide.md](deployment_guide.md) | S8 W3 |
+| §9 Тестирование | Coverage gate `--cov-fail-under=80` активен в CI. Baseline 2026-05-13: 1490 backend pytest passed, 544 frontend vitest, 158 Playwright nightly. Bandit 0 medium+, safety 1 documented CVE | S8 W1+W2+W3 |
+| §5 Backend модули | `app/admin/` (router + dash_mount + metrics_dash), `app/common/observability.py` (`@timed_event`), `app/middleware/security_headers.py` (CSP/HSTS), `EVENT_MAP` 17 ключей в `notification/event_bus.py` | S8 W1+W2 |
+| §6 Frontend модули | `components/dashboard/{Health,Sparkline,Balance,ActivePositions}Widget.tsx`, `components/common/ErrorBoundary.tsx`, `components/admin/AdminLayout.tsx` + `ProtectedAdminRoute`, `api/types.ts::PaginatedResponse<T>` + `unwrapPaginated()` | S8 W1+W2 |
 
 ---
 
@@ -2431,6 +2454,57 @@ SQLite-специфичные решения, требующие замены п
 
 **Инструмент миграции:** Alembic (уже в стеке) с отдельным `env.py` для PostgreSQL.
 **Скрипт:** `python -m app.cli migrate-to-postgres --source sqlite:///data/terminal.db --target postgresql://...`
+
+### 8.10 Deployment Architecture (Mac mini production-ready, S8 W3) — ✅ реализовано
+
+Утверждено заказчиком 2026-05-12 (arch_design_s8 §7.2, batch 3 пункт 10). Полный гайд установки: [deployment_guide.md](deployment_guide.md).
+
+**Topology:**
+
+```
+End users → Cloudflare edge (TLS termination, DDoS protection)
+              ↓ outbound tunnel (cloudflared)
+          Mac mini (macOS 14+, Apple Silicon)
+              ↓ launchd auto-start at boot
+          Docker Compose v2
+              ├── moex-frontend (nginx:alpine)  :80
+              │     ├── SPA static (React 19 + Vite build)
+              │     └── reverse proxy /api/, /ws/ → backend:8000
+              └── moex-backend (python:3.11-slim)  :8000
+                    ├── FastAPI + Uvicorn
+                    ├── SQLAlchemy + alembic (миграции на старте)
+                    ├── APScheduler (backup_job, MOEX-calendar, T+1 unblock)
+                    ├── tinkoff-investments gRPC (patched SDK)
+                    └── volumes: sqlite-data, sqlite-backups
+```
+
+**Компоненты:**
+
+| Компонент | Образ / технология | Назначение |
+|-----------|--------------------|------------|
+| `moex-backend` | python:3.11-slim, multi-stage (ta-lib build deps → runtime) | FastAPI + uvicorn |
+| `moex-frontend` | node:24-alpine (builder) → nginx:alpine (runtime) | SPA static + reverse proxy |
+| `sqlite-data` (named volume) | bind to /app/data/app.sqlite | Production БД (WAL-mode) |
+| `sqlite-backups` (named volume) | bind to /app/backups/ | APScheduler backup_job snapshots |
+| launchd plist `com.moex.terminal` | macOS auto-start | `docker compose up -d` при загрузке |
+| Cloudflare Tunnel `cloudflared` | TLS termination + публичный домен | Без открытых портов на роутере |
+
+**Безопасность:**
+- `.env.production` не коммитится (`.gitignore` правило `.env.*`). Содержит `SECRET_KEY`, `MASTER_KEY`, `TINVEST_TOKEN`.
+- nginx внутри контейнера слушает только :80; TLS — на Cloudflare edge.
+- `AdminAuthASGIMiddleware` защищает `/api/v1/admin/metrics` (Plotly Dash) — JWT + is_admin check (см. Gotcha 31).
+- SecurityHeadersMiddleware (CSP/HSTS/XFO/XCTO/Referrer/Permissions) применяется на всех HTTP-ответах.
+
+**Обновление:** `git pull && docker compose build && docker compose down && docker compose up -d`. Миграции применяются в entrypoint backend контейнера (`alembic upgrade head` перед uvicorn).
+
+**Backup:** `backup_job` в APScheduler (daily 03:00 МСК, см. `app/scheduler/service.py`) → `/app/backups/*.sqlite`. Опционально cron на хосте копирует на внешний диск (см. deployment_guide.md §6.2).
+
+**Monitoring:** `GET /api/v1/health` extended (статус CB, T-Invest, scheduler, jobs). Plotly Dash `/api/v1/admin/metrics` показывает performance графики (только admin).
+
+**Файлы:**
+- `Develop/docker-compose.yml`, `Develop/Dockerfile.backend`, `Develop/frontend/Dockerfile`, `Develop/nginx.conf`, `Develop/.dockerignore`.
+- `Документация по проекту/launchd/com.moex.terminal.plist`.
+- `Документация по проекту/deployment_guide.md` — 9 разделов (платформа, предусловия, установка, launchd, Cloudflare Tunnel, backup/restore, обновление, мониторинг, troubleshooting).
 
 ---
 

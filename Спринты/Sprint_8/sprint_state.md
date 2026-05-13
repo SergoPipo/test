@@ -9,12 +9,110 @@
 **Дата завершения W1:** 2026-05-12 (gate W1 → W2 пройден с одним отложенным критерием — coverage P1 для 4 модулей переносится в W2 по архитектурным зависимостям)
 **Дата старта W2:** 2026-05-12
 **Дата завершения W2:** 2026-05-13 (gate W2 → W3 пройден: TOTAL coverage 80%, 3 high SEC fixes сделаны, event type sync завершён, Plotly Dash работает, AIChat mock дополнен)
-**Дата старта W3:** —
-**Дата завершения 8.R:** —
+**Дата старта W3:** 2026-05-13
+**Дата завершения W3:** 2026-05-13
+**Дата завершения 8.R:** 2026-05-13 (ARCH вердикт: **PASS WITH NOTES**, M4 Production-ready достигнут, 0 блокеров)
 
 ## Текущий шаг
 
-**Sprint 8 ✅ W2 ЗАВЕРШЁН (2026-05-13). 4 параллельных потока (BACK2 Поток B → BACK1 Поток A + FRONT2 Поток C + QA → BACK1 Поток D) закрыты. Ожидает команды заказчика «старт W3».**
+**🏁 Sprint 8 ЗАКРЫТ (2026-05-13). M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. 18 carry-over карточек в W4 carry-over (Sprint_8_Review) (все non-blockers). Ожидает команды заказчика на коммит/push в обе ветки + опциональный тег `v1.0-m4-production-ready`.**
+
+### W3 финальные метрики (2026-05-13)
+
+| Слой | После W2 | После W3 | Δ |
+|------|----------|----------|---|
+| Backend pytest | 1490 passed / 0 failed | **1490 passed / 0 failed / 0 xfailed** | — (стабильно) |
+| Backend coverage TOTAL | 80% | **84.83%** ✅ | +4.83% (через `.coveragerc concurrency=greenlet,thread` — S8R-COV-COVERAGECFG-ASYNC закрыт) |
+| Frontend vitest | 544 passed / 2 flaky | **558 passed / 2 pre-existing flaky** | +14 (DEV-3 +12 HistogramTooltip + filter tests / DEV-4) |
+| Playwright nightly | 158 passed / 5 skipped | **158 passed / 5 skipped** | — (5 skip — S8R-W4-E2E-ANALYTICS-UNSKIP) |
+| Frontend lint | 0 err / 9 warn | **0 err / 0 warn (`--max-warnings 0`)** | −9 warn (DEV-3 S7R-FE-LINT-WARNINGS-CLEANUP) |
+| Frontend tsc | 0 errors | 0 errors | — |
+| Backend ruff/mypy | 0 / 0 | 0 / 0 | — |
+| Bandit / Safety | 0 medium+ / 1 CVE | 0 medium+ / 1 documented CVE | — |
+| Stack Gotchas | 25 | **31** (gotcha-26..31 W2 + gotcha-32 W3) | +6 W2 + 1 W3 |
+| CI coverage gate | n/a | `--cov-fail-under=80` (DEV-5 OPS) | новый защитник от регрессии |
+
+### Gate W3 → 8.R closeout — все критерии пройдены
+
+| Критерий | Статус | Комментарий |
+|----------|--------|------------|
+| Coverage TOTAL ≥ 80% с активным CI gate | ✅ | 84.83% локально + `--cov-fail-under=80` в `ci.yml` backend job |
+| 9 documentation файлов обновлены | ✅ | README, INSTALL, deployment_guide v1.0, FT v2.5, TS v1.5, dev_plan v2.1, INDEX v8, Develop/CLAUDE.md, 6 gotcha-NN-*.md |
+| `deployment_guide.md` создан | ✅ | 9 разделов: Mac mini + Docker compose + launchd + Cloudflare Tunnel + backup CLI + upgrade + monitoring + troubleshooting. 0 секретов |
+| UX final usability test + ui_checklist_s8 | ✅ | 6 сценариев, 12 скриншотов, 136 пунктов в 17 секциях, 6 S8R-UX карточек → W4 |
+| Frontend lint 0 errors / 0 warnings | ✅ | `pnpm lint --max-warnings 0` exit 0 |
+| 2 spec'а Blockly mode B удалены, новые W1/W2 spec'ы в nightly.yml | ✅ | Spec'ов уже не было в репо до S8; новые в nightly комментарием |
+| 4 W2-backlog карточки (S8R-COV-*, S8R-CLIENT-TEST-FLAKY) — закрыты или W4 | ✅ | S8R-COV-COVERAGECFG-ASYNC закрыт (`.coveragerc`); остальные 3 → W4 |
+| 8.R вердикт | ✅ | **PASS WITH NOTES** (0 блокеров, 18 carry-over non-blockers) |
+
+### W3 DEV-3 (FRONT1) — DONE 2026-05-13
+- 3.A (S7R-FE-LINT-WARNINGS-CLEANUP): 9 warnings → 0 + `--max-warnings 0` в `package.json`.
+- 3.B (S7R-HISTOGRAM-MANTINE-TOOLTIP): Mantine Tooltip на каждом bar в `PnLDistributionHistogram.tsx` + 3 unit-теста.
+- vitest 544 → 556 passed (+12). lint 0/9 → 0/0.
+- Stack Gotcha кандидат → ARCH перенумеровал в `gotcha-32-react-hooks-disable-directive-placement`.
+- Отчёт: `Sprint_8/reports/DEV-3_FRONT1_W3.md`.
+
+### W3 DEV-4 (FRONT2) — DONE 2026-05-13 (4/4 + 1 SKIP→W4)
+- S7R-STRATEGY-STATUS-ENUM-DRIFT: backend service + schemas + alembic `ef6627a679aa` (up/down/up clean) + frontend strategyApi + DashboardPage.
+- S7R-STRATEGY-STATUS-PAUSED-FILTER: SegmentedControl + 7 unit-тестов (через `dashboardFilters.ts` после оркестратор-рефактора).
+- S7R-BG-BACKTEST-AUTOCOLLAPSE: auto-collapse при `done` + 2 теста.
+- S7R-HEALTH-WS-MIGRATION: WS подписка + polling fallback (60s) + 2 теста на mock WebSocket.
+- S7R-MULTICURRENCY-TOGGLE: ⏭ SKIP → W4 (бюджет W3 исчерпан).
+- vitest 528 → 558 passed (+30). backend 1490 passed (без регрессий).
+- Отчёт: `Sprint_8/reports/DEV-4_FRONT2_W3.md`.
+
+### W3 DEV-5 (OPS) — DONE 2026-05-13 (14 задач: 12 закрыто + 2 SKIP→оркестратор)
+
+#### CI cleanup (Поток A часть OPS)
+- Coverage gate `--cov-fail-under=80` в `Develop/.github/workflows/ci.yml` backend job.
+- S7R-CI-NODE24-MIGRATION: Node 24, actions/setup-node@v4, actions/checkout@v4 в `ci.yml` + `playwright-nightly.yml`.
+- W1/W2 spec'ы зафиксированы комментарием в `playwright-nightly.yml`.
+
+#### Docker / Deployment стек
+- `Develop/Dockerfile.backend` (multi-stage, ta-lib + T-Invest SDK, alembic upgrade в entrypoint, не-root, HEALTHCHECK).
+- `Develop/frontend/Dockerfile` (Node 24-alpine → nginx-alpine).
+- `Develop/nginx.conf` (reverse proxy `/api/` + `/ws/` + SPA fallback).
+- `Develop/docker-compose.yml` (backend + frontend + 2 volumes + healthchecks).
+- `Develop/.dockerignore`.
+- `Документация по проекту/launchd/com.moex.terminal.plist` (`plutil -lint` OK).
+
+#### Документация
+- **`Документация по проекту/deployment_guide.md` v1.0 NEW** — 9 разделов.
+- `README.md` (корневой) NEW.
+- `Develop/backend/INSTALL.md` обновлён.
+- ФТ **v2.4 → v2.5**, ТЗ **v1.4 → v1.5** + новый §8.10 Deployment Architecture.
+- `development_plan.md` v2.0 → v2.1 (M4 ✅ + Sprint_8_Review план).
+- `Develop/CLAUDE.md` polish (секция «Дополнительные правила S8»).
+
+#### Stack Gotchas (6 новых + INDEX v6 → v7)
+- gotcha-26..31. Файлы созданы, INDEX обновлён.
+
+#### SKIP → оркестратору
+- `Sprint_8/changelog.md` финальная сводка (этот раздел).
+- `Спринты/project_state.md` final M4 ✅.
+- `docker compose build` smoke — carry-over `S8R-W4-DOCKER-COMPOSE-VALIDATE`.
+
+- Отчёт: `Sprint_8/reports/DEV-5_OPS_W3.md`.
+
+### W3 UX (Поток B) — DONE 2026-05-13
+- 6 сквозных юзабилити-сценариев пройдены через анализ кода (новый user → wizard → стратегия → бэктест → paper → закрытие; live → мониторинг → закрытие; bg-backtest; Grid Search; admin + Plotly Dash).
+- `ui_checklist_s8.md` (278 строк, **136 пунктов** в 17 секциях) + копия в `Спринты/ui_checklist_s8.md`.
+- 12 PNG скриншотов в `Sprint_8/screenshots/`.
+- 6 UX-карточек для W4 (все low/medium, без блокеров).
+- 9/9 Cross-DEV contracts C-S8-1..9 подтверждены через анализ кода.
+- Отчёт: `Sprint_8/reports/UX_W3.md`.
+
+### W3 оркестратор-фиксы (интеграция параллельных потоков)
+- **lint-блокер DEV-3 × DEV-4:** функции `FilterValue`/`filterStrategies`/`countByFilter` вынесены из `DashboardPage.tsx` в `dashboardFilters.ts` (избегаем `react-refresh/only-export-components` ошибку). Импорты обновлены в DashboardPage.tsx + `__tests__/DashboardPage.filter.test.ts`.
+- **S8R-COV-COVERAGECFG-ASYNC закрыт (W3 backlog, ~1ч):** локальный coverage gate `--cov-fail-under=80` падал на 79.54%. Создан `Develop/backend/.coveragerc` с `concurrency=greenlet,thread`. Результат: TOTAL coverage 79.54% → **84.83%** (+5.29%).
+
+### W3 Поток D — ARCH 8.R: **PASS WITH NOTES** 2026-05-13
+- Артефакты: `Sprint_8/arch_review_s8.md` (полный, 16 разделов), `Sprint_8/reports/ARCH_S8_review.md` (краткая), `Develop/stack_gotchas/gotcha-32-*.md`, INDEX v7 → v8.
+- EVENT_MAP ↔ EVENT_TYPE_LABELS sync: 17 ↔ 17 (был 17 ↔ 13 после W2).
+- 9/9 Cross-DEV contracts C-S8-1..9 — CONNECTED через grep.
+- 0 NOT CONNECTED символов S8.
+- Notes (не блокеры): market_data/service.py 78% per-module, gotcha-24 missing в каталоге, 2 e2e analytics skip, FT v2.5 cosmetic typo EVENT_TYPE_LABELS=13/17, S8R-SEC-AUTH-RATE-TIGHTEN documented, perf p95 measurements → W4.
+- **18 W4 carry-over** (6 medium + 11 low + 2 informational), все non-blockers.
 
 Sprint 7 финально закрыт со всеми post-S7 closeout-волнами. M3 Phase 1 production-ready. M4 Production-ready близок.
 
@@ -118,7 +216,7 @@ Sprint 7 финально закрыт со всеми post-S7 closeout-волн
 1. Заказчик подтверждает старт W3.
 2. **Поток A (FRONT1+FRONT2+OPS, ~14ч):** Low-карточки — `S7R-CI-NODE24-MIGRATION`, `S7R-FE-LINT-WARNINGS-CLEANUP` (9 warnings → 0 + `--max-warnings 0`), `S7R-HEALTH-WS-MIGRATION`, `S7R-MULTICURRENCY-TOGGLE`, `S7R-BG-BACKTEST-AUTOCOLLAPSE`, `S7R-HISTOGRAM-MANTINE-TOOLTIP`, `S7R-STRATEGY-STATUS-PAUSED-FILTER`, `S7R-STRATEGY-STATUS-ENUM-DRIFT` + **Coverage gate `--cov-fail-under=80` в CI** + удалить 2 spec'а Blockly mode B.
 3. **Поток B (UX, ~8ч):** Финальный юзабилити-тест, обновить `ui_checklist_s7.md` → `ui_checklist_s8.md`.
-4. **Поток C (OPS/BACK1, ~17ч):** Документация — README, `Develop/INSTALL.md`, **`deployment_guide.md` (Docker compose на Mac mini + launchd + Cloudflare Tunnel SSL)**, financial_requirements v2.5, technical_specification v1.5 с реальными perf-метриками, development_plan M4 ✅ + S9 roadmap, Develop/stack_gotchas/INDEX update, Develop/CLAUDE.md polish.
+4. **Поток C (OPS/BACK1, ~17ч):** Документация — README, `Develop/INSTALL.md`, **`deployment_guide.md` (Docker compose на Mac mini + launchd + Cloudflare Tunnel SSL)**, financial_requirements v2.5, technical_specification v1.5 с реальными perf-метриками, development_plan M4 ✅ + Sprint_8_Review план, Develop/stack_gotchas/INDEX update, Develop/CLAUDE.md polish.
 5. **Поток D (ARCH, ~8ч):** **8.R ARCH-ревью** (8 секций по образцу `Sprint_6_Review/code_review.md`) — финальные метрики + 12-13 event_type интеграционные тесты + вердикт PASS/PASS WITH NOTES/NEED FIXES.
 6. **Перенесённые из W2 в W3 backlog:**
    - `S8R-COV-BACKTEST-ROUTER` (~12ч) — `backtest/router.py` 41% → 80%
@@ -254,7 +352,7 @@ Sprint 7 финально закрыт со всеми post-S7 closeout-волн
 | 3 | Performance testing | Дашборд первый paint < 2с; signal→order p95 < 500мс; Telegram-команда < 3с. |
 | 4 | E2E регрессия + 6 missing spec'ов | `npx playwright test` зелёный; 6 новых spec'ов покрывают S7R-E2E-7.3/7.9/7.13/7.14/7.16/7.17. |
 | 5 | Закрытие S8 backlog | ≥ 80% медиум-карточек закрыты. Все medium-high закрыты обязательно. |
-| 6 | UX финальный юзабилити-тест | Чеклист `ui_checklist_s7.md` дополнен, найденные UX-баги закрыты или внесены в S9-backlog. |
+| 6 | UX финальный юзабилити-тест | Чеклист `ui_checklist_s7.md` дополнен, найденные UX-баги закрыты или внесены в W4 carry-over (Sprint_8_Review). |
 | 7 | Документация | README актуален, deployment_guide создан, итоговый changelog. |
 | 8 | 8.R ARCH-ревью | PASS / PASS WITH NOTES / NEED FIXES вердикт с обоснованием. |
 

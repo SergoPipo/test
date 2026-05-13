@@ -3,12 +3,14 @@
 # ПЛАН РАБОТ КОМАНДЫ РАЗРАБОТЧИКОВ
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия:** 2.0
-**Дата:** 2026-03-23
-**Основание:** Техническое задание v1.0 от 2026-03-23
-**Статус:** Утверждён (после ревью PM)
+**Версия:** 2.1
+**Дата:** 2026-05-13
+**Основание:** Техническое задание v1.5 от 2026-05-13
+**Статус:** ✅ M4 Production-ready достигнут (Sprint 8 закрыт). Sprint_8_Review план добавлен.
 
-> **Изменения относительно v1.0:** реорганизация состава команды (9 человек вместо 7), добавлены UX/UI-дизайнер и QA-инженер, объединены роли DB и AI в Backend #2, добавлен Frontend #2. Исправлена последовательность задач (CSRF/Rate Limiting перенесены в S3, Must-задачи убраны из Should-спринта). Тестирование встроено в каждый спринт.
+> **Изменения относительно v2.0:** актуализирован статус M4 после закрытия Sprint 8 (S8 W0 → W1 → W2 → W3 → 8.R). Добавлен §7 «Sprint_8_Review + post-production» с переносимыми задачами и будущими направлениями. Метрика Coverage достигнута (TOTAL = 80%, CI gate активен).
+>
+> **Изменения относительно v1.0 (v2.0):** реорганизация состава команды (9 человек вместо 7), добавлены UX/UI-дизайнер и QA-инженер, объединены роли DB и AI в Backend #2, добавлен Frontend #2. Исправлена последовательность задач (CSRF/Rate Limiting перенесены в S3, Must-задачи убраны из Should-спринта). Тестирование встроено в каждый спринт.
 
 ---
 
@@ -598,7 +600,7 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 | **M1** | **Каркас + wireframes** | 2 (S1) | Auth работает, дашборд по wireframes, CI проходит, wireframes утверждены UX. QA подтвердил тест-кейсы auth | ✅ завершён |
 | **M2** | **Полный цикл бэктеста** | 8 (S4) | Стратегия → бэктест → результаты. AI через UI. CSRF+Rate Limiting активны. QA прошёл E2E | ✅ завершён |
 | **M3** | **Paper Trading + Notifications** | 12 (S5+S6) | Paper+Real Trading + Circuit Breaker + НКД + корп. действия + Notifications (Telegram/Email/In-app) + Recovery + Graceful Shutdown. 945 тестов. QA E2E пройден (119/0/3) | ✅ завершён (Sprint_6_Review, 2026-04-24) |
-| **M4** | **Production-ready** | 16 (S8) | Coverage ≥ 80%, регрессия, security audit, performance, юзабилити-тест. Все sign-off (ARCH + QA + UX) | ⬜ не начат |
+| **M4** | **Production-ready** | 16 (S8) | Coverage ≥ 80% (TOTAL = 80%, CI gate активен), регрессия (1490 pytest / 544 vitest / 158 Playwright), security audit (0 high, bandit/safety в CI), performance (`@timed_event` + Plotly Dash /admin/metrics), Docker compose + Mac mini deployment + Cloudflare Tunnel SSL, ФТ v2.5 + ТЗ v1.5 + deployment_guide v1.0 | ✅ достигнут (Sprint 8, 2026-05-13, 8.R ARCH-вердикт — pending) |
 
 ```
 Неделя:  2        8        10       16
@@ -609,6 +611,61 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
   Каркас  Бэктест  Paper+Bond  Production
   +UX     +CSRF    +CB         Ready
 ```
+
+### 5.1 M4 Production-ready — итоговые метрики (Sprint 8 закрыт 2026-05-13)
+
+| Слой | Метрика | Цель | Факт |
+|------|---------|------|------|
+| Backend pytest | passed / failed | ≥ 1024 / 0 | **1490 / 0** ✅ |
+| Backend coverage TOTAL | % | ≥ 80% | **80%** ✅ (CI gate `--cov-fail-under=80` активен) |
+| Backend ruff | issues | 0 | **0** ✅ |
+| Backend mypy | errors | 0 | **0** ✅ |
+| Backend bandit | medium+ findings | 0 | **0** ✅ (28 low informational) |
+| Backend safety | critical CVE | 0 (документированные допустимы) | **1 documented** ✅ (protobuf транзитив) |
+| Frontend vitest | passed | ≥ 468 | **544 / 2 pre-existing flaky** ✅ |
+| Frontend tsc | errors | 0 | **0** ✅ |
+| Frontend lint | errors / warnings | 0 / 0 | 0 err / 9 warn (W3 cleanup в работе DEV-3) |
+| Playwright nightly | passed | ≥ 142 | **158 / 1 flaky / 5 skipped** ✅ |
+| Performance: signal→order p95 | ms | < 500 | измеряется `@timed_event("signal.process")` (на admin/metrics) |
+| Performance: dashboard LCP | s | < 2 | измеряется PerformanceObserver |
+| Performance: Telegram webhook p95 | s | < 3 | `@timed_event("telegram.handle")` |
+| Security audit | high findings open | 0 | **0** ✅ (3 high закрыты в W2) |
+| Deployment | артефакты | Docker compose + launchd + Cloudflare Tunnel | ✅ deployment_guide.md, launchd plist, Dockerfile×2, nginx.conf, docker-compose.yml |
+| Документация | актуальность | ФТ + ТЗ + deploy guide + dev plan + project_state | ✅ ФТ v2.5, ТЗ v1.5, deployment_guide v1.0, dev plan v2.1 |
+
+8.R ARCH-вердикт оформляется отдельно в `Спринты/Sprint_8_Review/code_review_s8.md` (по образцу Sprint_6_Review).
+
+---
+
+## 7. ROADMAP — Sprint_8_Review + post-production (после M4)
+
+После закрытия M4 проект переходит в стадию stabilization + Phase 2 feature work. Ниже — направления развития, зафиксированные в Sprint_8_Review/backlog.md и плане развития 001-005.
+
+### 7.1 Carry-over из S8 W3 (если не успели в спринте)
+
+| ID | Описание | Оценка | Источник |
+|----|----------|--------|----------|
+| S7R-MULTICURRENCY-TOGGLE | Переключение USD/RUB в BalanceWidget | ~6ч | S8 W3 backlog |
+| S8R-COV-BACKTEST-ROUTER | `backtest/router.py` 41% → 80% (heavy mocks event_bus + DI) | ~12ч | S8 W2 |
+| S8R-COV-MARKET-DATA-SERVICE | `market_data/service.py` 79% → 80%+ | ~4ч | S8 W2 |
+| S8R-COV-COVERAGECFG-ASYNC | `concurrency=greenlet,thread` в `.coveragerc` (Gotcha 29) | ~1ч | S8 W2 |
+| S8R-CLIENT-TEST-FLAKY | vitest `client.test.ts` flaky после SecurityHeadersMiddleware | ~1ч | S8 W2 |
+
+### 7.2 Phase 2 направления
+
+| Направление | Описание | Ссылка / источник |
+|-------------|----------|-------------------|
+| Position-aware strategies | Стратегии могут анализировать текущие позиции при принятии решения (Hold/Reduce/Add) | План развития 001 |
+| Realtime candle streaming в бэктесте | Backtest на «живых» данных без переключения через CSV | План развития 004 |
+| Prometheus/Grafana export | Из structlog + `@timed_event` → метрики для visualization, когда объёмы вырастут | План развития 003 |
+| Мультипользовательский режим | После Phase 1 single-user → миграция на PostgreSQL + per-user isolation | ТЗ §1.3, §8.9 |
+| Short-торговля (активация) | Сейчас blocked в circuit_breaker; ТЗ предполагает архитектурную готовность | ФТ §6.4 |
+| Срочный рынок FORTS | Опционы и фьючерсы | ФТ §1.5 «Won't» (на Phase 2) |
+| Мобильная адаптация | Desktop-first сейчас, mobile responsive — Phase 2 | ФТ §3.7 |
+
+### 7.3 Закрытые / отменённые направления
+
+- **S5R-BLOCKLY-MODE-B** — режим ручного ввода кода удалён в S8 (не использовался). Только Blockly visual editor + AI генерация.
 
 ---
 

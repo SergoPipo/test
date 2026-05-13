@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MOEX Trading Terminal — launchd plist для auto-start docker compose
+  на Mac mini после загрузки macOS.
+
+  Установка (см. ../deployment_guide.md §4):
+    1) Скопировать в ~/Library/LaunchAgents/com.moex.terminal.plist.
+    2) Заменить ВСЕ placeholder'ы `__USER__` и `__PATH_TO_REPO__` на актуальные.
+    3) plutil -lint ~/Library/LaunchAgents/com.moex.terminal.plist  → OK
+    4) launchctl load -w ~/Library/LaunchAgents/com.moex.terminal.plist
+
+  Выгрузка (например, перед обновлением):
+    launchctl unload ~/Library/LaunchAgents/com.moex.terminal.plist
+
+  Проверка статуса:
+    launchctl list | grep com.moex.terminal
+
+  S8 W3 OPS (2026-05-13): создан как часть финализации M4 Production-ready.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.moex.terminal</string>
+
+    <!--
+      ProgramArguments запускает однократный `docker compose up -d`.
+      KeepAlive=false: launchd НЕ перезапускает процесс при каждом exit —
+      это и не нужно, т.к. docker compose в detached режиме (`-d`) сам
+      возвращает успешный exit, а контейнеры управляются Docker daemon
+      (restart: unless-stopped в docker-compose.yml).
+
+      Если Docker Desktop ещё не успел подняться к моменту RunAtLoad —
+      см. WatchPaths трюк ниже.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>cd /Users/__USER__/__PATH_TO_REPO__/Develop &amp;&amp; /usr/local/bin/docker compose up -d</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+      KeepAlive=false: см. комментарий выше. Контейнеры рестартятся через
+      Docker daemon (restart: unless-stopped), launchd запускает compose
+      один раз на старте.
+    -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <!--
+      Логи — в ~/Library/Logs для удобства Console.app и `tail -f`.
+      Заказчик может посмотреть `docker compose ps` если launchd-старт прошёл успешно.
+    -->
+    <key>StandardOutPath</key>
+    <string>/Users/__USER__/Library/Logs/moex-terminal.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/__USER__/Library/Logs/moex-terminal.err</string>
+
+    <!--
+      ProcessType=Background: macOS не throttle'ит этот процесс при простое,
+      т.к. оркестрация контейнеров — фоновая длительная задача.
+    -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!--
+      EnvironmentVariables: PATH должен включать Docker Desktop binary.
+      На Apple Silicon путь — /opt/homebrew/bin (если установлен через brew)
+      или /usr/local/bin (Intel / Docker Desktop default).
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
