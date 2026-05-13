@@ -1344,9 +1344,81 @@ W5 = финализирующая волна, закрывает 7 W4-перен
 - Регрессионный full Playwright nightly после первого deployment.
 - Acceptance review всех 14 закрытых W4+W5 карточек.
 
-### Следующий шаг (W5)
-1. Финальные W5 коммиты в обе ветки (`docs/sprint-8` + `s8/sprint-8`).
-2. Push в origin.
-3. Тег `v1.0-m4-production-ready` обновить → переместить на W5-коммит (force-push тега) ИЛИ создать `v1.1-m4-production-ready` (на выбор заказчика).
-4. Sprint_8_Review — финальная приёмка решений.
+### Следующий шаг (W5) — ✅ ВЫПОЛНЕНО
+1. ✅ Финальные W5 коммиты в обе ветки (`e27d52c` test, `af49a3f` Develop).
+2. ✅ Push в origin.
+3. ✅ Тег `v1.0-m4-production-ready` перемещён на W5-коммит.
+
+---
+
+## 2026-05-13 — 🏁 W5-hotfix: 4 CI-fix + e2e fix + multicurrency unit-test
+
+### Контекст
+После push W5 (`af49a3f`) CI на `s8/sprint-8` оказался КРАСНЫМ — 3 коммита подряд (W2/W4/W5) failed. Диагностика показала, что W5 НЕ был причиной (баги унаследованы из W2), но мы должны были их выявить ранее. Заказчик прямо спросил «остались ли непрошедшие проверки» → найдены 4 серьёзных бага + 2 e2e fail + отсутствующий unit-test.
+
+### Хроника фиксов
+
+**ce791f1** (W5-hotfix #1):
+- `app/backtest/router.py:_run_backtest_task` — `UnboundLocalError` на `backtest.status = "failed"` в except-блоке, если exception случился ДО `backtest = result.scalar_one_or_none()`. Чинит `backtest: Backtest | None = None` ДО try + guard `if backtest is not None` в except. Это был CI fail W2/W4/W5 на Linux (на macOS не воспроизводился).
+- `frontend/e2e/s5-paper-trading.spec.ts:143 pause-resume` — назывался «pre-existing flaky», но фактически постоянно валился 3/3 (статичный mock GET /sessions возвращал status=active после pause-click). Заменён на dynamic mock с переменной `currentStatus`.
+- `frontend/src/components/dashboard/__tests__/BalanceWidget.test.tsx` — добавлены 2 unit-теста для `S8R-W5-MULTICURRENCY-TOGGLE`: default RUB + load USD из localStorage с конвертацией.
+
+**83efeae** (W5-hotfix #2):
+- 4 нарушения **Gotcha 26** (structlog `event=` kwarg коллизия с positional msg) в production-коде:
+  - `app/broker/tinvest/multiplexer.py:447,464` — `event=event` → `connection_event=event`.
+  - `app/backtest/jobs.py:419` — `event=event` → `job_event=event`.
+  - `app/notification/service.py:497,531,579` — `event=event_name` → `broker_event`/`session_event`.
+- Эти call-sites в Exception-ветках; macOS scheduler не активировал их в test ordering, Linux CI попал в эти ветки и валился `TypeError: got multiple values for argument 'event'`.
+
+**366b7d5** (W5-hotfix #3, финальный):
+- **Production bug** в `_broker_status_loop` (`app/notification/service.py:490`): cooldown проверка `since_last = now - last`, где `last = dict.get(event_name, 0.0)`. При первом событии `since_last = now - 0 = monotonic_time_since_process_start`. Если процесс работает < 900 сек (cooldown_sec), ЛЮБОЕ первое событие соответствующего типа некорректно скипалось. CI Linux запускался быстрее 15 мин → cooldown активен → skip → `assert None is not None` fail.
+- Фикс: cooldown активен ТОЛЬКО если `last > 0.0` (предыдущее событие действительно было зафиксировано).
+- Это БАГ S7 hotfix 2026-04-27, никогда не обнаруженный до сейчас.
+
+### Финальный CI статус
+
+✅ **CI s8/sprint-8 GREEN** на коммите `366b7d5`:
+- ✓ security-scan (20s)
+- ✓ frontend (3m6s)
+- ✓ backend Unit tests + Coverage gate (TOTAL ≥ 80%)
+
+### Финальные метрики (после всех W5-hotfix'ов)
+
+| Слой | Финал |
+|------|-------|
+| Backend pytest | **1547 passed / 0 failed / 0 xfailed @ ≥80% coverage** |
+| Backend tests/unit/ (CI-style) | **944 passed** |
+| Frontend vitest | **580 passed / 0 failed** (+2 multicurrency) |
+| Frontend lint | **0 errors / 0 warnings** (`--max-warnings 0`) |
+| Frontend tsc | **0 errors** |
+| Playwright nightly | **162 passed / 0 failed / 3 skipped** (полностью green) |
+| Bandit | 0 medium+ |
+| Safety | 1 documented CVE (protobuf, accepted) |
+| Stack Gotchas | **32** (gotcha-01..32) |
+
+### Sprint 8 итоги — все carry-over (36 шт.) закрыты внутри спринта
+
+- W3: 18 carry-over (W3 потоки A+B+C+D + ARCH 8.R).
+- W4: 7 переносных задач после W4 (по уточнению заказчика — не Sprint_8_Review).
+- W5: 7 W4-переносных закрыты.
+- W5-hotfix: 4 production bug fixes + 2 e2e fix + 1 unit-test coverage gap.
+
+Ни одного переноса в Sprint_8_Review. Sprint_8_Review остаётся для финальной приёмки + post-production observations.
+
+### Tag evolution
+
+- `v1.0-m4-production-ready`:
+  - da4f13b (W4 финал, 12/18 закрыто) → 
+  - af49a3f (W5 финал, 25/25 закрыто) → 
+  - ce791f1 (W5-hotfix #1) → 
+  - 366b7d5 (W5-hotfix #3, CI green) ← **ФИНАЛ**.
+
+### M4 Production-ready — финальный статус
+✅ ДОСТИГНУТ (2026-05-13). 0 блокеров. CI green. Все проверки пройдены. Можно начинать Mac mini deployment.
+
+### Sprint_8_Review план
+Финальная приёмка решений + post-production observations. Возможные направления:
+- `docker compose build` smoke на Mac mini хосте (единственная BLOCKED проверка).
+- Реальные production p95 числа через `/admin/metrics` Plotly Dash после первого deployment.
+- Acceptance review всех 36 закрытых W3+W4+W5+W5-hotfix карточек.
 

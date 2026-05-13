@@ -3,11 +3,11 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-05-13 (Sprint 8 — 🏁 ЗАКРЫТ + W4 + W5 финализирующие волны выполнены. M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. Все 18 W3 carry-over + 7 W4 carry-over закрыты внутри спринта. Sprint_8_Review — без переносов, только проверка решений).
+> Последнее обновление: 2026-05-13 (Sprint 8 — 🏁 ЗАКРЫТ ОКОНЧАТЕЛЬНО + W4+W5+W5-hotfix. CI s8/sprint-8: **GREEN** на `366b7d5`. Tag `v1.0-m4-production-ready` поставлен. M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. Все 36 carry-over закрыты внутри спринта. 4 production bug дополнительно найдены и исправлены в W5-hotfix).
 
 ---
 
-## Текущий спринт: **Sprint 8 — 🏁 ЗАКРЫТ + W4 ✅ + W5 ✅** (2026-05-13). **M4 Production-ready достигнут.** Далее: Sprint_8_Review (проверка решений + тестирование, без накопления переносов).
+## Текущий спринт: **Sprint 8 — 🏁 ЗАКРЫТ ОКОНЧАТЕЛЬНО (W3+8.R+W4+W5+W5-hotfix)** (2026-05-13). **M4 Production-ready достигнут.** CI GREEN, tag `v1.0-m4-production-ready` на `366b7d5`. Далее: Sprint_8_Review (финальная приёмка + post-production observations).
 
 ## Прогресс по спринтам
 

@@ -14,10 +14,11 @@
 **Дата завершения 8.R:** 2026-05-13 (ARCH вердикт: **PASS WITH NOTES**, M4 Production-ready достигнут, 0 блокеров)
 **Дата завершения W4:** 2026-05-13 (финализирующая волна — 12 из 18 carry-over закрыто + 1 partial, 6 + 1 → W5)
 **Дата завершения W5:** 2026-05-13 (вторая финализирующая волна — все 7 W4-переносных задач закрыты в текущем спринте по уточнению заказчика)
+**Дата завершения W5-hotfix:** 2026-05-13 (3 коммита: backtest UnboundLocal + e2e fixes + multicurrency unit-test → Gotcha 26 × 4 → broker cooldown bug. CI s8/sprint-8: **GREEN** на финальном коммите `366b7d5`)
 
 ## Текущий шаг
 
-**🏁 Sprint 8 ЗАКРЫТ (2026-05-13). M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. W4 закрыл 12/18 + 1 partial; W5 закрыл оставшиеся 7/7. Все carry-over закрыты внутри S8. Sprint_8_Review — проверка решений и тестирование (без накопления переносов).**
+**🏁 Sprint 8 ЗАКРЫТ ОКОНЧАТЕЛЬНО (2026-05-13). M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. W4 закрыл 12/18 + 1 partial; W5 закрыл 7/7; W5-hotfix закрыл 4 production bug + 2 e2e fail + 1 unit-test gap. CI s8/sprint-8: GREEN. Все 36 carry-over закрыты внутри S8. Tag `v1.0-m4-production-ready` на `366b7d5`. Sprint_8_Review — финальная приёмка решений.**
 
 ### W5 финальные метрики (2026-05-13)
 
