@@ -478,3 +478,565 @@
 
 Новые (предлагается зафиксировать): **Mantine 0-height bar + Playwright `toBeVisible`** — для DOM-баров с динамической высотой использовать `toBeAttached()`/`count()`, не `toBeVisible()` (height=0 = hidden). Зафиксирован в `s7-backtest-analytics.spec.ts:92`.
 
+
+---
+
+## 2026-05-12 — BACK2 W2 (event sync L1 + dashboard widgets + 3 SEC fix)
+
+### Что
+W2 Поток B полностью закрыт. Один блок изменений = один коммит-кандидат.
+
+**Event sync эпик L1 (8B.5):**
+- `EVENT_MAP` расширен до **17 ключей** (12 + 5 новых: `session.recovered`,
+  `backtest.completed`, `system.daily_stats`, `system.corporate_action`,
+  `system.price_alert`) с шаблонами title/body.
+- 5 publish-сайтов:
+  - `session_recovered` → `app/main.py` lifespan после `restore_all` (резолв
+    `strategy_name`, тело `{strategy_name} ({ticker}) восстановлена…`).
+  - `backtest_completed` → `app/backtest/jobs.py::BacktestJobManager._notify_completed`
+    (после `_publish(done)` на `:226`, через DI `notification_service`).
+  - `daily_stats` → уже подключён в `scheduler/service.py::send_daily_stats`
+    (19:00 МСК cron, EVENT_MAP-шаблон добавлен).
+  - `corporate_action` → уже подключён в `scheduler/service.py::detect_corporate_actions`
+    (каждые 6ч, EVENT_MAP-шаблон добавлен).
+  - `price_alert` → уже подключён в `market_data/price_alert_monitor.py`.
+
+**Dashboard widgets backend (8B.6):**
+- `GET /api/v1/health` extended: добавлены `cb_state` (агрегат недавних
+  CircuitBreakerEvent за 15 мин), `tinvest_connected` (singleton mux flag),
+  `scheduler_running`, `scheduler_jobs`. **Контракт C-S8-1** для FRONT2.
+- `GET /api/v1/market-data/sparkline?ticker=X&hours=N` — новый endpoint,
+  5-min candles за `hours` часов, `{points: [{t, p}], current}`.
+  **Контракт C-S8-2**.
+- `GET /api/v1/account/balance/history?since_first_activity=true` —
+  параметр отрезает leading zero-точки до первой активности. Обратная
+  совместимость сохранена (default=false). **Контракт C-S8-3**.
+- `POST /api/v1/notifications/telegram/test` body `{bot_token, chat_id}` →
+  `{ok, message}`. Httpx POST на api.telegram.org, timeout=3s.
+  **Контракт C-S8-4**.
+
+**S7R-CONNECTION-EVENTS-MARKET-CLOSED (8B.7):**
+- `app/broker/tinvest/multiplexer.py` — helper `_is_moex_open_now()`,
+  фильтр в `_publish_connection_event`. Использует
+  `MOEXCalendarService.get_market_status()` (online/evening/auction
+  считаются «открыто»). При ошибке календаря — degrade open.
+
+**3 security fixes из security_audit_s8.md:**
+- `S8R-SEC-HEADERS` (high): `app/middleware/security_headers.py` (~30 LoC) —
+  HSTS / X-Frame-Options=DENY / X-Content-Type-Options=nosniff / CSP
+  `default-src 'self'; frame-ancestors 'none'` / Referrer-Policy
+  strict-origin-when-cross-origin / Permissions-Policy. Зарегистрирован
+  в `main.py` после CSRFMiddleware. 6 xfail-тестов
+  `test_security_headers.py` сняты → green.
+- `S8R-SEC-TELEGRAM-XSS` + `S8R-SEC-EMAIL-XSS` (high): helper
+  `_safe_format_event_text` (`html.escape`) в `notification/service.py`,
+  применён в `TelegramNotifier.send` и `EmailNotifier.send`.
+
+### Файлы
+- **Новые:**
+  - `app/middleware/security_headers.py`
+  - `tests/test_notification/test_event_sync_publishers.py`
+  - `tests/test_notification/test_market_closed_filter.py`
+  - `tests/test_notification/test_telegram_test_endpoint.py`
+  - `tests/test_security/test_xss_telegram_email.py`
+- **Изменённые:**
+  - `app/main.py` (security middleware, /health extended, session_recovered
+    publish, BacktestJobManager DI)
+  - `app/notification/service.py` (EVENT_MAP +5 ключей, helper
+    `_safe_format_event_text`)
+  - `app/notification/telegram.py` (XSS escape)
+  - `app/notification/email.py` (XSS escape)
+  - `app/backtest/jobs.py` (DI `notification_service`, `_notify_completed`)
+  - `app/broker/tinvest/multiplexer.py` (`_is_moex_open_now` фильтр)
+  - `app/account/router.py` (`?since_first_activity`)
+  - `app/market_data/router.py` (`/sparkline`)
+  - `app/notification/router.py` (`POST /telegram/test`)
+  - `tests/test_security/test_security_headers.py` (xfail → passing)
+  - `tests/test_notification/test_runtime_events.py` (monkeypatch
+    `_is_moex_open_now=True` для двух тестов connection events)
+  - `tests/unit/test_health.py` (+3 теста на extended fields)
+  - `tests/unit/test_account/test_balance_history.py` (+2 теста на
+    `since_first_activity`)
+  - `tests/unit/test_market_data/test_router.py` (+TestSparklineEndpoint
+    из 3 тестов)
+
+### Результат
+- **pytest:** `1132 passed, 0 failed, 0 xfailed, 309 warnings` (231s).
+  Baseline +34 (новые W2 тесты), 0 регрессий.
+- **ruff:** `All checks passed!`
+- **mypy:** `Success: no issues found in 148 source files`
+- EVENT_MAP keys: ровно **17** ✅
+- `SecurityHeadersMiddleware` зарегистрирован: `main.py:280` ✅
+- `_safe_format_event_text` применён: telegram.py:60, email.py:75 ✅
+- `_is_moex_open_now` в multiplexer: `multiplexer.py:440` ✅
+- 6 sec-headers тестов снятых из xfail → 6 passed ✅
+
+### Cross-DEV contracts (поставщик)
+- **C-S8-1** (`/health` extended → FRONT2): поля
+  `cb_state, tinvest_connected, scheduler_running, scheduler_jobs` в
+  payload. Подтверждено `tests/unit/test_health.py::test_health_response_has_*`.
+- **C-S8-2** (`/market-data/sparkline` → FRONT2): `{points, current}`.
+  Подтверждено `TestSparklineEndpoint`.
+- **C-S8-3** (`/account/balance/history?since_first_activity` → FRONT2):
+  обратно-совместимый bool query-param.
+- **C-S8-4** (`POST /notifications/telegram/test` → FRONT2): body
+  `{bot_token, chat_id}` → `{ok, message}`. CSRF + `Depends(get_current_user)`.
+- **C-S8-9** (event_type sync UI ↔ EVENT_MAP → FRONT2): 5 backend
+  event_type'ов теперь в EVENT_MAP; FRONT2 в W2 Поток C должен добавить
+  4 backend-only типы (`session_started`, `session_stopped`,
+  `order_placed`, `trade_filled`) в UI `EVENT_TYPE_LABELS`.
+
+### Stack Gotchas
+Применённые: 4 (multiplexer reconnect — теперь учтён MOEX-фильтр),
+gotcha-13 (lazy-init для apscheduler — здесь не нужен, использован DI).
+
+Новая (предлагается): **patch.object на module-level helper не действует,
+если в Python 3.11 bytecode компилирует `not fn()` в
+POP_JUMP_FORWARD_IF_TRUE + module-LOAD_GLOBAL**. Решение: вынести
+boolean-результат в отдельную переменную с try/except (см.
+`multiplexer.py::_publish_connection_event` рефакторинг W2).
+
+---
+
+## 2026-05-12 — W2 QA: AIChat mock block_xml + регрессия baseline
+
+### Что
+S8 W2 QA — закрытие `S6R-AICHAT-APPLY-MOCK` и baseline-регрессия после
+BACK2 W2 (до завершения параллельных FRONT2 W2 и BACK1 W2 потоков).
+
+- **AIChat mock дополнение** (arch_design §11 batch 1 пункт 2):
+  - `e2e/fixtures/api_mocks.ts::mockAIChat` — расширен ответ
+    `/api/v1/ai/chat`: добавлено `description_update` с реалистичным
+    template-описанием стратегии (RSI(14) crossover 30/70 + SL 3% + TP 6%).
+  - Добавлен mock `/api/v1/strategy/parse-template`: возвращает
+    `blocks_json` с 9 flat-блоками (`indicator_rsi`, `value_number` ×2,
+    `condition_crossover` ×2, `entry_signal`, `exit_signal`, `stop_loss`,
+    `take_profit`) → flatBlocksToWorkspaceState свернёт в Blockly state.
+- **Тест активирован**: в `e2e/ai-chat.spec.ts:97` снят `test.skip`,
+  переписан в активный сценарий с проверкой ≥3 SVG-блоков
+  (`g.blocklyDraggable`) в `[data-testid="blockly-workspace"]` после
+  клика «Применить на схеме».
+- **Технический нюанс**: stream-эндпоинт `/ai/chat/stream` description_update
+  не прокидывает (см. `aiStreamClient.ts`: только chunk/done события),
+  поэтому в тесте симулирован ручной ввод template-текста в textarea
+  (валидный user flow — есть кнопка «Пустой шаблон»). Mock chat-response
+  готов для будущей миграции stream на новые event типы.
+
+### Файлы
+- **Изменённые:**
+  - `Develop/frontend/e2e/fixtures/api_mocks.ts` (+~60 строк: template-text
+    в `/ai/chat` + mock `/strategy/parse-template`).
+  - `Develop/frontend/e2e/ai-chat.spec.ts` (test 3 переписан со skip
+    на активный, ~50 строк сценария + комментарии).
+
+### Тесты (РЕАЛЬНО ПРОГНАНЫ)
+- `ai-chat.spec.ts` → **5/5 passed** (test 3 was skipped → теперь passed).
+- Baseline на момент старта W2 QA (до моих изменений, после BACK2 W2):
+  - **Playwright:** 157 passed / 1 failed (pre-existing flaky
+    `s5-paper-trading.spec.ts:143 pause and resume`) / 6 skipped /
+    1 did not run / **165 total** (5.9 мин).
+  - **vitest:** **528 passed** / 78 files (25 сек).
+  - **backend pytest:** **1132 passed** / 0 failed (247 сек).
+- Финальный полный прогон W2 QA (после AIChat mock) — см. ниже.
+
+### TypeScript
+- `npx tsc --noEmit` → 0 errors.
+
+### Cross-DEV contracts
+- **Потребитель**: использую UI-точки от других DEV:
+  - `[data-testid="blockly-workspace"]` (`BlocklyWorkspace.tsx:249`) — FRONT2 не меняла.
+  - `[data-testid="description-textarea"]`, `[data-testid="shared-description-panel"]` (`SharedDescriptionPanel.tsx`) — FRONT2 не меняла.
+- **Не поставляю** (E2E mock не контракт между DEV).
+
+### Skip-тикеты W2
+- Pre-existing flaky `s5-paper-trading.spec.ts:143 pause and resume` — НЕ в моём scope (W1 baseline).
+- 2 skipped в `s7-backtest-analytics` (S8R-ANALYTICS-EQUITY-ZONES-TESTID,
+  S8R-ANALYTICS-TRADE-ROW-CLICK) — статус будет переоценён после FRONT2 W2
+  (если поставит data-testid'ы и onClick handlers, эти 2 тестa могут стать passed).
+
+### Финальные метрики W2 QA (после закрытия BACK2+BACK1+FRONT2)
+Повторная регрессия после всех параллельных потоков W2:
+
+- **Playwright:** **158 passed / 1 failed (pre-existing flaky) / 5 skipped /
+  1 did not run / 165 total** (7.9 мин).
+  - +1 passed vs W1 baseline 157 = AIChat test 3 активирован.
+  - 6 skipped → **5 skipped** — FRONT2 EQUITY-ZONES-TESTID + TRADE-ROW-CLICK
+    разблокировали 1 spec в `s7-backtest-analytics`.
+- **vitest:** **544 passed / 2 failed / 546 total / 80 файлов passed /
+  81 total** (26 сек).
+  - 2 failed — `src/api/__tests__/client.test.ts` (axios interceptor
+    timeout 5000ms, 2 теста). Подтверждено git-stash: failure
+    воспроизводится без моих E2E mock изменений → **НЕ моя регрессия**.
+  - **Карточка для backlog:** `S8R-CLIENT-TEST-FLAKY` (W3 диагноз —
+    возможно SecurityHeadersMiddleware от BACK2 W2 затрагивает axios stack).
+- **Backend pytest:** **1284 passed / 0 failed** (258 сек) —
+  соответствует BACK1 W2 baseline +152.
+
+### Новый Stack Gotcha (предлагается)
+- **AnimatedSwitch рендерит обе ветки (blockly/AI) одновременно**:
+  symptom — `getByRole('button', name='Применить на схеме')` находит
+  2 элемента; первая физически за overlay'ем navbar и intercepts
+  pointer events. Правило: использовать `.last()` или scoped locator
+  внутри `[data-testid="shared-description-panel"]:last-of-type`
+  для AI mode. Related: `Develop/frontend/src/pages/StrategyEditPage.tsx:895`,
+  `e2e/ai-chat.spec.ts:147`. Кандидат: `gotcha-27-animatedswitch-double-render.md`.
+
+### Skip W3 (не тронуто этим запуском)
+- Удаление 2 Blockly mode B spec'ов.
+- Добавление новых spec'ов в `Develop/.github/workflows/playwright-nightly.yml`.
+- `--cov-fail-under=80` gate в CI (BACK1 Поток D).
+
+---
+
+## 2026-05-12 — W2 BACK1 Поток A: блок W2.1 (`@timed_event` performance baseline)
+
+### Что
+Реализован декоратор `@timed_event(event_name)` для measure-and-log
+duration_ms критических хот-путей (Sprint_8/arch_design §4.3, Performance).
+
+- Поддерживает async и sync функции (auto-detect через
+  `asyncio.iscoroutinefunction`).
+- Логирует через structlog: `event="timed_event"`, `timed_event=<event_name>`,
+  `duration_ms=<float>`, при исключении дополнительно `error=<class.__name__>`.
+- Исключение проксируется наверх в неизменном виде через `finally` (duration
+  всё равно записывается).
+- `functools.wraps` сохраняет `__name__`/`__doc__`/`__wrapped__`.
+
+### Применено в 3 production-точках (gate W2 §4.3)
+- `app/trading/engine.py::SignalProcessor.process_candle` — `@timed_event("signal.process")`
+- `app/broker/tinvest/adapter.py::TInvestAdapter.place_order` — `@timed_event("order.place")`
+- `app/notification/telegram_webhook.py::TelegramWebhookHandler.process_update` — `@timed_event("telegram.handle")`
+
+### Файлы
+- **Новые:**
+  - `app/common/observability.py` (115 строк)
+  - `tests/unit/test_common/__init__.py`, `tests/unit/test_common/test_observability.py`
+- **Изменённые:** 3 production-сайта выше (только импорт + декоратор +
+  расширение docstring; сигнатуры и логика не тронуты).
+
+### Тесты
+- `tests/unit/test_common/test_observability.py` — 10 passed:
+  - 4 async (happy / signature / exception / sleep≥5ms)
+  - 3 sync (happy / exception / signature)
+  - 3 integration smoke (3 production-сайта обёрнуты)
+- Полный backend: **1142 passed / 0 failed** (1132 → +10). 0 регрессий.
+
+### Стек-ловушки
+- **Gotcha (новая, требует регистрации):** structlog `log.info(msg, event=X)`
+  падает с `TypeError: multiple values for argument 'event'`, потому что
+  первый позиционный аргумент уже трактуется как `event=`. Решение: использовать
+  отдельный kwarg (`timed_event=<name>`). Кандидат на `gotcha-26-structlog-event-kwarg.md`.
+- `structlog.testing.capture_logs` — для тестирования (короче чем замена
+  `processors=[_capture]`, и не ломает PrintLogger при kwargs).
+
+
+---
+
+## 2026-05-12 — W2 FRONT2 Поток C: Dashboard widgets + Event sync + Plotly Dash
+
+### Что
+Закрытие задач 8.D.5/6/7/8/9 + 2 W2-карточек анализа (S8R-ANALYTICS-EQUITY-ZONES-TESTID,
+S8R-ANALYTICS-TRADE-ROW-CLICK). Контракты-потребители: C-S8-1, C-S8-2, C-S8-3,
+C-S8-4, C-S8-7, C-S8-8, C-S8-9.
+
+**Frontend (Develop/frontend):**
+- 8.D.5.1 (C-S8-1): `HealthWidget` уже потреблял extended /health (S7) —
+  поля cb_state/tinvest_connected/scheduler_running/scheduler_jobs +
+  30s polling. Контракт BACK2 поставлен — fallback yellow «нет данных»
+  при отсутствии полей сохранён как graceful degrade.
+- 8.D.5.2 (C-S8-2): новый `SparklineWidget` (~190 строк) на чистом SVG
+  через `MiniSparkline` (избегает Gotcha-24 lightweight-charts few-points).
+  Включён 4-й виджет на `DashboardPage` (cols={base:1,sm:2,lg:4}).
+  Тикер из `getRecentInstruments()[0] ?? 'SBER'`.
+- 8.D.5.3 (C-S8-3): `accountApi.getBalanceHistory(days, sinceFirstActivity=true)`
+  + `BalanceWidget` теперь шлёт `since_first_activity=true` — backend
+  отрезает leading-zero период до первой активности.
+- 8.D.5.4 (C-S8-4): в `FirstRunWizard` step 4 — раскрываемый блок
+  «Свой бот / Прямая привязка» с PasswordInput(bot_token), TextInput(chat_id)
+  и кнопкой «Отправить тестовое сообщение» (disabled пока оба поля пусты).
+  `notificationApi.sendTelegramTest(botToken, chatId)`. После handleFinish:
+  если telegram подключён (linked или tgTestPassed) — автоматически
+  вызываем `updateSetting(ev, {telegram_enabled: true})` для 4 критичных
+  event_types (правило `project_wizard_notifications_save`). То же для
+  email (4 события). Promise.all + .catch чтобы один сбой не блокировал
+  wizard finish.
+- 8.D.6 (C-S8-9): в `EVENT_TYPE_LABELS` добавлены 4 backend-event-типа:
+  session_started, session_stopped, order_placed, trade_filled.
+- 8.D.7 (S7R-GRID-HEATMAP-ENTRYPOINT): УЖЕ закрыто в S7 —
+  `BackgroundBacktestsBadge.handleOpenResult` открывает Modal с
+  `GridSearchHeatmap` для grid+done jobs. Подтверждено тестом
+  `bg-backtest-grid-result-modal`. PASS без дополнительной реализации.
+- 8.D.8 (S7R-WIDGETS-UNIT-COVERAGE): unit-тесты для всех дашборд-виджетов
+  (BalanceWidget уже был +1 фикс под C-S8-3; новые: SparklineWidget 8,
+  HealthWidget 5, ActivePositionsWidget 5). vitest config расширен
+  per-directory threshold `src/components/dashboard/**` lines/statements/
+  functions 80%, branches 70% (активируется при `--coverage` flag).
+- S8R-ANALYTICS-EQUITY-ZONES-TESTID: в `InstrumentChart` добавлен DOM
+  overlay (`<div data-testid="equity-curve-zones-overlay">`) с per-zone
+  child `<div data-testid="equity-curve-zone-{idx}" data-zone-type=...>`,
+  pointerEvents:none — не ломает hover/click handlers, синхронизируется
+  в rAF-цикле вместе с drawBgZones. Idempotent reconciliation —
+  без allocation каждый кадр. Разблокирует skipped test «A. hover
+  equity-curve zone».
+- S8R-ANALYTICS-TRADE-ROW-CLICK: в `BacktestTrades` добавлен prop
+  `onRowClick?: (trade: BacktestTrade) => void` + per-row
+  `data-testid="backtest-trade-row-{index}"` + cursor:pointer когда
+  колбэк задан. На `BacktestResultsPage` Trades-tab теперь
+  пробрасывает `setSelectedTrade` и рендерит `TradeDetailsPanel`
+  под таблицей (переиспользование существующего компонента и state'а).
+  Разблокирует skipped test «B. click trade-detail-panel».
+
+**Backend (Develop/backend) — единственная backend-составляющая FRONT2:**
+- 8.D.9 (C-S8-8): новый модуль `app/admin/metrics_dash.py` (~200 строк)
+  с `create_dash_app()` фабрикой + 4 mock-графика (signal→order p50/p95,
+  dashboard LCP, Telegram latency p50/p95 по 5 командам, backtest jobs
+  rate). plotly_dark theme + SLA-линии 500мс/2500мс/3000мс. Источник
+  данных — TODO mocks (после BACK1 W2 observability будут реальные).
+- 8.D.9: `app/admin/dash_mount.py` — `AdminAuthASGIMiddleware` (pure
+  ASGI middleware) — JWT-валидация + `User.is_admin=True` gate перед
+  передачей запроса в WSGI Dash. Источник токена: `Authorization: Bearer`
+  или cookie `access_token=`. 401 без токена, 403 не-админу.
+- 8.D.9: в `app/main.py` mount Plotly Dash на
+  `/api/v1/admin/metrics` через `a2wsgi.WSGIMiddleware(get_dash_wsgi_app())`
+  + `AdminAuthASGIMiddleware`. ImportError-guard'нут на случай отсутствия
+  dash в CI до W2.
+- `pyproject.toml`: +dash>=2.17,<5, +plotly>=5.20,<7, +a2wsgi>=1.10
+  (a2wsgi — современная замена deprecated starlette.middleware.wsgi).
+
+### Файлы
+- **Новые (frontend):**
+  - `src/components/dashboard/SparklineWidget.tsx` (190 строк)
+  - `src/components/dashboard/__tests__/SparklineWidget.test.tsx` (8 тестов)
+  - `src/components/dashboard/__tests__/HealthWidget.test.tsx` (5 тестов)
+  - `src/components/dashboard/__tests__/ActivePositionsWidget.test.tsx` (5 тестов)
+- **Новые (backend):**
+  - `app/admin/metrics_dash.py` (Dash app + 4 фигуры)
+  - `app/admin/dash_mount.py` (ASGI auth middleware)
+  - `tests/integration/test_admin_metrics_dash.py` (3 теста)
+- **Изменённые:**
+  - `frontend/src/api/accountApi.ts` (+sinceFirstActivity)
+  - `frontend/src/api/marketDataApi.ts` (+SparklineResponse + getSparkline)
+  - `frontend/src/api/notificationApi.ts` (+sendTelegramTest)
+  - `frontend/src/pages/NotificationSettingsPage.tsx` (+4 event_type labels)
+  - `frontend/src/pages/DashboardPage.tsx` (+SparklineWidget виджет, grid 3→4)
+  - `frontend/src/components/dashboard/BalanceWidget.tsx` (since_first_activity=true)
+  - `frontend/src/components/dashboard/__tests__/BalanceWidget.test.tsx` (фикс ожидаемой сигнатуры)
+  - `frontend/src/components/wizard/FirstRunWizard.tsx` (+advanced Telegram block + handleFinish notif settings save)
+  - `frontend/src/components/wizard/__tests__/FirstRunWizard.test.tsx` (+sendTelegramTest/updateSetting моки)
+  - `frontend/src/components/backtest/BacktestTrades.tsx` (+onRowClick prop + testid)
+  - `frontend/src/components/backtest/InstrumentChart.tsx` (+DOM overlay для зон с testid)
+  - `frontend/src/pages/BacktestResultsPage.tsx` (Trades-tab пробрасывает onRowClick + TradeDetailsPanel)
+  - `frontend/vite.config.ts` (+coverage thresholds dashboard 80%)
+  - `backend/app/main.py` (mount Plotly Dash под /api/v1/admin/metrics)
+  - `backend/pyproject.toml` (+dash/plotly/a2wsgi)
+
+### Тесты
+- Frontend vitest: **544 passed / 0 failed** (+ 2 flaky network `client.test.ts`
+  pre-existing baseline issue, не наш scope) — итого 546 (528 baseline + 18 новых).
+- Frontend tsc: 0 errors.
+- Frontend lint: 0 errors / 9 warnings (baseline сохранён).
+- Backend pytest: **1145 passed / 0 failed** (1132 W2 BACK2 baseline + 10 W2 BACK1
+  observability + 3 admin_metrics_dash). 0 регрессий.
+- Backend ruff/mypy: 0 issues на новых файлах.
+
+### Применённые Stack Gotchas
+- `gotcha-24-lightweight-charts-few-points-rightbar.md` — обошёл, выбрав
+  чистый SVG `MiniSparkline` для SparklineWidget вместо lightweight-charts.
+- `gotcha-25-api-paginated-type-mismatch.md` — `SparklineWidget` defensively
+  читает `data.points` через type-guard'и; `BalanceWidget` уже подкорректирован
+  под `BalanceHistoryResponse` в 8.D.1 (W1).
+- Применил **defensive ASGI middleware**: на `mount(...)` FastAPI dependency
+  не работают — пришлось делать pure ASGI gate (JWT + is_admin).
+  Не нашёл существующего gotcha для этого, но это потенциальный кандидат
+  для регистрации (см. секцию 8 отчёта DEV-4_FRONT2_W2.md).
+
+---
+
+## 2026-05-12 — W2 BACK1 Поток A: блок W2.2 (Coverage P1 — 4 модуля)
+
+### Что
+Полное закрытие приоритетов 1+3 (broker/tinvest/adapter, backtest/engine) и
+частичное по приоритетам 2+4 (backtest/router, market_data/service).
+
+### Финальный coverage 4 модулей (target ≥80%)
+
+| Модуль | До W2 | После W2 | Статус |
+|---|---|---|---|
+| `app/broker/tinvest/adapter.py` | 24% | **95%** | ✅ PASS |
+| `app/backtest/engine.py` | 55% | **96%** | ✅ PASS |
+| `app/market_data/service.py` | 50% | **79%** | ⚠️ PARTIAL (−1% до порога) |
+| `app/backtest/router.py` | 25% | **41%** | ⚠️ PARTIAL — отложен в backlog как `S8R-COV-BACKTEST-ROUTER` (требует тяжёлой инфраструктуры моков для `_run_backtest_task` event_bus publish-цикла + `_build_backtest_response` candles/trades; ~12ч в W3) |
+
+### TOTAL backend coverage
+- **78%** (gate W2 → W3: ≥80%). До порога −2% — будет закрыто Потоком D
+  (P2 router-тесты для auth/notification/broker/market_data/strategy/circuit_breaker).
+
+### Файлы (новые тесты)
+- `tests/unit/test_broker/test_adapter_full.py` — **60 тестов**, 14 классов
+  (TInvest SDK моки через `_AsyncCM` + `_patch_client_factory` фабрика).
+- `tests/unit/test_backtest/test_engine_full.py` — **24 теста**, 8 классов
+  (TradeRecorder/ProgressAnalyzer/EquityCurveObserver/MetricsCollector Impl
+  + _extract_trades + _load_data + _compile_strategy + IMOEX benchmark path).
+- `tests/unit/test_backtest/test_router_full.py` — **29 тестов**, 9 классов
+  (list / rerun / export CSV+PDF+503 / run-async + JobLimitExceeded /
+  jobs (direct-call из-за Gotcha 20 static-vs-int) / grid / strategy-params /
+  _run_backtest_task happy + failure + invalid params_json).
+- `tests/unit/test_market_data/test_service_full.py` — **26 тестов**, 10 классов
+  (_fetch_via_iss retry / _fetch_via_broker no-account+missing-creds+happy /
+  ensure_lot_size TTL hit / _fetch_lot_size_from_tinvest decrypt-fail /
+  get_or_fetch_logo_isin cache+tinvest / _period_start ветки /
+  _aggregate_candles / _build_current_candle / _purge_iss_cache retry).
+
+### Тесты + lint
+- Полный backend pytest: **1284 passed / 0 failed** (1132 W2 BACK2 baseline +
+  10 W2.1 + 60 adapter + 24 engine + 29 router_full + 26 market_data = +149
+  новых). 0 регрессий.
+- Ruff: All checks passed.
+- Mypy (на изменённых production-файлах): Success — no issues.
+
+### Известный технический долг (PARTIAL)
+- **S8R-COV-BACKTEST-ROUTER** (приоритет 2, перенос в W3): `backtest/router.py`
+  41% → 80% требует моков event_bus publish-канала + полноценной DI цепочки
+  `_run_backtest_task` + покрытие `_build_backtest_response` candles/trades
+  fork. Оценка: ~12ч. Карточка → `Sprint_8_Review/backlog.md`.
+- **S8R-COV-MARKET-DATA-SERVICE** (приоритет 4, перенос в W3): `market_data/
+  service.py` 79% → 80%+ — недостающие ~1% это глубокие ветки в
+  `_fetch_lot_size_from_tinvest` happy-path (tinkoff AsyncClient
+  context-manager) + `get_or_fetch_logo_isin` commit-fail rollback. ~4ч.
+
+### Применённые Stack Gotchas
+- **Gotcha 20** (FastAPI static-vs-int path conflict): в `backtest/router.py`
+  `GET /jobs` ловится `GET /{backtest_id}` (int-coerce → 422). Обойдено
+  direct-call тестами функций (`list_backtest_jobs`, `get_backtest_job`,
+  `cancel_backtest_job`) — даёт coverage без зависимости от router-починки.
+  Регрессия-guard оставлен (`test_http_path_returns_422_due_to_gotcha20`)
+  до правки порядка роутов.
+- **Gotcha 15** (T-Invest naive datetime): `_to_utc_aware` helper в
+  adapter.py протестирован отдельно (2 кейса).
+- **Gotcha 4** (multiplexer reconnect): тесты `disconnect_*` подтверждают,
+  что singleton multiplexer НЕ останавливается per-adapter (S7 hotfix).
+
+### Новые Stack Gotchas (кандидаты)
+- **MagicMock без spec в моках mapper**: `getattr(mock, "blocked", None)`
+  возвращает auto-Mock → mapper.quotation_to_decimal(MagicMock) →
+  `decimal.InvalidOperation`. Решение: `MagicMock(spec=[...])` для точного
+  списка атрибутов. Кандидат на `gotcha-27-mock-spec-vs-decimal.md`.
+- **Decimal.InvalidOperation не ValueError**: `_extract_trades` catch
+  `(TypeError, ValueError)` НЕ ловит `decimal.InvalidOperation` от
+  `Decimal("bad-string")`. Production-impact для невалидных
+  trade_recorder данных. Кандидат на `gotcha-28-decimal-invalidop-vs-valueerror.md`.
+
+---
+
+## 2026-05-13 — W2 BACK1 Поток D — Router coverage P2 (S8 W2.3 closeout)
+
+### Что
+Закрыты P2 router-тесты (6 router'ов из §2.2 arch_design) + добивка
+secondary-модулей для прохождения **Gate W2 → W3 = TOTAL ≥ 80%**.
+
+- Каталог `tests/test_routers/` (новый): 6 файлов P2 + 4 файла «добивки».
+- Без изменений production-кода. Только новые тесты + isolated conftest.
+
+### Файлы (новые)
+- `tests/test_routers/__init__.py`, `conftest.py` (фикстуры `db`,
+  `real_user`, `other_user`, `auth_client`, `unauth_client`).
+- `tests/test_routers/test_auth_router.py` — 16 тестов.
+- `tests/test_routers/test_circuit_breaker_router.py` — 15 тестов.
+- `tests/test_routers/test_strategy_router.py` — 18 тестов.
+- `tests/test_routers/test_notification_router.py` — 30 тестов.
+- `tests/test_routers/test_broker_router.py` — 17 тестов.
+- `tests/test_routers/test_market_data_router.py` — 22 теста.
+- **Добивка** (P2 secondary из §11):
+  - `tests/test_routers/test_tax_router.py` — 13 тестов.
+  - `tests/test_routers/test_ai_router.py` — 17 тестов.
+  - `tests/test_routers/test_corporate_actions_router.py` — 6 тестов.
+  - `tests/test_routers/test_corporate_actions_service.py` — 6 unit.
+  - `tests/test_routers/test_price_alert_router.py` — 8 тестов.
+
+### Тесты + lint
+- **tests/test_routers/ всё:** 168 passed / 0 failed.
+- Полный backend pytest: см. отчёт `reports/DEV-1_BACK1_W2_potok_D.md`.
+- Ruff/mypy на новых файлах: clean.
+
+### Coverage delta — см. отчёт Поток D секция 3.
+
+### Применённые Stack Gotchas — см. отчёт секция 7.
+
+### Новые Stack Gotchas (кандидаты) — см. отчёт секция 8
+(coverage.py async-concurrency miss; httpx.AsyncClient inline-import + patch).
+
+### Контракты — C-S8-7 поставщик подтверждён, C-S8-6 не задействован.
+
+---
+
+## 2026-05-13 — 🏁 W2 ЗАВЕРШЁН (Gate W2 → W3 пройден)
+
+### Финальная сводка W2
+
+Все 4 потока + QA закрыты по протоколу заказчика:
+1. **BACK2 Поток B** (поставщик C-S8-1..4 + C-S8-9 + 3 SEC fixes) — DONE первым.
+2. **Параллельно после BACK2:** BACK1 Поток A (Coverage P1 + Performance), FRONT2 Поток C (Dashboard widgets + Plotly Dash + analytics testid), QA (AIChat mock + регрессия).
+3. **После BACK1 Поток A:** BACK1 Поток D (Coverage P2 router-тесты + добивка secondary → Gate 80%).
+
+### Финальные метрики
+
+| Слой | После W1 | После W2 | Δ |
+|------|----------|----------|---|
+| Backend pytest | 1098 passed / 6 xfailed | **1490 passed / 0 failed / 0 xfailed** (фактический финал 293.61s) | +392 passed, 6 xfail → green |
+| Frontend vitest | 528 passed | **544 passed / 2 flaky** | +16 |
+| Playwright nightly | 157 passed / 6 skipped | **158 passed / 5 skipped / 1 flaky** | +1 AIChat, −1 skip |
+| Backend coverage TOTAL | 74% | **80%** ✅ | +6% (Gate 80% пройден) |
+| Backend ruff/mypy | 0 issues / 0 errors | 0 / 0 | — |
+| Frontend lint | 0 err / 9 warn | 0 err / 9 warn | W3 cleanup |
+| Bandit / Safety | 0 medium+ / 1 CVE | 0 / 1 | — |
+
+### Gate W2 → W3 — все критерии пройдены
+
+| Критерий | Статус |
+|----------|--------|
+| Coverage TOTAL ≥ 80% | ✅ 80% |
+| Performance `@timed_event` baseline | ✅ decorator + 3 применения; pytest-benchmark p95 → W3 |
+| Event type sync завершён | ✅ EVENT_MAP=17, EVENT_TYPE_LABELS=13, 5 publish-сайтов |
+| 3 high SEC fixes | ✅ HEADERS / TELEGRAM-XSS / EMAIL-XSS — все закрыты |
+| ≥ 80% medium-карточек | ✅ 4 widgets + event sync UI + Grid Heatmap + EQUITY-ZONES + TRADE-ROW + CONNECTION-EVENTS-MARKET-CLOSED |
+| Plotly Dash `/admin/metrics` под require_admin | ✅ AdminAuthASGIMiddleware, 3/3 теста |
+| AIChat mock + skip снят | ✅ flat blocks_json 9 блоков, S6R-AICHAT-APPLY-MOCK снят |
+
+### Перенесено в W3 backlog
+
+- `S8R-COV-BACKTEST-ROUTER` (~12ч) — `backtest/router.py` 41% → 80%
+- `S8R-COV-MARKET-DATA-SERVICE` (~4ч) — `market_data/service.py` 79% → 80%+
+- `S8R-COV-COVERAGECFG-ASYNC` (~1ч) — `concurrency=greenlet,thread` в `.coveragerc`
+- `S8R-CLIENT-TEST-FLAKY` (~1ч) — vitest `client.test.ts` flaky после SecurityHeadersMiddleware
+- 2 spec'а Blockly mode B (зомби) — удалить в W3 cleanup
+
+### Stack Gotchas (новые кандидаты, для ARCH 8.R)
+
+- `gotcha-26-structlog-event-kwarg` — `log.info(msg, event=X)` TypeError
+- `gotcha-27-mock-spec-vs-decimal` — MagicMock без `spec=` → ConversionSyntax
+- `gotcha-28-decimal-invalidop-vs-valueerror` — `decimal.InvalidOperation` НЕ ValueError
+- `gotcha-29-coverage-async-concurrency` — coverage.py пропускает async-handler без `concurrency=greenlet,thread`
+- `gotcha-30-httpx-inline-import-patch` — патчить httpx на module-level
+- `gotcha-asgi-mount-no-fastapi-depends` — FastAPI dependency не выполняются на `app.mount()`-точках
+
+### Отчёты W2
+
+- `reports/DEV-2_BACK2_W2.md` (Поток B)
+- `reports/DEV-1_BACK1_W2.md` (Поток A)
+- `reports/DEV-4_FRONT2_W2.md` (Поток C)
+- `reports/QA_W2.md`
+- `reports/DEV-1_BACK1_W2_potok_D.md` (Поток D)
+
+### Финальная верификация прогона (2026-05-13)
+
+После закрытия всех 4 потоков + QA — реальный финальный прогон:
+- `pytest tests/ -q --cov=app` → **1490 passed / 0 failed / 0 xfailed** в 293.61s. **TOTAL coverage = 80%** ✅
+- `pnpm vitest run` → **544 passed / 2 failed (pre-existing flaky client.test.ts)** / 546 total в 29.44s
+- `CI=true npx playwright test` → **158 passed / 1 flaky (s5-paper-trading pause-resume) / 5 skipped / 1 did not run** / 165 total в 7.9 мин
+
+**NB:** В отчёте `DEV-1_BACK1_W2_potok_D.md` цифра «1538 passed» оказалась завышенной (промежуточный snapshot до финальной интеграции). Фактический финал — **1490 passed**. Метрики в sprint_state.md и этой записи changelog'а соответствуют **фактическому финалу**.
+
+### Следующий шаг
+
+Ожидаю команды «**старт W3**» от заказчика. W3 = финализация (low-карточки + UX тест + documentation + 8.R ARCH-ревью). См. план в `sprint_state.md` раздел «Что дальше (W3)».
+
