@@ -10,6 +10,46 @@
 
 ---
 
+## 2026-05-14 — Sprint 8 W8c: daily_trade_limit фильтр по статусу + cleanup failed-сделок (`S8R-CB-DAILY-LIMIT-FAILED-FILTER`)
+
+### Что
+После W8b при попытке перезапустить сессии заказчик обнаружил: все 4 сессии **снова** в `paused` сразу после рестарта backend. Разбор показал: `_check_daily_trade_limit` считал **все** сделки за день, не фильтруя по статусу — 49 failed-сделок (наследие W7 «Not enough balance») зафиксировали 50/50 и блокировали торговлю до конца торгового дня даже после пополнения sandbox-баланса в W8a.
+
+Это классический баг **selection bias**: лимит должен защищать от избыточной **реальной** торговой активности, а failed-сделка — это попытка, отвергнутая брокером, никаких рисков она не несёт. Логика `_check_duplicate_instrument` уже использовала фильтр `status.in_(["filled", "pending"])` — здесь его забыли.
+
+### Реализация (TDD)
+
+**Red**: 2 теста в `tests/test_circuit_breaker/test_engine.py::TestDailyTradeLimit`:
+- `test_failed_trades_not_counted` — 10 failed при limit=5 → не блокирует.
+- `test_mixed_statuses_only_real_trades_count` — 3 filled + 1 closed + 1 pending + 10 failed → блокирует 5/5 (failed игнорируются).
+
+**Green**: добавлен фильтр `LiveTrade.status.in_(["filled", "closed", "pending"])` в `_check_daily_trade_limit`.
+
+**Cleanup БД**: транзакционно
+- `DELETE FROM live_trades WHERE status='failed' AND opened_at >= '2026-05-14 00:00:00'` → 49 строк удалено.
+- `UPDATE trading_sessions SET status='active' WHERE status='paused'` → 4 сессии разморожены.
+
+### Файлы
+
+**Develop backend:**
+- `app/circuit_breaker/engine.py` (M) — `_check_daily_trade_limit`: добавлен `.where(LiveTrade.status.in_(["filled", "closed", "pending"]))`.
+- `tests/test_circuit_breaker/test_engine.py` (M) — 2 новых теста.
+
+**test-репо документация:**
+- `Спринты/Sprint_8/changelog.md` — эта запись.
+- `Спринты/Sprint_8/sprint_state.md` — секция W8c.
+- `Документация по проекту/functional_requirements.md` — строка про daily_trade_limit фильтр (v2.8 → v2.9).
+
+### Результат
+- Backend pytest: **1578 passed / 0 failed** (1576 W8b baseline + 2 W8c).
+- БД: 0 paused, 4 active. 49 W7-failed сделок удалены. 1 старая failed (до сегодня) сохранена.
+- Backend перезапущен — runtime подхватил новую логику и активные сессии.
+
+### Тэг
+`v1.0-m4-production-ready` не перемещаем.
+
+---
+
 ## 2026-05-14 — Sprint 8 W8b: Circuit Breaker scope-fix + exit-bypass (`S8R-CB-SCOPE-AND-OPEN-POSITION`)
 
 ### Что
