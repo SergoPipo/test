@@ -15,10 +15,41 @@
 **Дата завершения W4:** 2026-05-13 (финализирующая волна — 12 из 18 carry-over закрыто + 1 partial, 6 + 1 → W5)
 **Дата завершения W5:** 2026-05-13 (вторая финализирующая волна — все 7 W4-переносных задач закрыты в текущем спринте по уточнению заказчика)
 **Дата завершения W5-hotfix:** 2026-05-13 (3 коммита: backtest UnboundLocal + e2e fixes + multicurrency unit-test → Gotcha 26 × 4 → broker cooldown bug. CI s8/sprint-8: **GREEN** на финальном коммите `366b7d5`)
+**Дата старта W7 (lethal hotfix):** 2026-05-14 (BUG-1 при acceptance: sandbox/real torgovlya не реализована в `OrderManager.process_signal`. Вариант C++ — immediate market-response без WS, ~1.5 дня)
+**Дата завершения W7:** 2026-05-14 (sandbox/real flow + recovery orphan pending. 13 новых тестов (8 process_signal + 5 recovery). Backend regression: **1560 passed / 0 failed** (1547 baseline + 13 new). ruff/mypy clean. Ждём live-test заказчиком + tag move.)
 
 ## Текущий шаг
 
-**🏁 Sprint 8 ЗАКРЫТ ОКОНЧАТЕЛЬНО (2026-05-13). M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. W4 закрыл 12/18 + 1 partial; W5 закрыл 7/7; W5-hotfix закрыл 4 production bug + 2 e2e fail + 1 unit-test gap. CI s8/sprint-8: GREEN. Все 36 carry-over закрыты внутри S8. Tag `v1.0-m4-production-ready` на `366b7d5`. Sprint_8_Review — финальная приёмка решений.**
+**🏁 Sprint 8 + W7 hotfix ЗАВЕРШЕНЫ КОДОМ (2026-05-14). Ожидается live-test sandbox-сессии заказчиком и финальный force-replace tag `v1.0-m4-production-ready` на новый HEAD. Acceptance возобновляется, Сценарий 2 (live торговля) теперь unblocked.**
+
+### W7 финальные метрики (2026-05-14)
+
+| Слой | После W5-hotfix | После W7 | Δ |
+|------|-----------------|----------|---|
+| Backend pytest | 1547 passed / 0 failed | **1560 passed / 0 failed** | +13 (8 sandbox-flow + 5 orphan-recovery) |
+| Backend ruff/mypy | 0 / 0 | 0 / 0 | — |
+| Frontend vitest/lint/tsc | 578 / 0 err / 0 errors | без изменений | — (W7 чисто backend) |
+| Файлы | — | engine.py (+~180 строк), runtime.py (+~150 строк), tests/test_trading/test_engine_sandbox_flow.py (NEW, 396 строк), tests/test_trading/test_runtime_orphan_recovery.py (NEW, 330 строк) | 2 новых, 2 изменённых |
+
+### W7 что закрыто
+
+| Карточка | Решение |
+|----------|---------|
+| `S8R-W7-SANDBOX-FLOW` | **Вариант C++:** `OrderManager.process_signal` для `mode in ("sandbox", "real")` теперь вызывает `_submit_order_to_broker(trade, session, direction, volume_lots)`. Метод подключает TInvestAdapter через новый `_resolve_broker_adapter` (sandbox=is_sandbox), отправляет market-order (price=None), резолвит `LiveTrade.status` по `OrderResponse.status`: `filled`/`partially_filled` → `filled` + `entry_price` из `response.price`; `rejected` → `failed` + `order.error` event; `placed` (edge case для market) → `pending` + WARNING (recovery подтянет); BrokerError → `failed` + `order.error`. WS `OrdersStream` не используется (все ордера = market, fill в response). |
+| `S8R-W7-RECOVERY-ORPHAN` | **`SessionRuntime._recover_orphan_pending_trades`** вызывается в начале `restore_all` (перед обработкой сессий). Сканирует `LiveTrade.status='pending' AND opened_at < now - 5min`. Для каждого orphan: если `broker_order_id IS NULL` → `failed` (до брокера не дошло); если `broker_order_id IS NOT NULL` → `adapter.get_order_state(order_id)` → `filled`/`failed`/keep pending. Ошибки в самом recovery (например, broker unavailable) тоже завершают trade как `failed`. Recovery не должен ронять весь restore_all (catch Exception на верхнем уровне). |
+
+### W7 файлы
+
+**Develop backend:**
+- `app/trading/engine.py` — process_signal sandbox/real ветка + `_submit_order_to_broker` + `_resolve_broker_adapter` + импорт `BrokerError`.
+- `app/trading/runtime.py` — `_resolve_broker_adapter` + `_recover_orphan_pending_trades` + вызов в начале `restore_all` (с try/except на верхнем уровне).
+- `tests/test_trading/test_engine_sandbox_flow.py` — NEW, 8 тестов (filled buy/sell, rejected, BrokerError, real-mode, placed edge, partially_filled, paper regression).
+- `tests/test_trading/test_runtime_orphan_recovery.py` — NEW, 5 тестов (orphan no broker_id, resolve filled, resolve rejected, recent pending не трогается, non-pending игнорируется).
+
+**Test-репо:**
+- `Документация по проекту/functional_requirements.md` — v2.5 → v2.6 (раздел Trading lifecycle hotfix + Recovery orphan + architectural constraint).
+- `Спринты/Sprint_8_Review/backlog.md` — карточка S8R-W7-SANDBOX-FLOW обновлена под Вариант C++.
+- `Спринты/Sprint_8_Review/acceptance_checklist.md` — BUG-1 описан, ждёт пометки FIXED после live-теста.
 
 ### W5 финальные метрики (2026-05-13)
 

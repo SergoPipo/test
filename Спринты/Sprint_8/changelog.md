@@ -10,6 +10,43 @@
 
 ---
 
+## 2026-05-14 — Sprint 8 W7: lethal hotfix `S8R-W7-SANDBOX-FLOW`
+
+### Что
+В ходе Sprint_8_Review acceptance (BUG-1) обнаружено что `OrderManager.process_signal` для `mode in ("sandbox", "real")` не отправлял ордера в T-Invest — trade оставался pending без `broker_order_id`, sandbox/real торговля по факту не работала. Тесты покрывали только `start_session` валидацию, не execution path. Реализован полный flow по Варианту C++ (см. `Sprint_8_Review/backlog.md`).
+
+### Файлы
+
+**Develop backend:**
+- `app/trading/engine.py` — process_signal sandbox/real ветка, `_submit_order_to_broker`, `_resolve_broker_adapter`. Логика: market-order → `OrderResponse.status` matching → trade.filled/failed/pending; BrokerError → failed. WS не используется (все ордера market, fill в response).
+- `app/trading/runtime.py` — `_resolve_broker_adapter` + `_recover_orphan_pending_trades`. Recovery вызывается в начале `restore_all` (с try/except верхнего уровня). Threshold = 5 минут. Логика: orphan без broker_order_id → failed; orphan с broker_order_id → `get_order_state` → filled/failed/keep pending.
+- `tests/test_trading/test_engine_sandbox_flow.py` — NEW, 8 тестов TDD: filled buy/sell, rejected, BrokerError, real-mode, placed edge, partially_filled, paper regression.
+- `tests/test_trading/test_runtime_orphan_recovery.py` — NEW, 5 тестов: orphan без broker_id, resolve filled, resolve rejected, recent pending не трогается, non-pending игнорируется.
+
+**Test-репо:**
+- `Документация по проекту/functional_requirements.md` — v2.5 → v2.6, раздел "Trading lifecycle (lethal hotfix)" + "Recovery orphan pending" + "Архитектурное ограничение" (все ордера = market).
+- `Спринты/Sprint_8/sprint_state.md` — секция W7 с метриками.
+- `Спринты/Sprint_8_Review/backlog.md` — карточка S8R-W7-SANDBOX-FLOW под Вариант C++.
+- `Спринты/Sprint_8_Review/acceptance_checklist.md` — BUG-1 описан.
+- `Спринты/project_state.md` — текущая фаза = W7.
+
+### Результат
+- Backend pytest: **1560 passed / 0 failed** (1547 baseline + 13 новых W7-тестов).
+- ruff/mypy: 0 issues на новых файлах.
+- Frontend без изменений (W7 чисто backend).
+- Sandbox-сессии теперь могут реально торговать: trade записывает `broker_order_id`, `entry_price` из `executed_order_price` T-Invest response, `status='filled'`. Stratagic `max_concurrent_positions=1` корректно разблокируется при закрытии позиции.
+- Recovery orphan pending защищает от повторения BUG-1: если backend упадёт между записью pending и отправкой в брокер, при следующем старте orphan trade будет помечен failed (если до брокера не дошёл) или резолвлен через get_order_state.
+
+### Архитектурное решение (фиксируется в проекте)
+В системе **все ордера = market** (algotrading: signal → market). Limit-orders и server-side stop-orders T-Invest **не используются**. SL/TP контролируется `RiskMonitor` через монитор текущей цены + market-close. Это значит WS `OrdersStream` подписка не нужна — `post_order` для market возвращает fill (`execution_report_status`, `executed_order_price`) синхронно. Если когда-то понадобится поддержать limit-orders или server-side stop-orders — добавится отдельным спринтом (полный объём: WS OrdersStream + scheduler-poll fallback + расширение multiplexer).
+
+### Дальше
+- Live-test: заказчик запускает sandbox-сессию, проверяет что trade открывается с filled status, broker_order_id, entry_price.
+- При успехе: `git commit` + `git push` + `git tag -f v1.0-m4-production-ready <new-HEAD>` + `git push --force-with-lease origin v1.0-m4-production-ready`.
+- BUG-1 в `acceptance_checklist.md` помечается FIXED. Acceptance возобновляется по Сценарию 2 и далее.
+
+---
+
 ## 2026-05-12 — Sprint 8 инициализирован
 
 ### Что

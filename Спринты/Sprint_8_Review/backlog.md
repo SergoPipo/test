@@ -460,3 +460,59 @@
 - Реальные production p95 числа через `/admin/metrics` Plotly Dash после первого deployment — для сравнения с synthetic baseline из `perf_baseline_w5.md`.
 
 **Sprint_8_Review остаётся для проверки решений и тестирования** (не накопления carry-over).
+
+---
+
+## Sprint 8 W7 — Lethal hotfix: Sandbox/Real trading flow (2026-05-14)
+
+### `S8R-W7-SANDBOX-FLOW` (lethal, ~2.5–3 дня)
+
+**Контекст:** в ходе Acceptance Sprint_8_Review (BUG-1) выявлено, что **sandbox/real торговля в `engine.process_signal` не реализована**. `TInvestAdapter.place_order` имеет полный код, но не вызывается из основного flow обработки сигналов. `on_order_filled` callback — dead code (0 caller'ов). Тесты покрывают только `start_session` валидацию, не execution path.
+
+**Влияние:** любая sandbox-сессия создаёт `LiveTrade(status=pending)` без `broker_order_id`, который никогда не resolved. Live-режим неработоспособен по той же причине. Тэг `v1.0-m4-production-ready` по факту относится только к paper-trading.
+
+**Выбранная архитектура (Вариант C++):**
+
+После уточнения через context7 (T-Invest Python SDK docs) выяснено: `post_order` для **market-order** возвращает в response `execution_report_status`, `executed_order_price`, `total_order_amount`, `executed_commission` — то есть **fill приходит синхронно**. В нашей системе все ордера = market (algotrading: signal → market-order), limit-orders не используются, server-side stop-orders T-Invest не используются (SL/TP контролируется RiskMonitor через market-close). Поэтому WS OrdersStream архитектурно избыточен.
+
+- **Sandbox/Real:** `adapter.place_order(market)` → response с execution_report_status + executed_order_price.
+  - `FILL`/`PARTIALLY_FILL` → `trade.broker_order_id`, `trade.entry_price=executed_order_price`, `trade.filled_lots`, `status=filled`. Publish `trade.opened` event.
+  - `REJECTED` → `trade.status=failed`. Publish `order.error` event с reason.
+  - `NEW` (edge-case, не должно случаться для market) → trade.broker_order_id записан, status остаётся pending. WARNING лог. Recovery подтянет.
+  - Exception → `trade.status=failed`. Publish `order.error`.
+- **Recovery orphan pending** при старте backend (`runtime.restore_all`):
+  - pending старше 5 мин + `broker_order_id IS NULL` → `failed` ("до брокера не дошло").
+  - pending + `broker_order_id IS NOT NULL` → `adapter.get_order_state(order_id)` → resolve по same matching как выше.
+- **НЕ реализуется:** WS OrdersStream, scheduler-poll-job, расширение multiplexer.py, dead-code `on_order_filled` (всё синхронно в process_signal).
+
+**TDD план (правило проекта для trading/critical-path):**
+1. Red: ~10 unit-тестов с моками TInvestAdapter:
+   - sandbox: place_order вызывается, broker_order_id записан, status=filled, entry_price=response.fill_price.
+   - real: place_order вызывается, broker_order_id записан, status=pending.
+   - real: OrdersStream callback → on_order_filled → status=filled.
+   - recovery: orphan без broker_order_id → failed.
+   - recovery: orphan с broker_order_id → get_order_state → resolve.
+   - error path: BrokerError → trade.status=failed, order.error event published.
+2. Green: имплементация в `engine.py`, `runtime.py`, `multiplexer.py`.
+3. Refactor: extract `_submit_order_to_broker` helper.
+
+**Файлы:**
+- `app/trading/engine.py` (process_signal ветка sandbox/real, ~50 строк)
+- `app/trading/runtime.py` (recovery orphan pending в restore_all, ~30 строк)
+- `tests/test_trading/test_engine_sandbox_flow.py` (новый, ~150 строк, ~8 тестов)
+- `tests/test_trading/test_runtime_recovery.py` (расширение, +50 строк, ~3 теста)
+- ФТ v2.5 → v2.6 (раздел Order lifecycle)
+- (ТЗ не трогаем — нет архитектурных изменений)
+
+**Оценка после recalibrate:** **~1–1.5 рабочих дня** (вместо 2.5–3 при Variant A с WS).
+
+**Acceptance criteria:**
+- pytest test_trading green (новые тесты + регресс старых).
+- Заказчик запускает sandbox-сессию, видит filled trade с broker_order_id, entry_price, p&l. Сверяет в T-Invest sandbox UI/API что ордер реально есть.
+- `acceptance_checklist.md` Сценарий 2 → ✅.
+
+**После реализации:**
+- Tag `v1.0-m4-production-ready` force-replace на новый HEAD коммит s8/sprint-8.
+- `Sprint_8/changelog.md` обновлён с W7-секцией.
+- `Sprint_8/sprint_state.md` отражает W7.
+- BUG-1 в `acceptance_checklist.md` помечен как FIXED.

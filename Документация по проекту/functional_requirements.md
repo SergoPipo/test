@@ -11,15 +11,19 @@
 
 | Версия | Дата | Спринт | Ключевые изменения |
 |--------|------|--------|-------------------|
+| 2.6 | 2026-05-14 | S8 W7 | **Lethal hotfix:** sandbox/real order lifecycle. `OrderManager.process_signal` теперь действительно отправляет market-orders в T-Invest (sandbox через `post_sandbox_order`, real через `post_order`) — до W7 ветка sandbox/real была пуста и trade навсегда оставался pending. Recovery orphan pending trades при старте backend (`SessionRuntime._recover_orphan_pending_trades`). |
 | 2.5 | 2026-05-13 | S8 W3 | M4 Production-ready: admin role + admin panel + Plotly Dash metrics, security headers (CSP/HSTS/XFO/...), event sync (EVENT_MAP 12→17, EVENT_TYPE_LABELS 13→17), dashboard widgets (Health/Sparkline/Balance/ActivePositions), performance instrumentation (@timed_event), `/api/v1/health` extended fields |
 | 2.4 | 2026-04-26 | S7 R | Feature-complete Phase 1 (drawing tools editing, grid search, AI commands, background backtests) |
 | 2.3 | 2026-04-15 | S6 R | Notifications fully integrated, paper trading SL/TP |
 | ... | | | (см. git log по этому файлу) |
 
-### S8 Production-ready additions (v2.5)
+### S8 Production-ready additions (v2.5–v2.6)
 
 | Раздел | Дополнение | Спринт |
 |--------|-----------|--------|
+| **Trading lifecycle (lethal hotfix)** | `OrderManager.process_signal` для sandbox/real теперь синхронно вызывает `TInvestAdapter.place_order` (market-order) и резолвит `LiveTrade.status` по `execution_report_status` в response: `filled`/`partially_filled` → `filled` + `entry_price` из `executed_order_price`; `rejected` → `failed` + `order.error` event; `placed` (edge) → `pending` + WARNING (recovery подтянет); BrokerError exception → `failed`. До W7 эта ветка отсутствовала — sandbox/real trade оставался pending без `broker_order_id`. | S8 W7 |
+| **Recovery orphan pending** | `SessionRuntime._recover_orphan_pending_trades` запускается в начале `restore_all`. Pending trade старше 5 минут: без `broker_order_id` → `failed`; с `broker_order_id` → `adapter.get_order_state` → `filled`/`failed`/остаётся pending по статусу. Это safety-net для случая, когда backend упал в момент отправки ордера. | S8 W7 |
+| **Архитектурное ограничение** | Все ордера в системе = `market` (algotrading: signal → market-order). Limit-orders и server-side stop-orders T-Invest **не используются** — SL/TP контролируется RiskMonitor через market-close. WS `OrdersStream` подписка не нужна, т.к. fill для market приходит синхронно в response. | S8 W7 |
 | Авторизация | **Роль администратора (admin)** — `users.is_admin` + bootstrap первого зарегистрированного, CLI `grant_admin`, Sidebar `IconShield` для админов, `ProtectedAdminRoute` | S8 W1 |
 | Безопасность | Заголовки CSP / HSTS / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy (SecurityHeadersMiddleware) | S8 W2 |
 | Безопасность | XSS-protection в Telegram + Email диспетчерах: `html.escape` на user-content до HTML parse_mode | S8 W2 |

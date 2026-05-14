@@ -240,7 +240,7 @@
 
 > Формат: `BUG-N | severity: lethal/critical/medium/low | где | что | приоритет фикса`
 
-- BUG-_(пусто пока)_
+- **BUG-1 ✅ FIXED 2026-05-14 (Sprint 8 W7) | severity: lethal | `app/trading/engine.py`, `app/trading/runtime.py` | Sandbox/real торговля не была реализована в `engine.process_signal`. Trade создавался со `status=pending`, `TInvestAdapter.place_order` никем не вызывался. Реализовано в W7 (Вариант C++): `_submit_order_to_broker` отправляет market-order и резолвит trade по `OrderResponse.status`; `_recover_orphan_pending_trades` зачищает orphan'ы при старте backend. 13 новых тестов (8 sandbox-flow + 5 orphan-recovery), backend regression 1560/0 passed. ФТ v2.5 → v2.6.** Ожидается live-test заказчиком для финального подтверждения.
 
 ---
 
