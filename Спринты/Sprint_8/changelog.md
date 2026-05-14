@@ -10,6 +10,53 @@
 
 ---
 
+## 2026-05-14 — Sprint 8 W8d: sandbox post-place polling + W7 recovery typo fix (`S8R-SANDBOX-PLACED-POLLING`)
+
+### Что
+После W8c при первых же сигналах в sandbox-сессиях все trades застряли в `pending` без `entry_price`. Разбор выявил **два связанных бага**:
+
+**BUG-6: T-Invest sandbox возвращает PLACED, а не синхронный FILL.** В W7 архитектурно положились на доку SDK о том, что для market-order `post_order` возвращает `executed_order_price` сразу в response. Это **верно для production**, но **неверно для sandbox** — sandbox симулирует асинхронность биржи. Наша ветка `placed` в `_submit_order_to_broker` оставляла trade в pending с пометкой «recovery подтянет», но recovery срабатывает только при рестарте → между рестартами сделки висели как призраки.
+
+**BUG-8: опечатка W7 в orphan recovery.** В `runtime.py:785` вызывался `adapter.get_order_state(...)`, но реальный метод адаптера называется `get_order_status` (см. `BaseBrokerAdapter.get_order_status`). Тесты W7 использовали `AsyncMock()` без `spec=`, который соглашался с любым именем атрибута → опечатка не была поймана и проявилась только в production: `AttributeError` → trade.failed. Recovery вообще не работал с момента W7.
+
+### Реализация (TDD)
+
+**W8d-1 (BUG-8 fix)**:
+- `app/trading/runtime.py:785` — `get_order_state` → `get_order_status` (1 строка) + комментарий-предупреждение.
+- `tests/test_trading/test_runtime_orphan_recovery.py` — переименование mock-методов в существующих тестах + **новый регрессионный тест** `TestRegressionAdapterMethodName::test_recovery_uses_existing_adapter_method` использует `AsyncMock(spec=BaseBrokerAdapter)` — любая опечатка в имени метода в будущем будет поймана сразу.
+
+**W8d-2 (BUG-6 polling)**:
+- Константы `MARKET_PLACED_POLL_RETRIES=5`, `MARKET_PLACED_POLL_INTERVAL_SEC=1.0` в `app/trading/engine.py`.
+- Helper `OrderManager._poll_order_status_until_filled(adapter, order_id)`: цикл `await asyncio.sleep + adapter.get_order_status` до терминального статуса или истечения retries.
+- Ветка `placed` в `_submit_order_to_broker` теперь после WARNING-лога вызывает polling. Результаты: `filled/partially_filled` → trade.filled + entry_price + event_bus(trade.opened); `rejected/cancelled` → trade.failed; timeout → pending (recovery подтянет).
+
+**Cleanup БД**: `UPDATE live_trades SET status='pending', closed_at=NULL WHERE id IN (14, 15) AND status='failed'` — возвращаем 2 сделки, которые BUG-8 неверно пометил failed, обратно в pending для корректного recovery после рестарта.
+
+### Файлы
+
+**Develop backend:**
+- `app/trading/runtime.py` (M) — фикс опечатки + комментарий.
+- `app/trading/engine.py` (M) — `import asyncio`, константы polling, `BaseBrokerAdapter` импорт, helper `_poll_order_status_until_filled`, рефактор ветки `placed`.
+- `tests/test_trading/test_runtime_orphan_recovery.py` (M) — 4 mock-переименования + новый тест с `spec=`.
+- `tests/test_trading/test_engine_sandbox_flow.py` (M) — 3 новых теста polling (filled / timeout / rejected), удалён старый `test_market_placed_keeps_pending`.
+
+**test-репо документация:**
+- `Спринты/Sprint_8/changelog.md` — эта запись.
+- `Спринты/Sprint_8/sprint_state.md` — секция W8d.
+- `Документация по проекту/functional_requirements.md` — строка про polling (v2.9 → v2.10).
+
+### Результат
+- Backend pytest: **1581 passed / 0 failed** (1578 W8c baseline + 3 новых polling + 1 регрессионный adapter method − 1 удалённый старый).
+- 14/15 возвращены в pending. После рестарта recovery вызовет правильный `get_order_status` → корректный финальный статус.
+
+### BUG-7 (database is locked) — Sprint 9
+SQLite WAL под concurrent-нагрузкой эпизодически даёт `PendingRollbackError`. Транзакции откатываются и ретраятся — данные не теряются, но это шум в логах. Правильный фикс — переход на PostgreSQL в Sprint 9 (Перевод в продуктив). Зафиксирован в backlog.
+
+### Тэг
+`v1.0-m4-production-ready` не перемещаем.
+
+---
+
 ## 2026-05-14 — Sprint 8 W8c: daily_trade_limit фильтр по статусу + cleanup failed-сделок (`S8R-CB-DAILY-LIMIT-FAILED-FILTER`)
 
 ### Что
