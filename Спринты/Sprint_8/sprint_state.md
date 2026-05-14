@@ -19,6 +19,8 @@
 **Дата завершения W7:** 2026-05-14 (sandbox/real flow + recovery orphan pending. 13 новых тестов (8 process_signal + 5 recovery). Backend regression: **1560 passed / 0 failed** (1547 baseline + 13 new). ruff/mypy clean. Develop fbd616b, test 06fe1ac, tag перемещён на fbd616b.)
 **Дата старта W8a (sandbox balance):** 2026-05-14 (live-test W7 показал что sandbox-аккаунт пустой → 'Not enough balance'. T-Invest sandbox UI не позволяет указать начальный баланс — добавляем поле в наш AddBrokerForm с auto-topup через `SandboxService.SandboxPayIn`)
 **Дата завершения W8a:** 2026-05-14 (TInvestAdapter.sandbox_pay_in + get_sandbox_balance; BrokerService.top_up_sandbox_to + auto-topup в create_account; 2 endpoint'а GET/POST sandbox-balance/sandbox-topup; UI поле в AddBrokerForm + Modal в BrokerAccountList. **10 новых backend-тестов в test_broker/test_sandbox_balance.py, всё passed.** ФТ v2.6 → v2.7.)
+**Дата старта W8b (CB scope-fix + exit-bypass):** 2026-05-14 (live-инцидент: 4 sandbox-сессии встали `paused` с `daily_trade_limit=50/50` за 2 минуты — эффект домино + зависание открытых позиций при срабатывании CB. Тикет: `S8R-CB-SCOPE-AND-OPEN-POSITION`.)
+**Дата завершения W8b:** 2026-05-14 (1) Явная карта `CB_SCOPE_ALL_SESSIONS` в `circuit_breaker/engine.py`: `daily_loss_limit`, `max_drawdown`, **`daily_trade_limit`** паузят ALL, остальные — OWN. 2) Exit-bypass в `runtime._handle_candle` через helper `_is_exit_signal` — при открытой противоположной позиции CB пропускается. 3) **6 новых тестов** (3 scope + 3 exit-bypass). Backend regression: **1576 passed / 0 failed** (1570 W8a baseline + 6). Plan 002 поднят со Среднего до Высокого приоритета — без UI CB пользователь не понимает причин паузы.
 
 ## Текущий шаг
 

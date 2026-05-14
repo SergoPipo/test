@@ -10,6 +10,45 @@
 
 ---
 
+## 2026-05-14 — Sprint 8 W8b: Circuit Breaker scope-fix + exit-bypass (`S8R-CB-SCOPE-AND-OPEN-POSITION`)
+
+### Что
+По итогам разбора live-инцидента (4 sandbox-сессии встали `paused` в течение 2 минут с `daily_trade_limit=50/50`) выявлены 2 архитектурных дефекта Circuit Breaker:
+
+1. **Эффект домино**: `daily_trade_limit` считается user-wide (`COUNT(LiveTrade)` по всем сессиям user), но наказывал per-session — каждый сигнал в очередной сессии триггерил CB и паузил эту сессию, эффект распространялся серией событий.
+2. **Зависание открытой позиции**: при срабатывании CB сессия переводилась в `paused` безусловно, даже если в ней есть открытая позиция. Поскольку выход = новый сигнал в обратную сторону → новый сигнал блокируется CB → позиция остаётся открытой под TP/SL или ручным stop.
+
+### Реализация (TDD Red→Green→Refactor)
+
+**W8b-1 (scope-map)**: явная карта `CB_SCOPE_ALL_SESSIONS` в `app/circuit_breaker/engine.py`. `daily_loss_limit`, `max_drawdown`, **`daily_trade_limit`** — паузят ВСЕ активные сессии user. Остальные 6 проверок — только свою.
+
+**W8b-2 (exit-bypass)**: helper `_is_exit_signal(db, session_id, action)` в `app/trading/runtime.py`. Если у сессии есть открытая `filled`-позиция в направлении, противоположном сигналу → CB пропускается, ордер идёт сразу в OrderManager. Pyramid (BUY поверх BUY) — не exit, CB вызывается.
+
+### Файлы
+
+**Develop backend:**
+- `app/circuit_breaker/engine.py` (M) — `CB_SCOPE_ALL_SESSIONS: frozenset`, рефактор условия `pause_all` через карту.
+- `app/trading/runtime.py` (M) — `_CBResultPass`, `_is_exit_signal`, ветка bypass перед вызовом CB в `_handle_candle`.
+- `tests/test_circuit_breaker/test_engine.py` (M) — `TestScopeMap`: 3 теста (daily_trade_limit→ALL, position_size_limit→OWN, insufficient_funds_streak→OWN).
+- `tests/test_trading/test_runtime.py` (M) — 3 теста exit-bypass (exit пропускает CB, entry без позиций вызывает CB, pyramid вызывает CB).
+
+**test-репо документация:**
+- `Спринты/Планы на развитие/002_circuit_breaker_ui.md` — приоритет Средний → **Высокий**, секция «Обновления 2026-05-14» (3 нюанса для UI).
+- `Спринты/Планы на развитие/README.md` — приоритет 002 в реестре.
+- `Спринты/Sprint_8/changelog.md` — эта запись.
+- `Спринты/Sprint_8/sprint_state.md` — секция W8b.
+
+### Результат
+- Backend pytest: **1576 passed / 0 failed** (1570 W8a baseline + 6 W8b).
+- `py_compile` 2 файлов: OK.
+- 4 paused-сессии в БД (4 события `daily_trade_limit`) разморожены `UPDATE trading_sessions SET status='active' WHERE status='paused'`.
+- Backend restart выполнен (PID 46093) — runtime подхватил новый scope-map и exit-bypass.
+
+### Тэг
+`v1.0-m4-production-ready` не перемещаем — W8b ужесточает риск-семантику, но не меняет acceptance-критерии M4.
+
+---
+
 ## 2026-05-14 — Sprint 8 W8a: sandbox balance management
 
 ### Что
