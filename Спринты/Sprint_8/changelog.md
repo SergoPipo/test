@@ -10,6 +10,42 @@
 
 ---
 
+## 2026-05-14 — Sprint 8 W8a: sandbox balance management
+
+### Что
+По итогам live-теста W7 (sandbox-сессия GAZP создала 4 trade.failed подряд) выяснилось — T-Invest sandbox-аккаунт создаётся с **нулевым балансом** и любой ордер падает с `'Not enough balance'` (StatusCode.INVALID_ARGUMENT '30034'). В T-Invest sandbox UI нет возможности задать начальный баланс — это делается **только через API** (`SandboxService.SandboxPayIn`). Добавили в наш UI поле «Начальный баланс sandbox» при создании аккаунта + кнопку «Пополнить» для существующих.
+
+### Файлы
+
+**Develop backend:**
+- `app/broker/tinvest/adapter.py` — методы `sandbox_pay_in(account_id, amount, currency)` через `client.sandbox.sandbox_pay_in(MoneyValue)`, `get_sandbox_balance` через `get_sandbox_portfolio.total_amount_currencies`. Оба отказывают (`BrokerError`) при не-sandbox адаптере. Используют `decimal_to_quotation` + `MoneyValue` из `tinkoff.invest`.
+- `app/broker/schemas.py` — `BrokerAccountCreate.sandbox_initial_balance: Decimal | None = None` (опционально, ge=0), новые `SandboxBalanceResponse` и `SandboxTopUpRequest`.
+- `app/broker/service.py` — `BrokerService.get_sandbox_balance(account_pk, user_id)` и `top_up_sandbox_to(account_pk, user_id, target_balance, currency='rub')`. В `create_account` после `db.commit()` для sandbox-аккаунтов с заданным `sandbox_initial_balance` — auto-topup с try/except (ошибка topup не блокирует создание).
+- `app/broker/router.py` — `GET /api/v1/broker-accounts/{id}/sandbox-balance`, `POST /api/v1/broker-accounts/{id}/sandbox-topup` (422 для production-аккаунтов).
+- `tests/test_broker/test_sandbox_balance.py` — NEW, **10 тестов:** TestAdapterSandboxPayIn (3), TestAdapterGetSandboxBalance (2), TestServiceTopUpSandbox (3), TestServiceGetSandboxBalance (2). Все passed.
+
+**Develop frontend:**
+- `src/api/brokerApi.ts` — расширение `BrokerAccountCreate` полем `sandbox_initial_balance?: number`, новые типы `SandboxBalance`, `SandboxTopUpRequest`, методы `getSandboxBalance`, `topUpSandbox`.
+- `src/components/settings/AddBrokerForm.tsx` — поле `NumberInput` «Начальный баланс sandbox (₽)» (default 1 000 000, thousand separator), показывается если хотя бы один из обнаруженных счетов is_sandbox. Значение передаётся в `addAccount` payload как `sandbox_initial_balance`.
+- `src/components/settings/BrokerAccountList.tsx` — для sandbox-аккаунтов в колонке «Баланс» отображается значение из `getSandboxBalance` + кнопка-ActionIcon `IconCoin` (open top-up modal). Modal с NumberInput, текущий баланс, кнопкой «Пополнить» через `topUpSandbox(target_balance)`.
+
+**Test-репо:**
+- `Документация по проекту/functional_requirements.md` — v2.6 → v2.7, секция «Sandbox balance management».
+- `Спринты/Sprint_8/sprint_state.md` — секция W8a (метрики, файлы).
+
+### Результат
+- Backend pytest: **1570 passed / 0 failed** (1560 W7 + 10 W8a).
+- Frontend lint 0/0, tsc 0 errors, settings vitest 9/9 (BrokerAccountList + AddBrokerForm).
+- Заказчик при создании sandbox-аккаунта указывает начальный баланс в форме → backend выполняет PayIn → sandbox имеет деньги для торговли → W7 flow работает с filled trades (а не failed).
+- Архитектурный нюанс: T-Invest sandbox API позволяет ТОЛЬКО `PayIn` (пополнение). Чтобы уменьшить баланс — закрыть sandbox-аккаунт и создать новый. UI явно об этом предупреждает в описании поля.
+
+### Дальше
+- Live-test: заказчик пополняет sandbox-аккаунт #3 «Сэндбокс» на 1 000 000 ₽ через новый UI (на странице Settings → Brokers → IconCoin), перезапускает sandbox-сессии (или ждёт следующего сигнала), проверяет что новый trade имеет filled status + broker_order_id + entry_price.
+- При успехе — пополнение через UI стало стандартным сценарием. Tag `v1.0-m4-production-ready` останется на W7 коммите (sandbox balance — это UX-добавление, не изменение архитектуры trading flow).
+- Остальные находки W7 live-теста (BUG-3 Invalid Date, BUG-4 «2 ч. назад», BUG-5 5 строк vs 4 trades) — отдельный W8b/W8c hotfix.
+
+---
+
 ## 2026-05-14 — Sprint 8 W7: lethal hotfix `S8R-W7-SANDBOX-FLOW`
 
 ### Что

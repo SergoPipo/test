@@ -16,7 +16,9 @@
 **Дата завершения W5:** 2026-05-13 (вторая финализирующая волна — все 7 W4-переносных задач закрыты в текущем спринте по уточнению заказчика)
 **Дата завершения W5-hotfix:** 2026-05-13 (3 коммита: backtest UnboundLocal + e2e fixes + multicurrency unit-test → Gotcha 26 × 4 → broker cooldown bug. CI s8/sprint-8: **GREEN** на финальном коммите `366b7d5`)
 **Дата старта W7 (lethal hotfix):** 2026-05-14 (BUG-1 при acceptance: sandbox/real torgovlya не реализована в `OrderManager.process_signal`. Вариант C++ — immediate market-response без WS, ~1.5 дня)
-**Дата завершения W7:** 2026-05-14 (sandbox/real flow + recovery orphan pending. 13 новых тестов (8 process_signal + 5 recovery). Backend regression: **1560 passed / 0 failed** (1547 baseline + 13 new). ruff/mypy clean. Ждём live-test заказчиком + tag move.)
+**Дата завершения W7:** 2026-05-14 (sandbox/real flow + recovery orphan pending. 13 новых тестов (8 process_signal + 5 recovery). Backend regression: **1560 passed / 0 failed** (1547 baseline + 13 new). ruff/mypy clean. Develop fbd616b, test 06fe1ac, tag перемещён на fbd616b.)
+**Дата старта W8a (sandbox balance):** 2026-05-14 (live-test W7 показал что sandbox-аккаунт пустой → 'Not enough balance'. T-Invest sandbox UI не позволяет указать начальный баланс — добавляем поле в наш AddBrokerForm с auto-topup через `SandboxService.SandboxPayIn`)
+**Дата завершения W8a:** 2026-05-14 (TInvestAdapter.sandbox_pay_in + get_sandbox_balance; BrokerService.top_up_sandbox_to + auto-topup в create_account; 2 endpoint'а GET/POST sandbox-balance/sandbox-topup; UI поле в AddBrokerForm + Modal в BrokerAccountList. **10 новых backend-тестов в test_broker/test_sandbox_balance.py, всё passed.** ФТ v2.6 → v2.7.)
 
 ## Текущий шаг
 
