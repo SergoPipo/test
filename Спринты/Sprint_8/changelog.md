@@ -10,6 +10,55 @@
 
 ---
 
+## 2026-05-14 — Sprint 8 W8e: T-Invest get_order_status / cancel_order требуют account_id (`S8R-TINVEST-ACCOUNT-ID-REQUIRED`)
+
+### Что
+После W8d рестарт recovery всё ещё валился с `failed`. В логах ясная причина: T-Invest gRPC API вернул `INVALID_ARGUMENT '30021' Missing parameter: account_id`. Комментарий в `tinvest/adapter.py:714,738` (от W5/S5) `"T-Invest SDK требует, но игнорирует"` оказался **неверен** — для sandbox API account_id обязателен.
+
+Из-за этого:
+- `get_order_status` никогда не работал в production с момента S5.
+- W8d polling тоже был сломан (использует ту же сигнатуру).
+- W7 orphan recovery тоже не работал (BUG-8 опечатка + BUG-9 пустой account_id).
+
+### Реализация
+
+**Изменение публичного контракта** `BaseBrokerAdapter`:
+- `cancel_order(order_id)` → `cancel_order(account_id, order_id)`
+- `get_order_status(order_id)` → `get_order_status(account_id, order_id)`
+
+**Реализация в адаптерах:**
+- `TInvestAdapter.cancel_order` и `get_order_status` передают `account_id` в `client.sandbox.cancel_sandbox_order` / `get_sandbox_order_state` / `client.orders.*` вместо пустой строки.
+- `PaperBrokerAdapter.cancel_order` и `get_order_status` — добавлен параметр `account_id` для совместимости интерфейса (не используется в paper-логике).
+
+**Обновлены callers:**
+- `runtime.py:_recover_orphan_pending_trades` — извлекает `tinvest_account_id` из `_resolve_broker_adapter(session)` и передаёт в `get_order_status`.
+- `engine.py:_poll_order_status_until_filled` — принимает `account_id`, передаёт в adapter.
+- `engine.py:_submit_order_to_broker` — передаёт `tinvest_account_id` в polling.
+
+**Тесты:**
+- `tests/unit/test_broker/test_adapter_full.py` — все вызовы `cancel_order` / `get_order_status` обновлены (6 мест).
+- `tests/test_trading/test_paper_engine.py::test_cancel_order_returns_false` — добавлен account_id.
+- `tests/test_trading/test_engine_sandbox_flow.py::test_market_placed_polled_to_filled` — assert на `await_args.args[0] == "test_account_id"` (catch будущих регрессий сигнатуры).
+
+### Файлы
+- `app/broker/base.py` (M) — abstract метод сигнатуры.
+- `app/broker/tinvest/adapter.py` (M) — `cancel_order` + `get_order_status`.
+- `app/trading/paper_engine.py` (M) — обе сигнатуры.
+- `app/trading/runtime.py` (M) — orphan recovery с tinvest_account_id.
+- `app/trading/engine.py` (M) — polling с account_id.
+- `tests/unit/test_broker/test_adapter_full.py` (M).
+- `tests/test_trading/test_paper_engine.py` (M).
+- `tests/test_trading/test_engine_sandbox_flow.py` (M).
+
+### Результат
+- Backend pytest: **1581 passed / 0 failed** (без изменения числа тестов, изменена только сигнатура).
+- 14/15 повторно возвращены в pending для следующего рестарта.
+
+### Тэг
+`v1.0-m4-production-ready` не перемещаем.
+
+---
+
 ## 2026-05-14 — Sprint 8 W8d: sandbox post-place polling + W7 recovery typo fix (`S8R-SANDBOX-PLACED-POLLING`)
 
 ### Что
