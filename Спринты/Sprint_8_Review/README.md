@@ -1,11 +1,18 @@
 # Финальное ревью после Sprint 8
 
-> **Milestone M4: Production-ready**
+> **Milestone M4: Production-ready (по коду)**
 > Охватывает: Sprint 7 (Should-фичи + Полировка) + Sprint 8 (Стабилизация)
+>
+> **Решение от 2026-05-14:** ревью = ручная приёмка реализации на текущем dev-окружении. Перевод в продуктив (Mac mini Docker, canary, watchdog, deploy.sh) вынесен в отдельный **Sprint 9 "Перевод в продуктив"**, стартующий после Gate Sprint_8_Review.
 
 ## Цель
 
-Финальное ревью всего проекта перед релизом: coverage 80%, security audit, performance, полное регрессионное тестирование.
+Проверить корректность всей реализации S7+S8 (M4 Production-ready по коду) живым кликом на dev-окружении (`./scripts/start.sh`, localhost). Найденные баги фиксятся в `s8/sprint-8` ветке (как в W4/W5). Gate ревью — вердикт PASS / PASS WITH NOTES / NEED FIXES — открывает старт Sprint 9.
+
+**Не в scope ревью:**
+- Развёртывание на Mac mini (Docker, LAN, backup, launchd) → Sprint 9.
+- Canary-инстанс, deploy.sh, watchdog → Sprint 9.
+- Перенос БД из dev-окружения в Docker volume → Sprint 9.
 
 ## Что реализовано к этому моменту
 
@@ -23,34 +30,29 @@ _Заполняется после завершения Sprint 8._
 
 ## Порядок работы
 
-1. **UI-проверки (Playwright)** → [ui_checklist_s8_review.md](ui_checklist_s8_review.md)
-   - **Полная регрессия** всех UI-проверок за все спринты (S1-S8)
-   - Финальный прогон перед релизом
-   - Скриншоты в `e2e/screenshots/s8-review/`
-   - При ❌ → исправление → повторный прогон
+1. **Ручная приёмка** → [acceptance_checklist.md](acceptance_checklist.md) — главный артефакт ревью.
+   - Шаг 0: Pre-flight (запускается ли dev-окружение).
+   - Шаг 1: Smoke по основным страницам.
+   - Шаг 2: 6 сквозных сценариев (S8.15 из ui_checklist_s8).
+   - Шаг 3: 17 секций / 136 пунктов ui_checklist_s8.
+   - Шаг 4: Финальный отчёт в `acceptance_report.md`.
 
-2. **Финальная актуализация ФТ/ТЗ** → `Документация по проекту/`
-   - Собрать все изменения за S7+S8 (changelog, sprint_report, решения заказчика)
-   - Финальная сверка ФТ/ТЗ с реализацией — **все разделы** должны соответствовать коду
-   - Обновить `functional_requirements.md`, `technical_specification.md`, `development_plan.md`
+2. **Реактивные багфиксы** при находках lethal/critical → коммит в `s8/sprint-8` ветку (тэг `S8R-ACCEPTANCE-FIX-*`).
 
-3. **Ревью кода** → [code_review.md](code_review.md)
-   - Расширенный чеклист: архитектура, безопасность, performance
-   - Security audit (OWASP top 10)
-   - Coverage проверка (≥ 80%)
+3. **Backlog находок** medium/low → накапливается в [backlog.md](backlog.md) и либо закрывается в текущем S8 (как W4/W5), либо переносится в Sprint 9.
 
-4. **Бэклог доработок** → [backlog.md](backlog.md)
-
-5. **Выполнение** → [execution_log.md](execution_log.md)
+4. **Подпись отчёта** [acceptance_report.md](acceptance_report.md) — вердикт PASS / PASS WITH NOTES / NEED FIXES. Это gate перед Sprint 9.
 
 ## Файлы
 
 | Файл | Описание |
 |------|----------|
-| [ui_checklist_s8_review.md](ui_checklist_s8_review.md) | UI-чеклист: полная регрессия S1-S8 (финальная) |
-| [code_review.md](code_review.md) | Расширенный чеклист ревью (production-ready) |
-| [backlog.md](backlog.md) | Финальные доработки |
-| [execution_log.md](execution_log.md) | Лог выполнения |
+| [acceptance_checklist.md](acceptance_checklist.md) | **Главный артефакт.** Чек-лист приёмки с местом для заметок/багов. Заказчик заполняет вручную. |
+| [acceptance_report.md](acceptance_report.md) | Финальный отчёт с вердиктом (создаётся в конце). |
+| [backlog.md](backlog.md) | Накопительный backlog: что закрылось в W4/W5 + новые находки. |
+| [ui_checklist_s8_review.md](ui_checklist_s8_review.md) | (старая структура; новый смысл переехал в acceptance_checklist.md) |
+| [code_review.md](code_review.md) | (старая структура; не используется в новом подходе) |
+| [execution_log.md](execution_log.md) | (старая структура) |
 
 ## Предыдущее ревью
 

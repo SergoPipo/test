@@ -3,11 +3,15 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-05-13 (Sprint 8 — 🏁 ЗАКРЫТ ОКОНЧАТЕЛЬНО + W4+W5+W5-hotfix. CI s8/sprint-8: **GREEN** на `366b7d5`. Tag `v1.0-m4-production-ready` поставлен. M4 Production-ready достигнут. ARCH 8.R: PASS WITH NOTES. Все 36 carry-over закрыты внутри спринта. 4 production bug дополнительно найдены и исправлены в W5-hotfix).
+> Последнее обновление: 2026-05-14 (Sprint 8 закрыт по коду; Sprint_8_Review запущен как ручная приёмка на dev-окружении. Перевод в продуктив (Mac mini Docker, canary, watchdog, deploy.sh) вынесен в новый **Sprint 9 "Перевод в продуктив"**, стартующий после Gate Sprint_8_Review).
 
 ---
 
-## Текущий спринт: **Sprint 8 — 🏁 ЗАКРЫТ ОКОНЧАТЕЛЬНО (W3+8.R+W4+W5+W5-hotfix)** (2026-05-13). **M4 Production-ready достигнут.** CI GREEN, tag `v1.0-m4-production-ready` на `366b7d5`. Далее: Sprint_8_Review (финальная приёмка + post-production observations).
+## Текущая фаза: **Sprint_8_Review — ручная приёмка реализации S8 на dev-окружении**
+
+- **Sprint 8 (код)** — 🏁 закрыт окончательно 2026-05-13 (W3+8.R+W4+W5+W5-hotfix). M4 Production-ready достигнут. CI GREEN, tag `v1.0-m4-production-ready` на `366b7d5`. Все 36 carry-over закрыты внутри спринта.
+- **Sprint_8_Review** — 🔄 в процессе (старт 2026-05-14). Артефакт: `Спринты/Sprint_8_Review/acceptance_checklist.md` — 4 шага / 136 пунктов / 6 сквозных сценариев на `start.sh` localhost. Заказчик прокликивает вручную, баги lethal/critical фиксятся реактивно в `s8/sprint-8` ветке.
+- **Sprint 9 "Перевод в продуктив"** — ⬜ запланирован, стартует после Gate Sprint_8_Review (PASS / PASS WITH NOTES). Содержание (из дизайна 2026-05-13): фаза 9.1 = Mac mini Docker prod (18080) + LAN + backup на USB-флешку; фаза 9.2 = canary (18081) + TRADING_ENABLED guard + heartbeat endpoint + deploy.sh + watchdog + launchd. Спека-черновик: `docs/superpowers/specs/2026-05-13-s8-w6-design.md` (переименуется при старте Sprint 9).
 
 ## Прогресс по спринтам
 
