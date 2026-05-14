@@ -10,6 +10,62 @@
 
 ---
 
+## 2026-05-14 — Sprint 8 W8f: datetime UTC serialization + trades idempotency (`S8R-DATETIME-UTC-AND-IDEMPOTENCY`)
+
+### Что
+Три связанных бага по UI после W8e:
+
+**BUG-3: «Invalid Date» в TradesTable**. SQLite/SQLAlchemy возвращали `datetime` без TZ, Pydantic v2 сериализовал в naive ISO (`'2026-05-14T19:30:00.123456'`). Safari отказывался парсить такие строки в `new Date()`, в UI отображалось `Invalid Date`.
+
+**BUG-4: «2 ч. назад» для свежих уведомлений**. То же naive ISO — JS трактовал строку как **local time**. В MSK (UTC+3) backend пишет UTC, frontend парсит как «местное» → разница 3 часа: «только что» отображалось как «2-3 часа назад» в `NotificationDrawer` и `NotificationList`.
+
+**BUG-5: 5 строк в TradesTable vs 4 в БД**. `tradingStore.addTradeFromWS` добавлял trade в начало массива **без проверки уникальности** по `trade.id`. При повторной отправке WS-события `trade.opened`/`trade.filled` (race с recovery, реconnect, дублирование `event_bus.publish`) одна и та же сделка задваивалась.
+
+### Реализация
+
+**Backend (root cause BUG-3/4)**:
+- Новый helper `app/common/datetime_utils.py::iso_utc(dt)` — добавляет `Z`-суффикс к naive UTC datetime, для aware datetime возвращает `dt.isoformat()` как есть.
+- `TradeResponse` (opened_at, closed_at) и `NotificationResponse` (created_at) — `@field_serializer(when_used="json")` через `iso_utc`. JSON-сериализация теперь содержит `Z`: `"2026-05-14T19:30:00.123456Z"`.
+
+**Frontend (safety-net BUG-3/4)**:
+- Новый `src/utils/dateParsing.ts::parseBackendDate(input)` — двойная защита: заменяет пробел между датой и временем на `T`, добавляет `Z` если нет TZ-индикатора, возвращает `null` при невалидном вводе.
+- `TradesTable.formatDate` — использует `parseBackendDate`, при `null` рендерит `—`.
+- `NotificationDrawer.formatRelativeTime` и `NotificationList.formatRelativeTime` — то же самое.
+
+**Frontend (BUG-5 idempotency)**:
+- `tradingStore.addTradeFromWS` — поиск по `trade.id`: если найден → replace (update in place); иначе → prepend.
+
+### Файлы
+
+**Develop backend:**
+- `app/common/datetime_utils.py` (A) — helper `iso_utc`.
+- `app/trading/schemas.py` (M) — `field_serializer` на TradeResponse.
+- `app/notification/schemas.py` (M) — `field_serializer` на NotificationResponse.
+
+**Develop frontend:**
+- `src/utils/dateParsing.ts` (A) — `parseBackendDate` helper.
+- `src/utils/__tests__/dateParsing.test.ts` (A) — 7 unit-тестов (Z-суффикс, naive UTC, микросекунды, space-вместо-T, aware datetime, null/undefined, неваленый).
+- `src/components/trading/TradesTable.tsx` (M) — formatDate через parseBackendDate.
+- `src/components/notifications/NotificationDrawer.tsx` (M) — formatRelativeTime через parseBackendDate.
+- `src/components/notifications/NotificationList.tsx` (M) — formatRelativeTime через parseBackendDate.
+- `src/stores/tradingStore.ts` (M) — addTradeFromWS idempotency.
+
+**test-репо документация:**
+- `Спринты/Sprint_8/changelog.md` — эта запись.
+- `Спринты/Sprint_8/sprint_state.md` — секция W8f.
+- `Документация по проекту/functional_requirements.md` — строки v2.11 → v2.12.
+
+### Результат
+- Backend pytest: **1581 passed / 0 failed** (без изменения числа тестов).
+- Frontend vitest (utils): **7 passed / 0 failed** (новые dateParsing-тесты).
+- Frontend tsc: 0 errors.
+- Sanity-check Pydantic: `TradeResponse.model_dump_json()` теперь содержит `"opened_at":"2026-05-14T19:30:00.123456Z"`.
+
+### Тэг
+`v1.0-m4-production-ready` не перемещаем.
+
+---
+
 ## 2026-05-14 — Sprint 8 W8e: T-Invest get_order_status / cancel_order требуют account_id (`S8R-TINVEST-ACCOUNT-ID-REQUIRED`)
 
 ### Что
