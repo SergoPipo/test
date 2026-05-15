@@ -10,6 +10,74 @@
 
 ---
 
+## 2026-05-15 — Sprint 8 W8i: КОРНЕВОЙ БАГ — неверный ORDER_STATUS_MAP (`S8R-PROTO-ENUM-ALIGNMENT`)
+
+### Что
+В ходе изучения почему **ни одна** sandbox-сделка не получает `entry_price` (зависает в pending несмотря на работающий W8d polling, W8e account_id, W8h TTL recovery) — **проведён прямой эксперимент с T-Invest API через диагностический скрипт** (`scripts/diag_sandbox_orders.py`).
+
+**Результат эксперимента**: T-Invest sandbox **исполняет** все варианты ордеров (MARKET без order_id, MARKET с order_id, LIMIT по last_price, LIMIT с buffer) — каждый возвращает `lots_executed=1, executed_order_price=325.60 ₽, execution_report_status=1`.
+
+**Корневой баг**: наш `ORDER_STATUS_MAP` в `mapper.py:70-81` **сдвинут относительно официального `.proto`-контракта** [orders.proto](https://github.com/RussianInvestments/investAPI/blob/main/src/docs/contracts/orders.proto):
+
+| int | .proto (правильно) | Sprint 1–8 (баг) |
+|-----|---------------------|------------------|
+| 1 | EXECUTION_REPORT_STATUS_FILL | `"new"` ❌ |
+| 2 | REJECTED | `"partially_filled"` ❌ |
+| 3 | CANCELLED | `"filled"` ❌ |
+| 4 | NEW | `"cancelled"` ❌ |
+| 5 | PARTIALLYFILL | `"replaced"` ❌ |
+| 6-9 | (не существуют) | мусор: `pending_cancel/rejected/pending_new/pending_replace` ❌ |
+
+T-Invest возвращал `int=1` (FILL), наш код интерпретировал как `"new"` → ветка polling → 5 сек таймаут → trade.status='pending' навсегда. **Это был корневой баг с самого Sprint 1**.
+
+### Реализация (TDD)
+
+**Обновлены mapping-таблицы** в `mapper.py`:
+- `ORDER_STATUS_MAP` (W8i variant B): только 0–5 со значениями по `.proto`, удалены значения 6–9 как мусор.
+- `ACCOUNT_STATUS_MAP`: добавлено `4 → "all"` (мета-значение для фильтров).
+- `ACCOUNT_TYPE_MAP`: добавлены `5 → "debit"`, `6 → "saving"`.
+- В `order_response_to_order_response.status_simple_map` удалён dead-code `"pending_new" → "placed"`.
+
+**Регрессионная защита**: новый класс `TestProtoEnumAlignmentW8i` в `tests/unit/test_broker/test_mapper.py` с цитатами из официального `.proto` (URL фиксирован), 5 тестов:
+- `test_order_status_map_matches_proto` — int↔string для 0..5.
+- `test_order_status_map_has_no_garbage_after_5` — guard против повторного появления 6-9.
+- `test_account_status_map_matches_proto`.
+- `test_account_type_map_matches_proto`.
+- `test_trading_status_map_matches_proto`.
+
+Плюс `TestOrderResponseMappingW8i` (4 теста: FILL → filled, NEW → placed, REJECTED → rejected, PARTIALLYFILL → partially_filled) и `TestOrderStateMappingW8i` (2 теста: FILL → "filled", NEW → "new") — для проверки полного pipeline маппинга.
+
+**Диагностический скрипт** `scripts/diag_sandbox_orders.py` — однократный исполнитель эксперимента с T-Invest sandbox. Делает 4 варианта `post_sandbox_order`, затем `get_sandbox_order_state` через 5 сек, отменяет все ордера. Не часть production-кода, но оставлен в репо для будущих сверок.
+
+### Файлы
+
+**Develop backend:**
+- `app/broker/tinvest/mapper.py` (M) — исправлен ORDER_STATUS_MAP, добавлены значения в ACCOUNT_STATUS_MAP / ACCOUNT_TYPE_MAP, удалён dead-code `pending_new` в status_simple_map.
+- `tests/unit/test_broker/test_mapper.py` (M) — 11 новых тестов (3 класса).
+- `scripts/diag_sandbox_orders.py` (A) — диагностический скрипт с цитатами из эксперимента.
+
+**test-репо документация:**
+- `Документация по проекту/tinvest_api_services.md` — новый раздел «Приложение: enum-значения protobuf» с таблицами всех актуальных значений + ссылки на источники.
+- `Документация по проекту/tinvest_api_sandbox.md` — note про W8i в секции «Исполнение заявок».
+- `Спринты/Sprint_8/changelog.md` — эта запись.
+- `Спринты/Sprint_8/sprint_state.md` — секция W8i.
+
+### Результат
+- Targeted regression (test_trading + test_circuit_breaker + test_broker + unit/test_broker): **358 passed / 0 failed**.
+- Все 11 новых W8i-тестов проходят.
+- После рестарта backend новые sandbox-сделки получат корректный `entry_price` сразу, мгновенно (T-Invest исполняет market в sandbox по last_price, как заложено в дизайн API).
+
+### Историческое значение
+W8d (polling), W8e (account_id), W8h (TTL+periodic recovery) — все эти волны лечили **симптомы** одного и того же бага в mapping таблице. После W8i:
+- **W8d polling**: остаётся как fallback для редких случаев низкой ликвидности и для production-эндпоинта (хотя в production T-Invest sync fill = иммедиатный, polling завершится после первой же итерации).
+- **W8e account_id**: остаётся правильным фиксом (T-Invest API действительно требует).
+- **W8h TTL + periodic recovery**: остаётся как safety-net для случая когда ордер реально низколиквиден.
+
+### Тэг
+`v1.0-m4-production-ready` не перемещаем.
+
+---
+
 ## 2026-05-15 — Sprint 8 W8h: TTL для зависших pending + periodic recovery (`S8R-STALE-PENDING-TTL-CANCEL`)
 
 ### Что
