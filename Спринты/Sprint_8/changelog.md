@@ -10,6 +10,52 @@
 
 ---
 
+## 2026-05-15 — Sprint 8 W8h: TTL для зависших pending + periodic recovery (`S8R-STALE-PENDING-TTL-CANCEL`)
+
+### Что
+BUG-11 (2026-05-15, 12:08 MSK): новая sandbox-сессия SBER открыла BUY-сделку в 10:00 MSK → T-Invest sandbox вернул PLACED → polling W8d (5 сек) не дождался fill → trade застрял в `pending`. Через ~2 часа ордер `d4e9229c` всё ещё в book'е T-Invest (status='new', нет встречной заявки в sandbox-симуляции). Recovery после рестарта в 10:36 правильно опросил T-Invest, увидел `state='new'` → оставил pending. Это **тупик**: `max_concurrent_positions=1` заполнен висящим pending, стратегия не может торговать (логи `max_positions_reached` × N раз), а трейд не закроется без рестарта.
+
+Корень: до W8h `_recover_orphan_pending_trades` для state='new' просто оставлял pending без таймаута. Также recovery вызывался только при `restore_all` (рестарт), не периодически.
+
+### Реализация (TDD)
+
+**Константы в `SessionRuntime`**:
+- `STALE_PENDING_CANCEL_THRESHOLD_SEC = 1800` (30 мин) — TTL, после которого зависший в `new` ордер отменяется.
+- `PERIODIC_RECOVERY_INTERVAL_SEC = 60` — частота фонового цикла recovery.
+
+**Изменения в `_recover_orphan_pending_trades`** (ветка state='new'):
+- Если `trade.opened_at` старше STALE-TTL → `adapter.cancel_order(account_id, order_id)`, status='failed', closed_at=now.
+- Если cancel падает с exception (T-Invest уже не помнит ордер) → exception ловится, статус всё равно становится failed (иначе trade навсегда блокирует сессию).
+- Если age < STALE-TTL → как раньше, оставляем pending.
+
+**Periodic recovery task**:
+- Новый метод `SessionRuntime._periodic_recovery_loop()` — фоновый цикл `asyncio.sleep(60s) + _recover_orphan_pending_trades` пока `_shutting_down=False`.
+- `restore_all` создаёт `_periodic_recovery_task` через `asyncio.create_task`. Idempotent: повторный вызов не создаёт второй task.
+- `shutdown()` отменяет task через `.cancel()` + await.
+- Внутренние exception ловятся, не ломают цикл.
+
+### Файлы
+
+**Develop backend:**
+- `app/trading/runtime.py` (M) — 2 константы, `_periodic_recovery_loop`, ветка TTL-cancel в `_recover_orphan_pending_trades`, создание/отмена task в `restore_all` / `shutdown`, поле `_periodic_recovery_task`.
+- `tests/test_trading/test_runtime_orphan_recovery.py` (M) — новый `TestStalePendingCancel` (3 теста: above TTL → cancel + failed; below TTL → kept pending; above TTL + cancel raises → всё равно failed).
+
+**test-репо документация:**
+- `Спринты/Sprint_8/changelog.md` — эта запись.
+- `Спринты/Sprint_8/sprint_state.md` — секция W8h.
+- `Документация по проекту/functional_requirements.md` — строка v2.13 → v2.14.
+
+### Результат
+- Test runtime_orphan_recovery: **9 passed / 0 failed** (6 baseline + 3 W8h).
+- Targeted regression (test_trading + test_circuit_breaker + test_broker): зелёный.
+- После рестарта backend periodic recovery каждые 60 сек подхватит зависшие pending; через 30 мин (STALE TTL) застрявший ордер автоматически отменится → trade=failed → стратегия разблокирована.
+- Текущая сделка id=15 (age ≈ 2ч 8м) автоматически отменится при первом же цикле recovery после рестарта W8h.
+
+### Тэг
+`v1.0-m4-production-ready` не перемещаем.
+
+---
+
 ## 2026-05-15 — Sprint 8 W8g: ручное закрытие позиции для sandbox/real + проверка торговых часов (`S8R-MANUAL-CLOSE-SANDBOX-REAL`)
 
 ### Что
