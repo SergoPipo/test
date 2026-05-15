@@ -10,6 +10,64 @@
 
 ---
 
+## 2026-05-15 — Sprint 8 W8g: ручное закрытие позиции для sandbox/real + проверка торговых часов (`S8R-MANUAL-CLOSE-SANDBOX-REAL`)
+
+### Что
+До W8g `OrderManager.close_position` поддерживал только paper-режим. Для sandbox/real путь `mode == "paper"` не срабатывал, ордер брокеру **не отправлялся**, но `RiskMonitor._apply_close` всё равно ставил `status='closed'` в БД → drift между нашей БД и T-Invest. На стороне T-Invest sandbox/real позиция оставалась открытой, деньги заблокированы; наш UI показывал «закрыто».
+
+Кроме того, проверка торговых часов отсутствовала — даже в paper-логике (где это не критично). Для sandbox/real попытка закрыться во внеторговое время вызвала бы непонятный gRPC-фейл T-Invest.
+
+### Реализация (TDD)
+
+**Helper** `app/common/trading_hours.py::is_within_trading_hours(now, start, end)`:
+- Defaults: 10:00-23:50 MSK (основная + вечерняя сессии MOEX).
+- Принимает опциональный `now` (для тестов).
+- Naive datetime трактуется как MSK; aware приводится к MSK через `astimezone`.
+
+**`engine.close_position` (W8g)**:
+- Paper-ветка — без изменений (regression).
+- Новая ветка `mode in ("sandbox", "real")`:
+  1. `is_within_trading_hours()` → если False, `raise ValidationError(...)` 422.
+  2. `_resolve_broker_adapter(session)` → `(adapter, tinvest_account_id)`.
+  3. `adapter.place_order(account_id, ticker, direction=opposite, quantity, price=None)`.
+  4. response.status == filled/partially_filled → `exit_price = response.price`.
+  5. response.status == placed → `_poll_order_status_until_filled(account_id, order_id)`:
+     - filled → `exit_price = polled.average_price`.
+     - rejected/cancelled → `ValidationError("Брокер отклонил...")`.
+     - timeout → `ValidationError("Ордер ушёл, ждёт исполнения...")`, trade остаётся `filled`.
+  6. response.status == rejected → `ValidationError("Брокер отклонил...")`.
+  7. `adapter.disconnect()` в `finally`.
+- exit_price: приоритет — цена от брокера; fallback — последняя котировка из `OHLCVCache`.
+
+**Тесты** (`tests/test_trading/test_engine_close_position_w8g.py`):
+- `TestCloseSandboxCallsBroker::test_sandbox_close_filled` — SELL для BUY-позиции, `account_id="test_account_id"`, `exit_price` из response.
+- `TestCloseRealCallsBroker::test_real_close_filled` — то же для `mode='real'`.
+- `TestCloseOutsideTradingHours::test_sandbox_outside_hours_raises` — mock `is_within_trading_hours → False`, `place_order` НЕ вызывается, `ValidationError`.
+- `TestCloseSandboxPollingFlow::test_close_polling_until_filled` — PLACED → polling → filled, проверка `account_id` в polling-вызове.
+- `TestClosePaperRegression::test_paper_close_does_not_call_tinvest` — paper не зовёт `_resolve_broker_adapter`.
+
+### Файлы
+
+**Develop backend:**
+- `app/common/trading_hours.py` (A) — helper.
+- `app/trading/engine.py` (M) — import + close_position W8g-ветка.
+- `tests/test_trading/test_engine_close_position_w8g.py` (A) — 5 новых тестов.
+
+**test-репо документация:**
+- `Спринты/Sprint_8/changelog.md` — эта запись.
+- `Спринты/Sprint_8/sprint_state.md` — секция W8g.
+- `Документация по проекту/functional_requirements.md` — строка v2.12 → v2.13.
+
+### Результат
+- Targeted regression (test_trading + test_circuit_breaker + test_broker): **215 passed / 0 failed**.
+- Все 5 новых W8g-тестов проходят.
+- `py_compile` engine.py + trading_hours.py: OK.
+
+### Тэг
+`v1.0-m4-production-ready` не перемещаем.
+
+---
+
 ## 2026-05-14 — Sprint 8 W8f: datetime UTC serialization + trades idempotency (`S8R-DATETIME-UTC-AND-IDEMPOTENCY`)
 
 ### Что

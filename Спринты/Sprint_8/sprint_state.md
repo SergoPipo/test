@@ -29,6 +29,8 @@
 **Дата завершения W8e:** 2026-05-14 Изменение публичного контракта `BaseBrokerAdapter`: `cancel_order(account_id, order_id)`, `get_order_status(account_id, order_id)`. Обновлены TInvestAdapter, PaperBrokerAdapter, runtime._recover_orphan_pending_trades, engine._poll_order_status_until_filled и все тесты (3 файла). Backend regression: **1581 passed / 0 failed**. 14/15 повторно возвращены в pending.
 **Дата старта W8f (datetime UTC + idempotency):** 2026-05-14 (BUG-3 Invalid Date в TradesTable; BUG-4 «2 ч. назад» в уведомлениях; BUG-5 5 строк vs 4 в БД. Тикет: `S8R-DATETIME-UTC-AND-IDEMPOTENCY`.)
 **Дата завершения W8f:** 2026-05-14 Backend: helper `iso_utc` + `@field_serializer` в TradeResponse / NotificationResponse — JSON теперь с Z-суффиксом. Frontend: `parseBackendDate` (заменяет space на T, добавляет Z) — используется в TradesTable + 2 notifications. `tradingStore.addTradeFromWS` идемпотентен по trade.id. **7 новых frontend-тестов**. Backend regression: **1581 passed / 0 failed**, frontend tsc 0 errors. ФТ v2.11 → v2.12.
+**Дата старта W8g (BUG-10 manual close):** 2026-05-15 (для sandbox/real `OrderManager.close_position` не отправлял ордер брокеру — drift БД vs T-Invest. Тикет: `S8R-MANUAL-CLOSE-SANDBOX-REAL`.)
+**Дата завершения W8g:** 2026-05-15 (1) helper `app/common/trading_hours.py::is_within_trading_hours` (10:00-23:50 MSK defaults). 2) close_position новая ветка для sandbox/real: pre-check торговых часов → 422; иначе place_order(opposite direction) + polling (W8d-style) + резолв filled/placed/rejected/timeout. 3) **5 новых тестов**: sandbox/real close, outside hours, polling, paper regression. Targeted regression: **215 passed / 0 failed**. ФТ v2.12 → v2.13.
 
 ## Текущий шаг
 
