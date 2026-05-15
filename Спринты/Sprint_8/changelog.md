@@ -10,6 +10,119 @@
 
 ---
 
+## 2026-05-15 — Sprint 8 W8k: stale-render карты сессии при возврате назад (`S8R-SESSION-DASHBOARD-STALE`)
+
+### Что
+
+Frontend-баг, подмечен заказчиком после W8j: на странице `/trading` клик по карточке сессии A открывает её карту, кнопка «Назад» возвращает на список, клик по другой сессии B показывает **карту сессии A** (не B) — пока fetchSession не подтянет новые данные.
+
+### Причина
+
+`SessionDashboard.tsx:80-96` рендерит `const session = activeSession` напрямую из `tradingStore`. `activeSession` не очищается при размонтировании, поэтому при mount нового SessionDashboard (для другого sessionId):
+
+- `activeSession` остаётся = «предыдущая сессия» (нет cleanup в store/в компоненте).
+- `loading` = false (с прошлого успешного fetch).
+- Существующие guards `if (loading && !activeSession)` и `if (!activeSession)` оба false → первый render проходит со stale данными.
+- Только спустя ~50–200 мс fetchSession обновляет `activeSession` на правильный id.
+
+### Изменения в коде
+
+**`Develop/frontend/src/components/trading/SessionDashboard.tsx`** — две защиты:
+
+1. В `useEffect([sessionId, ...])` перед fetchSession вызываем `useTradingStore.setState({ activeSession: null })`, чтобы сбросить stale значение до начала async загрузки.
+2. Guard перед `const session = activeSession`: если `activeSession === null` **или** `activeSession.id !== sessionId` — показываем `<Loader/>` (заменено на единый блок вместо двух старых guards).
+
+### Файлы
+
+- `Develop/frontend/src/components/trading/SessionDashboard.tsx` (M)
+
+### Результат
+
+- `npx tsc --noEmit` 0 errors.
+- Сценарий «открыл A → назад → открыл B» теперь корректно показывает Loader на ~ 50–200 мс вместо stale карты A.
+- Защита двойная: даже если очистка в useEffect не успеет (Strict Mode, повторные mount), id-mismatch guard поймает несовпадение URL и store.
+
+---
+
+## 2026-05-15 — Sprint 8 W8j: фейковый PnL и пауза с открытой позицией (`S8R-PRICE-SOURCE-FIX` + `S8R-CB-FORCE-CLOSE`)
+
+### Что
+
+Регрессия от W8i. После починки `ORDER_STATUS_MAP` (FILL=1 → "filled") синхронная ветка `_submit_order_to_broker` стала срабатывать, и в неё попал «спящий» баг — `response.price` (=`executed_order_price` из `PostOrderResponse`) в T-Invest sandbox приходит **как total executed value** (price × lots), а не per-share, как формально декларирует `.proto`. Код записывал это в `LiveTrade.entry_price` и `volume_rub = entry_price × filled_lots`, получая инфляцию в `lots`-раз.
+
+**Реальный инцидент 2026-05-15 (trade #17, session #3, SBER):**
+
+| Поле | Должно быть | Записано |
+|------|-------------|----------|
+| `entry_signal_price` | 325.44 | 325.44 ✅ |
+| `entry_price` | 325.44 | **9763.20** ❌ (= 325.44 × 30) |
+| `exit_price` | ~325 | **9372.672** ❌ |
+| `volume_rub` | ~9763 | **292 896** ❌ (= 9763.2 × 30) |
+| `pnl` | ~0 | **−11 715.84** ❌ |
+
+Каскад: фейковая `entry_price` → стратегия видит «падение 97%» → exit-bypass из W8b закрывает позицию за 3 сек → фейковый `pnl=-11715` фиксируется → `daily_loss_limit` срабатывает с действием `all_sessions_paused` (W8b scope: дневной убыток — про капитал user).
+
+Заказчик корректно поднял два независимых вопроса:
+
+1. Откуда «-11715 при минимальной разнице цен?» — root bug `executed_order_price` ≠ per-share.
+2. «Как сессия с активной позицией может встать на паузу?» — W8b CB-pause только меняет `session.status`, открытые позиции висят. По договорённости 2026-05-15 (Вариант B) — при CB-trigger принудительно закрывать открытые позиции в затронутых сессиях.
+
+### Изменения в коде
+
+**`app/trading/engine.py`**:
+
+- `_submit_order_to_broker` синхронная ветка `filled/partially_filled` — после `place_order` теперь **всегда** вызываем `adapter.get_order_status(account_id, response.order_id)` и берём `average_position_price` (per-share по контракту T-Invest `.proto`). `response.price` используется только как fallback при exception. Промежуточные переменные `state_avg`/`state_qty` + откат в `except` защищают от частичного обновления и от AsyncMock без `spec=` (Gotcha 27).
+- `close_position` ветка `sandbox/real` — симметричный фикс: `broker_exit_price = response.price`, далее `try get_order_status` → если есть `state.average_price`, перезаписать.
+- Поведение poll-ветки (status='placed') не трогалось — там уже было `polled_state.average_price` (правильно).
+
+**`app/circuit_breaker/engine.py`** (Вариант B):
+
+- Новый метод `_force_close_open_positions(session_ids, reason)`: ленивый импорт `OrderManager`, поиск `LiveTrade.status='filled'` в затронутых сессиях, `OrderManager.close_position(trade_id, reason=f"cb_{event_type}")` для каждого; per-trade exception swallow.
+- В `_trigger()` после смены `session.status='paused'` сохраняется список `affected_session_ids` и вызывается `_force_close_open_positions`. Best-effort — ошибки close не блокируют trigger и EventBus publish.
+
+### Тесты
+
+**`tests/test_trading/test_engine_sandbox_flow.py::TestW8jEntryPriceFromOrderState` (3 теста, W8j-1):**
+
+- `test_filled_uses_average_price_not_response_price` — response.price=9763.20 (total), state.average_price=325.44 → entry_price=325.44. Точное воспроизведение инцидента.
+- `test_filled_fallback_to_response_price_when_state_unavailable` — exception в get_order_status → fallback на response.price.
+- `test_close_position_exit_price_from_order_state` — exit-цена для sandbox close тоже из get_order_status.
+
+**`tests/test_circuit_breaker/test_engine.py::TestScopeMap::test_daily_loss_force_closes_open_positions_w8j` (1 тест, W8j-2):** две paper-сессии с открытыми позициями → trigger `daily_loss_limit` → обе сессии `paused` И обе позиции `closed`.
+
+Регрессия: `tests/test_trading/test_engine_sandbox_flow.py` — 13/13 passed (включая 3 ранее существующих filled-теста, прошли благодаря defensive-fallback в `except`).
+
+### Восстановление данных (по согласованию с заказчиком)
+
+Скрипт `backend/scripts/restore_w8j_inconsistent_data.py`:
+
+- `live_trades #17`: entry/exit/volume_rub/pnl пересчитаны от `entry_signal_price=325.44`, `pnl=0` (фейковые числа не известны точно — фиксируем как «нулевой результат»).
+- `circuit_breaker_events #18`: удалено (`daily_loss_limit` был спровоцирован фейковым PnL).
+- `trading_sessions #3`: `paused` → `active`.
+
+Скрипт идемпотентен.
+
+### Файлы
+
+- `app/trading/engine.py` (M)
+- `app/circuit_breaker/engine.py` (M) — `_force_close_open_positions` + `_trigger` интеграция
+- `tests/test_trading/test_engine_sandbox_flow.py` (M)
+- `tests/test_circuit_breaker/test_engine.py` (M)
+- `scripts/restore_w8j_inconsistent_data.py` (A)
+- `stack_gotchas/gotcha-33-tinvest-sandbox-executed-price-vs-per-share.md` (A)
+- `stack_gotchas/INDEX.md` (M) — строка #33, version 10
+- `Спринты/Sprint_8/sprint_state.md` (M) — секция W8j
+- `Спринты/Sprint_8/changelog.md` (M)
+
+### Результат
+
+- W8j-1/2 тесты GREEN (4/4).
+- sandbox_flow regression: 13/13 passed.
+- Sandbox-сделки теперь получают **корректный per-share entry_price**, при срабатывании CB открытые позиции **закрываются автоматически**, а не висят в воздухе.
+- Документирован Gotcha 33 — про неконсистентность sandbox с `.proto`-контрактом.
+
+---
+
 ## 2026-05-15 — Sprint 8 W8i: КОРНЕВОЙ БАГ — неверный ORDER_STATUS_MAP (`S8R-PROTO-ENUM-ALIGNMENT`)
 
 ### Что
