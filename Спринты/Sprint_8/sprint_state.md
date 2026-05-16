@@ -43,6 +43,8 @@
 **Дата завершения W8l:** 2026-05-15 (1) `CandlestickChart`: `autoScale: false` применяется через `requestAnimationFrame` после `setVisibleRange` — Y фиксируется на видимом диапазоне, drag по Y работает, свечи не сжимаются. (2) `TradeMarkerPrimitive`: размеры ×2 (font 11→22, arrow 8→16, line 14→28), collision detection через placedBoxes + extraOffset сдвиг при пересечении (10 итераций safety). tsc 0 errors.
 **Дата старта W8m (Telegram daily-stat — нулевые сделки при открытых позициях):** 2026-05-15 (отчёт показывал «0 сделок» при реально открытых, дублировал метки одинаково названных сессий, win_pct=100% при любом положительном total. Тикет: `S8R-DAILY-STAT-OPEN-CLOSED-SPLIT`.)
 **Дата завершения W8m:** 2026-05-15 `scheduler/service.send_daily_stats` переписан: источник — `LiveTrade` напрямую, агрегаты opened/closed/wins/realized + unrealized из OHLCVCache. Метка `{strategy} ({ticker mode}) #id`. Регрессия scheduler: **15 passed / 0 failed**.
+**Дата старта W8n (sparkline 24h на дашборде всегда пуст):** 2026-05-16 (заказчик: виджет `SBER · 24h` показывал «Нет данных за 24 ч» и в выходные, и в торговые дни. Тикет: `S8R-SPARKLINE-TIMEFRAME-TYPO`.)
+**Дата завершения W8n:** 2026-05-16 `market_data/router.py:get_sparkline` передавал `timeframe="5min"` вместо канонического `"5m"` — фильтр кеша `WHERE timeframe='5min'` всегда давал 0 строк (5550 SBER-точек лежали под `'5m'`). Опечатка с Sprint 8 W2. Фикс — одна строка + regression-тест `test_sparkline_uses_5m_timeframe` блокирует возврат. Tests: **4 passed / 0 failed**.
 
 ## Текущий шаг
 

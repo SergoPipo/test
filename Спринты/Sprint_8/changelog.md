@@ -10,6 +10,51 @@
 
 ---
 
+## 2026-05-16 — Sprint 8 W8n: dashboard sparkline всегда «Нет данных за 24 ч» (`S8R-SPARKLINE-TIMEFRAME-TYPO`)
+
+### Что
+
+Виджет `SparklineWidget` на главной странице (правая верхняя плитка `SBER · 24h`) показывал «Нет данных за 24 ч» постоянно — и в будни во время торгов, и в выходные. Никогда не отображал sparkline с момента появления в Sprint 8 W2.
+
+### Причина
+
+Опечатка в [`backend/app/market_data/router.py:81`](Develop/backend/app/market_data/router.py#L81): endpoint `GET /api/v1/market-data/sparkline` вызывает `service.get_candles(timeframe="5min", ...)`. Во **всей остальной системе** используется код `"5m"`:
+
+- `TIMEFRAME_DELTAS["5m"]` ([service.py:23](Develop/backend/app/market_data/service.py#L23))
+- Ветка `if timeframe == "5m":` ([service.py:318](Develop/backend/app/market_data/service.py#L318))
+- В `OHLCVCache.timeframe` для SBER хранится `"5m"` (на момент диагностики — 5550 точек, последняя `2026-05-16 07:45`)
+
+Из-за опечатки:
+1. `_get_cached(ticker, "5min", ...)` → `WHERE timeframe='5min'` → 0 строк.
+2. `_find_gaps` → весь диапазон gap.
+3. `_fetch_candles(..., "5min", ...)` → передаётся в T-Invest/ISS adapter с неизвестным timeframe → пустой ответ.
+4. Endpoint возвращает `{points: [], current: null}` → виджет показывает «Нет данных».
+
+Существующие тесты `TestSparklineEndpoint` мокали `MarketDataService.get_candles` целиком и не проверяли передаваемые kwargs — баг не задетектили.
+
+### Изменения
+
+**`backend/app/market_data/router.py`** (W8n):
+
+- Заменено `timeframe="5min"` → `timeframe="5m"`. Комментарий с пояснением, чтобы при следующих правках не вернули обратно.
+
+**`backend/tests/unit/test_market_data/test_router.py`**:
+
+- Новый regression-тест `test_sparkline_uses_5m_timeframe` — мокает `MarketDataService`, делает запрос и ассертит `mock_instance.get_candles.await_args.kwargs["timeframe"] == "5m"`. Блокирует возврат опечатки.
+
+### Файлы
+
+- `Develop/backend/app/market_data/router.py` (M)
+- `Develop/backend/tests/unit/test_market_data/test_router.py` (M)
+
+### Результат
+
+- `py_compile` OK.
+- `TestSparklineEndpoint`: **4 passed / 0 failed** (3 существующих + 1 новый regression).
+- Виджет должен начать показывать sparkline сразу после `--reload` backend (или вручную перезапустить).
+
+---
+
 ## 2026-05-15 — Sprint 8 W8m: Telegram daily-stat показывал нулевые сделки при открытых позициях (`S8R-DAILY-STAT-OPEN-CLOSED-SPLIT`)
 
 ### Что
