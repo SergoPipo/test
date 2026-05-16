@@ -10,6 +10,43 @@
 
 ---
 
+## 2026-05-16 — Sprint 8 W8o: селектор тикера в SparklineWidget (`S8R-SPARKLINE-TICKER-SELECT`)
+
+### Что
+
+После починки W8n виджет `SBER · 24h` на дашборде начал показывать данные. Но прямого способа сменить тикер в виджете не было: он брал `getRecentInstruments()[0]` из localStorage и менялся только при открытии графика другого инструмента в разделе «Графики». Заказчик попросил селектор прямо в виджете.
+
+### Изменения
+
+**`Develop/frontend/src/components/dashboard/SparklineWidget.tsx`**:
+
+- Внутренний state `selectedTicker` с приоритетом инициализации:
+  1. `localStorage['dashboardSparklineTicker']` — если пользователь уже выбирал;
+  2. prop `ticker` — текущий fallback из DashboardPage (`recentInstruments[0] ?? 'SBER'`);
+  3. иначе — пусто, рендерится placeholder «Выберите тикер...» (сохраняет старый контракт).
+- Mantine `Autocomplete` в шапке виджета вместо `Title`. Подсказки = `getRecentInstruments()`, с добавлением текущего `selectedTicker` если его нет в recent. Триггеры применения нового тикера: `onOptionSubmit` (клик по подсказке), `onBlur` (потеря фокуса), `Enter` в input. Все триггеры через `applyTicker` → `toUpperCase().trim()` + сохранение в localStorage. Изменение `inputValue` через `onChange` не делает fetch, чтобы не было N+1 запросов на каждое нажатие клавиши.
+- `useEffect` теперь зависит от `selectedTicker` (вместо `ticker`).
+- `ariaLabel` MiniSparkline использует `selectedTicker`.
+
+**`Develop/frontend/src/components/dashboard/__tests__/SparklineWidget.test.tsx`**:
+
+- 2 новых регрессионных теста:
+  - `Enter в Autocomplete переключает тикер + сохраняет в localStorage` — вводит `'gazp'`, нажимает Enter, проверяет что fetch вызван с `GAZP` и localStorage записан.
+  - `localStorage[dashboardSparklineTicker] переопределяет prop ticker` — prop=SBER, localStorage=LKOH → fetch для LKOH.
+
+### Файлы
+
+- `Develop/frontend/src/components/dashboard/SparklineWidget.tsx` (M)
+- `Develop/frontend/src/components/dashboard/__tests__/SparklineWidget.test.tsx` (M)
+
+### Результат
+
+- `npx tsc --noEmit`: 0 errors.
+- `vitest SparklineWidget.test.tsx`: **10 passed / 0 failed** (8 существующих + 2 новых W8o).
+- На дашборде в шапке виджета теперь есть поле ввода тикера с автодополнением из recent. Выбор персистентный (localStorage), не зависит от того что пользователь смотрел в разделе «Графики».
+
+---
+
 ## 2026-05-16 — Sprint 8 W8n: dashboard sparkline всегда «Нет данных за 24 ч» (`S8R-SPARKLINE-TIMEFRAME-TYPO`)
 
 ### Что

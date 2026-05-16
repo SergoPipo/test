@@ -45,6 +45,8 @@
 **Дата завершения W8m:** 2026-05-15 `scheduler/service.send_daily_stats` переписан: источник — `LiveTrade` напрямую, агрегаты opened/closed/wins/realized + unrealized из OHLCVCache. Метка `{strategy} ({ticker mode}) #id`. Регрессия scheduler: **15 passed / 0 failed**.
 **Дата старта W8n (sparkline 24h на дашборде всегда пуст):** 2026-05-16 (заказчик: виджет `SBER · 24h` показывал «Нет данных за 24 ч» и в выходные, и в торговые дни. Тикет: `S8R-SPARKLINE-TIMEFRAME-TYPO`.)
 **Дата завершения W8n:** 2026-05-16 `market_data/router.py:get_sparkline` передавал `timeframe="5min"` вместо канонического `"5m"` — фильтр кеша `WHERE timeframe='5min'` всегда давал 0 строк (5550 SBER-точек лежали под `'5m'`). Опечатка с Sprint 8 W2. Фикс — одна строка + regression-тест `test_sparkline_uses_5m_timeframe` блокирует возврат. Tests: **4 passed / 0 failed**.
+**Дата старта W8o (селектор тикера в SparklineWidget):** 2026-05-16 (после W8n виджет начал показывать данные, но менять тикер можно было только через раздел «Графики». Тикет: `S8R-SPARKLINE-TICKER-SELECT`.)
+**Дата завершения W8o:** 2026-05-16 Mantine Autocomplete в шапке виджета (вместо Title), приоритет инициализации `localStorage > prop > placeholder`. Применение тикера по Enter/onOptionSubmit/onBlur. Сохранение в localStorage `dashboardSparklineTicker`. 2 новых regression-теста (Enter переключает + localStorage переопределяет prop). vitest: **10 passed / 0 failed**, tsc 0 errors.
 
 ## Текущий шаг
 
