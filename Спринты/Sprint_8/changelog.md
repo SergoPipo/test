@@ -10,6 +10,124 @@
 
 ---
 
+## 2026-05-16 — Sprint 8 W8s: колонка «Бэктест» на дашборде стала информативной (`S8R-W8s-DASHBOARD-BACKTEST-COL`)
+
+### Что
+
+Заказчик: «мне не очень понятно, что выводится в колонке "Бэктест" в списке стратегий. Не очень как-то информативно».
+
+### Анализ старого формата
+
+- **На уровне стратегии (свёрнутая строка)** — просто `—`. Никакой агрегации; чтобы что-то увидеть, нужно раскрыть.
+- **На уровне инструмента (раскрытая строка)** — `formatBacktest()` собирал `15.05 PF 1.8 DD 12%`:
+  - Только последний завершённый бэктест по тикеру.
+  - PF и DD без цветовой подсветки (PF=0.8 и PF=2.5 выглядят одинаково — серый текст).
+  - Дата без года → бэктест полугодовалой давности и недельной не отличаются.
+  - Нет win rate, нет числа сделок: непонятно, на какой выборке считался PF.
+
+### Решение (вариант A — inline-усиление + бейдж качества)
+
+**Backend** — поля уже были в `Backtest` модели (`total_trades`, `win_rate`, `started_at`), но не отдавались на фронт. Миграции не требовались.
+
+**`Develop/backend/app/strategy/schemas.py`**:
+
+- `InstrumentBacktest` дополнен `total_trades: int | None` и `win_rate: float | None` (`Numeric(10,4)` 0..1).
+- `StrategyResponse` дополнен `backtests_count: int` и `avg_profit_factor: float | None` для свёрнутой строки.
+
+**`Develop/backend/app/strategy/service.py`** — `get_instruments_summary`:
+
+- Возврат расширен с 4-tuple до 6-tuple: `(instruments, total_pos, total_abs, total_pct, backtests_count, avg_profit_factor)`.
+- `backtests_count` — число `status='completed'` бэктестов (running игнорируется).
+- `avg_profit_factor` — среднее арифметическое `profit_factor` по completed с не-NULL PF; None если ни одного с PF.
+- В обоих местах сборки `InstrumentBacktest` (session-loop + bt-only-tickers) прокинуты `total_trades` и `win_rate`.
+
+**`Develop/backend/app/strategy/router.py`** — `list_strategies` распаковывает 6-tuple и кладёт агрегаты в `StrategyResponse`.
+
+**`Develop/frontend/src/api/strategyApi.ts`** — типы `InstrumentBacktest` и `Strategy` обновлены под новый контракт (поля optional для backward compat).
+
+**`Develop/frontend/src/pages/DashboardPage.tsx`** — переработана ячейка «Бэктест»:
+
+- **Свёрнутая строка** (стратегия): `3 теста · ср. PF 1.6` с цветной точкой по PF (красный <1, жёлтый 1–1.5, зелёный ≥1.5). Прочерк если `backtests_count=0`.
+- **Раскрытая строка** (инструмент): цветной `Badge` для PF + inline `DD N% · M сд. · WR Z% · Nд` с цветами по порогам:
+  - PF: <1 красный / 1–1.5 жёлтый / ≥1.5 зелёный.
+  - WR: <40% красный / 40–55% жёлтый / ≥55% зелёный.
+  - DD: ≤15% зелёный / 15–25% жёлтый / >25% красный.
+- Возраст бэктеста: `сегодня` / `Nд` / `Nнед` / `Nмес` / `Nг` — сразу видно, не устарел ли результат.
+- Удалены неиспользуемые `formatBacktest()` и `formatShortDate()`.
+- Кликабельна вся `Group` (раньше `Anchor`) — ведёт на `/backtests/{id}`.
+
+### Тесты
+
+**`Develop/backend/tests/unit/test_strategy/test_service_overview.py`**:
+
+- Все unpack'и `get_instruments_summary` обновлены под 6-tuple (звёздный slice `*_` где детали не важны).
+- `test_overview_with_backtest_only_tested_status` дополнен ассертами на новые поля (`total_trades=47`, `win_rate≈0.6383`, `backtests_count=1`, `avg_pf=1.5`).
+- **Новый тест** `test_overview_aggregates_backtests_count_and_avg_pf`: 3 completed (PF 1.0, 2.0, NULL) + 1 running → `count=3`, `avg=1.5` (NULL и running не учтены в среднем).
+
+### Файлы
+
+- `Develop/backend/app/strategy/schemas.py` (M)
+- `Develop/backend/app/strategy/service.py` (M)
+- `Develop/backend/app/strategy/router.py` (M)
+- `Develop/backend/tests/unit/test_strategy/test_service_overview.py` (M)
+- `Develop/frontend/src/api/strategyApi.ts` (M)
+- `Develop/frontend/src/pages/DashboardPage.tsx` (M)
+
+### Результат
+
+- `py_compile` OK для schemas/service/router.
+- `tsc --noEmit` — 0 errors.
+- Regression backend `tests/unit/test_strategy/`: **159 passed / 0 failed** (158 → 159 с новым тестом).
+- Regression frontend `vitest src/pages/__tests__/DashboardPage`: **9 passed / 0 failed**.
+
+### Hotfix W8s·1 (после визуальной сверки данных, 2026-05-16)
+
+Заказчик прислал скриншот дашборда с реальными данными — обнаружились **два бага**:
+
+1. **WR > 100% на всех строках** (`WR 3226%`, `4828%`, `3333%`). Причина: `win_rate` в БД хранится как процент 0..100 (формула в `app/backtest/metrics.py:54`: `winning_trades / total_trades * 100`), а frontend `formatWinRate` ошибочно умножал ещё раз на 100. Тест `test_overview_with_backtest_only_tested_status` тоже был неверным (`Decimal("0.6383")`) — не пойман, потому что только проверял проброс значения, не семантику.
+
+2. **Средний PF стратегии = 172.8** при реальных PF инструментов 0.8–1.2. Причина: один из 29 бэктестов выдал PF≈∞ (одна выигрышная сделка без убытков) → среднее арифметическое искажено. Решение — заменить `avg_profit_factor` на **`median_profit_factor`** (медиана устойчива к выбросам).
+
+### Изменения W8s·1
+
+**Backend:**
+
+- `app/strategy/schemas.py` — переименовано `avg_profit_factor` → `median_profit_factor`.
+- `app/strategy/service.py` — расчёт медианы вместо среднего:
+  ```python
+  sorted_pf = sorted(pf_values)
+  n = len(sorted_pf); mid = n // 2
+  median_profit_factor = sorted_pf[mid] if n % 2 == 1 else (sorted_pf[mid-1] + sorted_pf[mid]) / 2
+  ```
+- `app/strategy/router.py` — unpack `median_pf` → `median_profit_factor` в `StrategyResponse`.
+
+**Frontend:**
+
+- `pages/DashboardPage.tsx::formatWinRate` — убрано умножение на 100, формат теперь `WR ${Math.round(wr)}%` напрямую.
+- `pages/DashboardPage.tsx::wrTextColor` — пороги 0.4/0.55 → 40/55 (под единицы БД).
+- `pages/DashboardPage.tsx` — лейбл свёрнутой строки «ср. PF» → «медиан. PF».
+- `api/strategyApi.ts` — поле `avg_profit_factor` → `median_profit_factor`.
+
+**Тесты:**
+
+- `test_overview_with_backtest_only_tested_status` — `win_rate=Decimal("63.83")` вместо `0.6383` (правильные единицы).
+- `test_overview_aggregates_backtests_count_and_avg_pf` → `test_overview_aggregates_backtests_count_and_median_pf`. Добавлен случай-выброс: PF {1.0, 1.5, 2.0, 5000.0, NULL} → медиана 1.75 (среднее было бы ~1251). Демонстрирует robustness.
+
+### Результат W8s·1
+
+- `py_compile` OK.
+- Backend `test_strategy`: **159 passed / 0 failed**.
+- Frontend `tsc --noEmit` 0 errors.
+- Frontend `vitest DashboardPage`: **9 passed / 0 failed**.
+
+### Известные ограничения
+
+- На уровне стратегии показывается только `backtests_count` и `median_profit_factor` — без best/worst PF, без trend'а. Если по фидбэку понадобятся — расширим в W8t.
+- Шкала возраста округляется (3д включает 3д+12ч). Достаточно для UX, но не для аудита.
+- Реалистичность чисел `total_trades` по инструментам (LKOH 62 сд., SBER 29 сд., GAZP 42 сд.) — заказчик подтвердил визуально, что соответствует ожиданиям.
+
+---
+
 ## 2026-05-16 — Sprint 8 W8r: таблица стратегий на дашборде показывает unrealized PnL, sandbox-сессии видны (`S8R-DASHBOARD-INSTRUMENTS-UNREALIZED`)
 
 ### Что
