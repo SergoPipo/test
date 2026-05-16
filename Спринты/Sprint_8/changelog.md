@@ -10,6 +10,45 @@
 
 ---
 
+## 2026-05-16 — Sprint 8 W8q: SparklineWidget — иконка+тикер как trigger, dropdown с TickerLogo (`S8R-SPARKLINE-COMBOBOX-ICONS`)
+
+### Что
+
+После W8p заказчик: «не нравится, что два поля. Сделать как в `ActivePositionsWidget` — иконка + тикер крупно, клик открывает выпадающий список с поиском и подсказками (тоже с иконками). Выбор закрывает список, возврат к "иконка + тикер". `24 ч` — где-то отдельно, не критично».
+
+### Изменения
+
+**`Develop/frontend/src/components/dashboard/SparklineWidget.tsx`** — полностью переписана шапка через Mantine `Combobox` low-level API:
+
+- **Trigger** (`Combobox.Target` → `UnstyledButton`): `[TickerLogo size=24] {SBER} [▾]` — точно тот же стиль, что в `ActivePositionsWidget:147-148`. При пустом `selectedTicker` — текст «Выберите тикер».
+- **Dropdown** (`Combobox.Dropdown`): сверху `Combobox.Search` с placeholder «Поиск тикера...», ниже `Combobox.Options` (макс. высота 280px со scroll). Каждая опция = `[TickerLogo size=20] {ticker} {name?}` — название инструмента показывается мелким серым шрифтом при наличии (API search).
+- **Подсказки**:
+  - При пустом ввод­е — `getRecentInstruments()`, формат `{ticker}` (только тикер, имя неизвестно).
+  - При вводе ≥ 1 символа — debounce 300 мс → `marketDataApi.searchInstruments` → `[{ticker, name}, ...]` (как в `LaunchSessionModal`).
+- **Применение**: `onOptionSubmit` → `applyTicker(ticker)` → закрытие dropdown, сброс `searchValue`, обновление `selectedTicker`, `localStorage`. Никакого Enter в input — выбор только через клик на опцию или клавиатура (стандарт Combobox).
+- **24 ч** — Badge справа в той же `Group`, как было.
+- `onDropdownOpen` → `combobox.focusSearchInput()` — фокус сразу на поиске.
+
+### Тесты
+
+**`Develop/frontend/src/components/dashboard/__tests__/SparklineWidget.test.tsx`**:
+
+- W8o-тест «Enter в Autocomplete» переписан под Combobox UX: клик по trigger → опция GAZP из recent → клик → fetch GAZP, localStorage сохранён.
+- W8o-тест «localStorage переопределяет prop» — остался как был, инвариантен к UI.
+
+### Файлы
+
+- `Develop/frontend/src/components/dashboard/SparklineWidget.tsx` (M)
+- `Develop/frontend/src/components/dashboard/__tests__/SparklineWidget.test.tsx` (M)
+
+### Результат
+
+- `tsc --noEmit`: 0 errors.
+- `vitest SparklineWidget.test.tsx`: **10 passed / 0 failed**.
+- UI: в шапке кликабельный блок `[Logo] SBER ▾`, при клике раскрывается dropdown с поисковой строкой и опциями с иконками. После выбора всё закрывается, виджет показывает новый тикер.
+
+---
+
 ## 2026-05-16 — Sprint 8 W8p: SparklineWidget — вернуть Title + dropdown как в LaunchSessionModal (`S8R-SPARKLINE-TICKER-VISIBLE`)
 
 ### Что
