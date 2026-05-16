@@ -10,6 +10,110 @@
 
 ---
 
+## 2026-05-15 — Sprint 8 W8m: Telegram daily-stat показывал нулевые сделки при открытых позициях (`S8R-DAILY-STAT-OPEN-CLOSED-SPLIT`)
+
+### Что
+
+Telegram-уведомление «Дневная статистика» приходило в виде:
+```
+Тестовая (LKOH): 0 сделок, P&L +0 ₽, Win 0%
+Тестовая (SBER): 0 сделок, P&L +0 ₽, Win 0%
+Тестовая (SBER): 0 сделок, P&L +0 ₽, Win 0%
+Итого: 0 сделок, P&L +0 ₽, Win 0%
+Портфель: 218 929.82 ₽
+```
+
+При том что реально сегодня **3 позиции были открыты** (LKOH session 2, SBER session 1, SBER session 3 sandbox), просто ни одна не закрыта.
+
+### Причина
+
+В [scheduler/service.py:send_daily_stats](Develop/backend/app/scheduler/service.py) три бага:
+
+1. **Игнор открытых сделок**: `trades_count = stat.trades_closed` — отчёт считает только закрытые. Открытые позиции в статистику не попадают → пользователь видит «0 сделок» при реально открытых.
+2. **Метки сессий не уникальны**: `f"{strategy_name} ({session.ticker})"` — две сессии Тестовая на SBER (paper + sandbox) выглядели одинаковой строкой.
+3. **Сломанная формула Win%**: `100 * max(0, int(pnl > 0)) * trades_count / trades_count` сводится к «100% если total pnl > 0, иначе 0%». Сколько прибыльных сделок было — игнорируется. Должно быть `winning_trades / total_closed * 100`.
+
+### Изменения в коде
+
+**`Develop/backend/app/scheduler/service.py`** — переписан `send_daily_stats`:
+
+- Источник истины — таблица `LiveTrade` напрямую, не `DailyStat`. Запрос охватывает сделки, у которых `DATE(opened_at)=today OR DATE(closed_at)=today`.
+- Для каждой сессии собираются раздельно:
+  - `opened` — сколько позиций открыто сегодня;
+  - `closed` — сколько закрыто сегодня;
+  - `wins` — закрытые с `pnl > 0`;
+  - `realized` — сумма `pnl` закрытых сегодня;
+  - `unrealized` — для всё ещё открытых: `(last_close - entry_price) × filled_lots` (по направлению), цена берётся из `OHLCVCache` (тот же fallback, что в `OrderManager.close_position`).
+- Метка сессии теперь включает `ticker mode #id` — например, `Тестовая (SBER paper) #1` и `Тестовая (SBER sandbox) #3`.
+- Win% выводится как `"—"` при `closed == 0`, иначе `round(wins / closed * 100)`.
+- Формат строки: `{label}: {opened} откр / {closed} закр, real PnL X, unreal Y, Win Z%`.
+
+### Файлы
+
+- `Develop/backend/app/scheduler/service.py` (M) — переписан `send_daily_stats`.
+
+### Результат
+
+- `py_compile` OK.
+- Регрессия `tests/unit/test_scheduler/` + `tests/test_routers/test_scheduler_service.py`: **15 passed / 0 failed**.
+- Следующий запуск в 19:00 MSK покажет:
+  ```
+  Тестовая (LKOH paper) #2: 1 откр / 0 закр, real PnL +0 ₽, unreal +X ₽, Win —
+  Тестовая (SBER paper) #1: 1 откр / 0 закр, real PnL +0 ₽, unreal +Y ₽, Win —
+  Тестовая (SBER sandbox) #3: 1 откр / 0 закр, real PnL +0 ₽, unreal +Z ₽, Win —
+  Итого: 3 откр / 0 закр, real PnL +0 ₽, unreal +X+Y+Z ₽, Win —
+  Портфель: 218 929.82 ₽
+  ```
+  Unrealized PnL обновляется из последней цены в OHLCVCache, так что цифры будут осмысленные.
+
+---
+
+## 2026-05-15 — Sprint 8 W8l: drag по вертикали на графике + увеличенные trade-маркеры (`S8R-CHART-VERTICAL-DRAG` + `S8R-MARKERS-2X-COLLISION`)
+
+### Что
+
+Два независимых улучшения графика по запросу заказчика после W8j:
+
+1. **Drag по вертикали в основной области графика** перестал работать (заметно при заходе на `/chart/SBER?session=N`). Перетаскивать Y можно было только через ось справа или после изменения масштаба.
+2. **Метки Buy/Sell** на графике слишком мелкие, при близких сделках накладываются (на скриншоте заказчика — `Sell 324.61` поверх `Buy 325.27`).
+
+### Причина (W8l-1: drag)
+
+Регрессия из Sprint 7 (коммит `bf3a75d`, 2026-05-12). Хронология:
+
+- **Sprint 2** (`66fbe45`): после `setVisibleRange(last 100)` синхронно применяли `priceScale('right').applyOptions({ autoScale: false })`. Drag по вертикали работал.
+- **Sprint 7 (баг 2026-05-09)**: LKOH ходил 5500→5100, после `setData(allCandles)` + sync `autoScale: false` Y зафиксировался на **полном** диапазоне `[5100, 5500]`, а видимые 100 свечей (только май, `[5050, 5200]`) выглядели тонкой полоской. В коммите `bf3a75d` строку `autoScale: false` **убрали совсем** → свечи стали красивые, но при `autoScale: true` lightweight-charts по design блокирует drag в основной области (перезаписывает Y каждый кадр).
+
+То есть в Sprint 7 чинили **видимость свечей**, и как side-effect сломали **drag по вертикали**. Никто не заметил до 2026-05-15.
+
+### Изменения в коде
+
+**`Develop/frontend/src/components/charts/CandlestickChart.tsx`** (W8l-1):
+
+Применяем `autoScale: false` **через `requestAnimationFrame`** — на следующем кадре после `setVisibleRange`, когда lightweight-charts уже подогнала Y под видимый диапазон. Фиксируем именно этот корректный диапазон, не полные данные. Решает обе проблемы сразу:
+- drag работает (autoScale=false)
+- свечи не сжимаются на инициальном рендере (Y подстроен под visible range)
+
+Trade-off: при сильном горизонтальном скролле к свечам с другими ценовыми уровнями они могут сжиматься — reset стандартный для charting libs: double-click по оси Y.
+
+**`Develop/frontend/src/components/charts/primitives/TradeMarkerPrimitive.ts`** (W8l-2):
+
+- Все размеры ×2: `FONT_PX 11→22`, `ARROW_HEIGHT 8→16`, `ARROW_HALF_WIDTH 5→10`, `LABEL_GAP 4→8`, `LABEL_LINE_HEIGHT 14→28`, `LABEL_PADDING_X 4→8`.
+- **Collision detection**: маркеры приходят отсортированные по time (см. `rebuildMarkers` в CandlestickChart). Для каждого вычисляем label-rect, проверяем пересечение с уже размещёнными боксами (`placedBoxes`); при collision сдвигаем `extraOffset += LABEL_BLOCK_HEIGHT + LABEL_GAP` в направлении `dir` (Buy вниз, Sell вверх). Safety-limit 10 итераций. После рендера добавляем rect в `placedBoxes`. Стрелка остаётся прикреплённой к цене (tip), сдвигается только тело + подписи.
+
+### Файлы
+
+- `Develop/frontend/src/components/charts/CandlestickChart.tsx` (M)
+- `Develop/frontend/src/components/charts/primitives/TradeMarkerPrimitive.ts` (M)
+
+### Результат
+
+- `npx tsc --noEmit` 0 errors.
+- Drag по вертикали восстановлен в основной области графика.
+- Метки Buy/Sell в 2 раза крупнее, при близких сделках разъезжаются по вертикали.
+
+---
+
 ## 2026-05-15 — Sprint 8 W8k: stale-render карты сессии при возврате назад (`S8R-SESSION-DASHBOARD-STALE`)
 
 ### Что
