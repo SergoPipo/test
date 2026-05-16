@@ -10,6 +10,36 @@
 
 ---
 
+## 2026-05-16 — Sprint 8 W8p: SparklineWidget — вернуть Title + dropdown как в LaunchSessionModal (`S8R-SPARKLINE-TICKER-VISIBLE`)
+
+### Что
+
+После W8o заказчик заметил: реализация в целом нравится, но в шапке виджета **исчез сам тикер** (раньше отображалось `SBER · 24h`). Autocomplete показывал тикер только внутри input как value, а крупный заголовок виджета пропал. Также подсказки в dropdown показывали только тикер (`SBER`), без названия инструмента, тогда как в `LaunchSessionModal`/`BacktestLaunchModal` подсказки богаче (`SBER — Сбербанк России ПАО`).
+
+### Изменения
+
+**`Develop/frontend/src/components/dashboard/SparklineWidget.tsx`**:
+
+- Возвращён `Title order={5}` слева в шапке: `{selectedTicker} · {hours}h` (визуально как до W8o). Если `selectedTicker` пуст — `'Sparkline'`.
+- Autocomplete теперь справа в той же `Group`, шириной 180px, с `placeholder="Сменить тикер"`. После применения тикера `inputValue` сбрасывается в `''` — input снова пустой, а текущий тикер виден в Title.
+- Подсказки в dropdown:
+  - По умолчанию (пустой ввод) — `getRecentInstruments()` (как было).
+  - При вводе ≥ 1 символа — debounce 300мс → `marketDataApi.searchInstruments(query)` → подсказки формата `"SBER — Сбербанк России ПАО"` (как в `LaunchSessionModal:152-170`).
+- При выборе из dropdown или Enter — `applyTicker` извлекает тикер через `.split(' — ')[0]` (та же логика, что в `LaunchSessionModal:188-192`), сохраняет в localStorage.
+- `onBlur` теперь применяет только если `inputValue` непустой — чтобы клик мимо поля без ввода не сбрасывал что-то.
+
+### Файлы
+
+- `Develop/frontend/src/components/dashboard/SparklineWidget.tsx` (M)
+
+### Результат
+
+- `tsc --noEmit`: 0 errors.
+- `vitest SparklineWidget.test.tsx`: **10 passed / 0 failed** (тесты W8o используют `data-testid` и инвариантны к расположению Title — не сломались).
+- UI: тикер виден как крупный заголовок (`SBER · 24h`), справа компактный Autocomplete с подсказками вида `"GAZP — Газпром"` при поиске.
+
+---
+
 ## 2026-05-16 — Sprint 8 W8o: селектор тикера в SparklineWidget (`S8R-SPARKLINE-TICKER-SELECT`)
 
 ### Что

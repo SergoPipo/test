@@ -47,6 +47,8 @@
 **Дата завершения W8n:** 2026-05-16 `market_data/router.py:get_sparkline` передавал `timeframe="5min"` вместо канонического `"5m"` — фильтр кеша `WHERE timeframe='5min'` всегда давал 0 строк (5550 SBER-точек лежали под `'5m'`). Опечатка с Sprint 8 W2. Фикс — одна строка + regression-тест `test_sparkline_uses_5m_timeframe` блокирует возврат. Tests: **4 passed / 0 failed**.
 **Дата старта W8o (селектор тикера в SparklineWidget):** 2026-05-16 (после W8n виджет начал показывать данные, но менять тикер можно было только через раздел «Графики». Тикет: `S8R-SPARKLINE-TICKER-SELECT`.)
 **Дата завершения W8o:** 2026-05-16 Mantine Autocomplete в шапке виджета (вместо Title), приоритет инициализации `localStorage > prop > placeholder`. Применение тикера по Enter/onOptionSubmit/onBlur. Сохранение в localStorage `dashboardSparklineTicker`. 2 новых regression-теста (Enter переключает + localStorage переопределяет prop). vitest: **10 passed / 0 failed**, tsc 0 errors.
+**Дата старта W8p (вернуть Title + dropdown как в LaunchSessionModal):** 2026-05-16 (после W8o заказчик: «нравится, но не хватает самого тикера и dropdown должен быть как в новой торговой сессии». Тикет: `S8R-SPARKLINE-TICKER-VISIBLE`.)
+**Дата завершения W8p:** 2026-05-16 Title `{selectedTicker} · {hours}h` вернулся слева в шапку, Autocomplete справа (`placeholder="Сменить тикер"`, 180px). Подсказки: при пустом вводе — `getRecentInstruments()`, при ≥1 символа — debounce 300мс → `marketDataApi.searchInstruments()` → `"SBER — Сбербанк России ПАО"` (как в LaunchSessionModal). `applyTicker` извлекает тикер через `.split(' — ')[0]`. vitest: **10 passed / 0 failed**, tsc 0 errors.
 
 ## Текущий шаг
 
