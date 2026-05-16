@@ -10,6 +10,76 @@
 
 ---
 
+## 2026-05-16 — Sprint 8 W8t: email в профиле и notification settings (`S8R-W8t-PROFILE-EMAIL-PERSIST`)
+
+### Что
+
+Заказчик: «в моём профиле слетела привязка к email; на странице уведомлений — «email не подключён»».
+
+### Диагностика
+
+В БД (`data/terminal.db`): `users.email = 'mr.buzz@mail.ru'` для `sergopipo` — данные на месте. Backend `GET /api/v1/auth/me` корректно сериализует email в `UserResponse`. **Bug на frontend:**
+
+- `LoginPage.tsx:49` после `/auth/login` кладёт в authStore минимальный объект `{ id: 0, username }` — без email, is_admin, wizard_completed_at (token endpoint не отдаёт их).
+- `FirstRunWizardGate.tsx` зовёт `usersApi.getMe()` при authenticate, но **результат никуда не сохраняется** — используется только для проверки флага `wizard_completed_at`.
+- `ProfileSettingsPage` и `NotificationSettingsPage` читают `user.email` из persisted authStore → undefined → показывают «Email не указан».
+
+Симптом давний: похоже, что у пользователя в localStorage сохранился persisted snapshot без email ещё с момента какого-то более раннего login (Sprint 7?). При обычной работе он не подтягивался обратно.
+
+### Изменения
+
+**`Develop/frontend/src/stores/authStore.ts`**:
+
+- `AuthUser` дополнен `wizard_completed_at?: string | null` (поле приходит из `/auth/me::UserResponse`).
+- Новый экшен `refreshUser(): Promise<AuthUser | null>`:
+  - `GET /auth/me` → merge ответа в `state.user` (сохраняет существующие поля, перезаписывает новыми).
+  - Не throw'ит — graceful degrade, возвращает `null` при сетевой ошибке.
+  - Используется и LoginPage'ем, и FirstRunWizardGate'ом, чтобы покрыть оба сценария — новый login и rehydration существующей сессии.
+
+**`Develop/frontend/src/pages/LoginPage.tsx`**:
+
+- После `login(token, refreshToken, { id: 0, username })` вызывается `await refreshUser()` до `navigate('/')`. Новые входы сразу получают полный профиль.
+
+**`Develop/frontend/src/components/wizard/FirstRunWizardGate.tsx`**:
+
+- В useEffect на authenticate `usersApi.getMe()` заменено на `refreshUser()` — теперь профиль кладётся в authStore.user, а флаг `wizard_completed_at` проверяется по ответу. Это исправляет **уже залогиненных** пользователей без re-login.
+- `handleComplete()` после wizard финализации тоже вызывает `refreshUser()` — чтобы email, который пользователь ввёл в wizard, сразу отобразился в Profile/Notification UI.
+
+### Тесты
+
+**`Develop/frontend/src/stores/__tests__/authStore.test.ts`**:
+
+- Мок `apiClient` расширен методом `get` (раньше был только interceptors).
+- Новый describe `refreshUser`:
+  - Кейс 1: `GET /auth/me` → 200 с полным `{id, username, email, is_admin, wizard_completed_at}` → `user` смержен, возвращается свежий объект.
+  - Кейс 2: сетевая ошибка → `user` остаётся прежним, возвращается `null`.
+
+### Файлы
+
+- `Develop/frontend/src/stores/authStore.ts` (M)
+- `Develop/frontend/src/pages/LoginPage.tsx` (M)
+- `Develop/frontend/src/components/wizard/FirstRunWizardGate.tsx` (M)
+- `Develop/frontend/src/stores/__tests__/authStore.test.ts` (M)
+
+### Результат
+
+- `tsc --noEmit`: 0 errors.
+- `vitest src/stores/__tests__/authStore.test.ts src/components/wizard/__tests__/FirstRunWizard.test.tsx`: **20 passed / 0 failed** (18 → 20, +2 кейса на refreshUser).
+- На уровне БД ничего не менялось — баг был чисто frontend persistence.
+
+### Как проверить (acceptance)
+
+1. Обновить дашборд (Vite HMR подхватит). FirstRunWizardGate вызовет `refreshUser()` → в `authStore.user` появится `email`.
+2. `/settings` → Profile → поле Email должно показать `mr.buzz@mail.ru`.
+3. `/settings` → Notifications → строка должна стать «Email уведомления: mr.buzz@mail.ru», а не «Email не указан».
+
+### Известные ограничения
+
+- Race condition: если страница `/settings` смонтировалась раньше, чем `refreshUser()` завершил запрос — пользователь увидит пустое поле в первый момент. Mitigation: компоненты пере-рендерятся когда `authStore.user` обновится. Отдельный загрузочный state не вводим (UX-достаточно).
+- `usersApi.getMe()` в `handleComplete` дублирует `refreshUser()` — оставлен для совместимости с потенциальными подписчиками на `UserProfile.updated_at` (поле есть в `UserProfile`, но не в `AuthUser`). Можно убрать позже, если выясним, что никто его не читает.
+
+---
+
 ## 2026-05-16 — Sprint 8 W8s: колонка «Бэктест» на дашборде стала информативной (`S8R-W8s-DASHBOARD-BACKTEST-COL`)
 
 ### Что
