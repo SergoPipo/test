@@ -10,6 +10,78 @@
 
 ---
 
+## 2026-05-16 — Sprint 8 W8r: таблица стратегий на дашборде показывает unrealized PnL, sandbox-сессии видны (`S8R-DASHBOARD-INSTRUMENTS-UNREALIZED`)
+
+### Что
+
+Заказчик: «в таблице стратегий значения позиции и P&L не соответствуют действительности; sandbox-сессия SBER #3 совсем не отображается».
+
+### Причина
+
+В [`strategy/service.py:get_instruments_summary`](Develop/backend/app/strategy/service.py) три проблемы:
+
+1. **Семантика поля «Позиция»**. Считалось `equity − initial_capital` (history equity сессии с момента старта). Для LKOH session активной с 22 апреля это «+10 214 ₽» — сумма закрытых сделок за месяц, не текущая позиция. Колонка названа «Позиция», ожидание — unrealized PnL по открытой сделке.
+
+2. **Sandbox/real отфильтрованы**. `if session.mode == "paper":` — sandbox и real сессии не получали `position_payload` и не давали отдельную строку.
+
+3. **Несколько сессий на тикер схлопывались**. `sessions_by_ticker` брал самую раннюю по `started_at`. SBER paper #1 (раньше) перекрывал SBER sandbox #3 — последний никогда не появлялся в таблице.
+
+### Изменения
+
+**`Develop/backend/app/strategy/service.py`** — `get_instruments_summary` переписан:
+
+- Итерация теперь **по сессиям**, не по тикерам. У каждой активной сессии — отдельная строка `StrategyInstrumentSummary` с собственным `session_id` и `session_mode`.
+- Включены все режимы: `paper`, `sandbox`, `real`.
+- `position` для строки считается из текущей открытой сделки (`status='filled' AND closed_at IS NULL`):
+  - `current_price` — последняя свеча из `OHLCVCache` по `(ticker, timeframe)` сессии.
+  - `volume_rub = current_price × filled_lots` (текущая стоимость позиции).
+  - `abs_pnl = (current − entry) × lots` с учётом direction.
+  - `pct_pnl = abs_pnl / (entry × lots) × 100` (% к cost-basis).
+  - Если нет открытой сделки или нет цены в кеше → `position = None`.
+- Тикеры из бэктестов без активной сессии — отдельная строка `status="tested"`, `position=None`.
+- `total_pct_pnl` теперь считается как `total_abs_pnl / total_cost_basis × 100` (% к стоимости открытых позиций).
+
+**`Develop/backend/app/strategy/schemas.py`**:
+
+- `StrategyInstrumentSummary` — новое поле `session_mode: Literal["paper","sandbox","real"] | None`. Backward-compatible (Optional).
+- Комментарий к `InstrumentPosition` обновлён под новую семантику.
+
+**`Develop/frontend/src/api/strategyApi.ts`**:
+
+- Тип `StrategyInstrumentSummary` дополнен `session_mode`.
+
+**`Develop/frontend/src/pages/DashboardPage.tsx`**:
+
+- Новый `SESSION_MODE_LABEL` для бейджа: `paper` (yellow), `sandbox` (cyan), `real` (red).
+- Бейдж берётся из `session_mode` если есть сессия — sandbox отличается от paper визуально.
+- Ключ строки теперь `${strategy.id}-${ticker}-${session_id ?? 'no'}` — на один тикер можно иметь несколько строк (paper + sandbox).
+- `data-testid` соответственно.
+
+### Тесты
+
+**`Develop/backend/tests/unit/test_strategy/test_service_overview.py`** — 4 теста переписаны под новую семантику + 1 новый случай:
+
+- `test_overview_paper_session_with_open_position` — entry=250, lots=100, OHLCVCache.close=260 → abs_pnl=+1000, pct_pnl=4%.
+- `test_overview_session_mode_real_maps_to_live` — `session_mode='real'`, status='live', position=None без открытой сделки.
+- `test_overview_session_mode_sandbox_with_position` — sandbox теперь даёт position, отличается от paper через `session_mode='sandbox'`.
+- `test_overview_two_sessions_same_ticker_separate_rows` — paper + sandbox на SBER → **две** строки с разными `session_id`/`session_mode`, не одна.
+
+### Файлы
+
+- `Develop/backend/app/strategy/service.py` (M)
+- `Develop/backend/app/strategy/schemas.py` (M)
+- `Develop/backend/tests/unit/test_strategy/test_service_overview.py` (M)
+- `Develop/frontend/src/api/strategyApi.ts` (M)
+- `Develop/frontend/src/pages/DashboardPage.tsx` (M)
+
+### Результат
+
+- `py_compile` OK, `tsc --noEmit` 0 errors.
+- Regression `tests/unit/test_strategy/`: **158 passed / 0 failed**.
+- В таблице на дашборде теперь видны строки `Тестовая (SBER paper) #1`, `Тестовая (SBER sandbox) #3`, `Тестовая (LKOH paper) #2`. P&L — unrealized по текущей открытой сделке, совпадает с SessionCard.
+
+---
+
 ## 2026-05-16 — Sprint 8 W8q: SparklineWidget — иконка+тикер как trigger, dropdown с TickerLogo (`S8R-SPARKLINE-COMBOBOX-ICONS`)
 
 ### Что
