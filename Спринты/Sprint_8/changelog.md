@@ -10,6 +10,68 @@
 
 ---
 
+## 2026-05-18 — Sprint 8 W8u: CI lint fixes — moex-terminal Actions снова зелёный (`S8R-W8u-CI-LINT-FIXES`)
+
+### Что
+
+Заказчик: «мне постоянно приходят уведомления от GitHub, что какие-то были ошибки». Проверка `gh run list --repo SergoPipo/moex-terminal`: **20+ последних CI-runs красные подряд** (с W8a от 2026-05-16 и далее), время падения 39–47 секунд — значит падают lint-стадии, а не тесты. Repo `test` без CI — оттуда уведомлений нет.
+
+### Диагностика
+
+**Backend (ruff)** — 8 × `E402` в `scripts/diag_sandbox_orders.py` (W8h-diag, легитимные imports после `sys.path.insert(0, ROOT)` для запуска вне backend-дерева).
+
+**Frontend (eslint --max-warnings 0)** — 2 ошибки:
+- `SessionDashboard.tsx:34` — `'loading' is assigned a value but never used` (давний техдолг с W8k, переменная не используется в JSX).
+- `DashboardPage.tsx:42` — `'StrategyInstrumentSummary' is defined but never used` — **мой свежий косяк W8s**: удалил `formatBacktest(bt: StrategyInstrumentSummary['last_backtest'])`, но импорт оставил.
+
+Все 4 (1 W8s + 1 W8k + 8 ruff) → блок CI, ни один из них не блокирует runtime — только lint-gate. Длится с W8a (с серии sandbox hotfix'ов от 2026-05-16), так что хвост W8 кидался ошибками на email.
+
+### Изменения
+
+**`Develop/backend/pyproject.toml`** — `[tool.ruff.lint.per-file-ignores]` дополнен:
+```toml
+"scripts/**/*.py" = ["E402"]
+```
+Standalone-скрипты по природе делают `sys.path.insert` + последующие `from app.*` — это не bug, а паттерн.
+
+**`Develop/backend/scripts/diag_sandbox_orders.py`** — убран неиспользуемый `import os` (всплыло после открытия E402 — других ошибок ruff в скрипте больше нет).
+
+**`Develop/backend/app/strategy/service.py`** — убран `PaperPortfolio` из `from app.trading.models import ...`. Использовался в старой версии `get_instruments_summary`; после W8r-переписки больше не нужен.
+
+**`Develop/backend/app/broker/service.py`** — `SandboxBalanceResponse` использовался как forward-ref `"SandboxBalanceResponse"` в return-type annotation, но импортировался только inside-function. Ruff `F821` ругалось. Добавлен `if TYPE_CHECKING: from app.broker.schemas import SandboxBalanceResponse` блок — runtime-импорт остался inside-function (без circular issues), статическая проверка теперь видит имя.
+
+**`Develop/frontend/src/components/trading/SessionDashboard.tsx`** — удалена строка `const loading = useTradingStore((s) => s.loading)`. Переменная не использовалась в JSX, подписка не нужна.
+
+**`Develop/frontend/src/pages/DashboardPage.tsx`** — `StrategyInstrumentSummary` убран из import statement (импорт `Strategy` и `InstrumentStatus` остался, оба используются).
+
+### Тесты
+
+Регрессионных тестов не добавлено — lint-fixes без изменения поведения.
+
+### Файлы
+
+- `Develop/backend/pyproject.toml` (M)
+- `Develop/backend/scripts/diag_sandbox_orders.py` (M)
+- `Develop/backend/app/strategy/service.py` (M)
+- `Develop/backend/app/broker/service.py` (M)
+- `Develop/frontend/src/components/trading/SessionDashboard.tsx` (M)
+- `Develop/frontend/src/pages/DashboardPage.tsx` (M)
+
+### Результат локально
+
+- `ruff check .` — **All checks passed!**
+- `pnpm lint` (eslint --max-warnings 0) — 0 errors.
+- `tsc --noEmit` — 0 errors.
+- `pytest tests/unit/test_strategy tests/unit/test_broker -q` — **299 passed**.
+- `vitest run` (полный suite) — **591 passed / 86 файлов**.
+
+### Известные ограничения
+
+- Старые failed runs (W8a..W8t) останутся в истории GitHub Actions — нельзя «перезапустить» уже завершённые. CI с этого коммита должен пойти зелёным.
+- `actions/checkout@v4`, `actions/setup-python@v5`, `actions/setup-node@v4`, `pnpm/action-setup@v4` — Node 20 deprecation warnings до 2026-06-02. Не блокируют, но в S9 имеет смысл обновить.
+
+---
+
 ## 2026-05-16 — Sprint 8 W8t: email в профиле и notification settings (`S8R-W8t-PROFILE-EMAIL-PERSIST`)
 
 ### Что
