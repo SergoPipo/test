@@ -65,10 +65,36 @@ Standalone-скрипты по природе делают `sys.path.insert` + �
 - `pytest tests/unit/test_strategy tests/unit/test_broker -q` — **299 passed**.
 - `vitest run` (полный suite) — **591 passed / 86 файлов**.
 
+### Hotfix W8u·1 — mypy errors после открытия следующей CI-стадии (2026-05-18)
+
+После коммита `8ded7e3` ruff прошёл, frontend полностью зелёный (3м1с), но backend упал на следующей стадии — `mypy app/ --ignore-missing-imports`. До W8u CI до mypy не доходил (ruff блокировал), поэтому накопилось 4 ошибки:
+
+1. **`app/notification/schemas.py:27`** — `error: Invalid "type: ignore" comment [syntax]`. Stand-alone строка `# type: ignore[return-value]  — iso_utc(datetime) всегда возвращает str` парсилась mypy как невалидный inline-ignore. Inline-ignore на следующей строке (28) корректный — был лишний дубль-комментарий. **Fix:** превращён в обычный пояснительный комментарий без `type: ignore`.
+
+2. **`app/strategy/service.py:283`** — `Argument "date" to "InstrumentBacktest" has incompatible type "datetime | None"; expected "datetime"`. В bt-only-tickers ветке `date=bt.started_at` без None-guard — мой W8r residue (в session-loop guard был, в bt-only — нет). **Fix:** `if bt.started_at is None: continue` перед сборкой payload.
+
+3. **`app/scheduler/service.py:343`** — `Argument 2 to "and_" has incompatible type "Any | bool"`. Inline `if-else` с `True` в правой ветке возвращал `bool`, а `and_()` ждёт `ColumnElement[bool]`. **Fix:** выделено в локальную переменную `tf_filter` с `sa_true()` (из `sqlalchemy import true as sa_true`) вместо Python `True`.
+
+4. **`app/trading/runtime.py:1266`** — `Incompatible types in assignment (expression has type "_CBResultPass", variable has type "CheckResult")`. `cb_result` получает либо `CheckResult` от `cb_engine.check_before_order()`, либо `_CBResultPass()` (W8b duck-typed stub для exit-bypass). mypy выводил тип из первой ветки. **Fix:** явная аннотация `cb_result: Any` (импорт `Any` уже был). Duck-typed протокол (`.blocked/.temporary/.reason/.event_type`) во всех ветках сохранён.
+
+### Файлы W8u·1
+
+- `Develop/backend/app/notification/schemas.py` (M)
+- `Develop/backend/app/strategy/service.py` (M, +5 строк None-guard)
+- `Develop/backend/app/scheduler/service.py` (M, +1 импорт, рефакторинг условия)
+- `Develop/backend/app/trading/runtime.py` (M, +5 строк аннотации)
+
+### Результат W8u·1
+
+- `mypy app/ --ignore-missing-imports` — **Success: no issues found in 153 source files**.
+- `pytest tests/unit/` (то что прогоняет CI) — **957 passed**.
+- Известный failed-тест `tests/test_notification/test_telegram_positions.py::test_unrealized_pnl_uses_lot_size` — давний баг (lot_size синхронизируется в 1 вместо 10 для SBER mock), падает и на baseline без моих изменений. **CI его не запускает** — он не в `tests/unit/`.
+
 ### Известные ограничения
 
 - Старые failed runs (W8a..W8t) останутся в истории GitHub Actions — нельзя «перезапустить» уже завершённые. CI с этого коммита должен пойти зелёным.
 - `actions/checkout@v4`, `actions/setup-python@v5`, `actions/setup-node@v4`, `pnpm/action-setup@v4` — Node 20 deprecation warnings до 2026-06-02. Не блокируют, но в S9 имеет смысл обновить.
+- Тест `test_unrealized_pnl_uses_lot_size` за пределами `tests/unit/` — не запускается в CI, давний техдолг (lot_size mock возвращает 1 вместо 10). В Coverage gate и Unit tests CI не учитывается, но при ручном запуске `pytest tests/` всплывает.
 
 ---
 
