@@ -90,11 +90,35 @@ Standalone-скрипты по природе делают `sys.path.insert` + �
 - `pytest tests/unit/` (то что прогоняет CI) — **957 passed**.
 - Известный failed-тест `tests/test_notification/test_telegram_positions.py::test_unrealized_pnl_uses_lot_size` — давний баг (lot_size синхронизируется в 1 вместо 10 для SBER mock), падает и на baseline без моих изменений. **CI его не запускает** — он не в `tests/unit/`.
 
+### Hotfix W8u·2 — time-bomb тест в Coverage gate (2026-05-18)
+
+После W8u·1 (mypy fixes) CI прошёл `Lint (ruff) → Type check (mypy) → Unit tests`, но упал на финальной стадии — **`Coverage gate (TOTAL ≥ 80%)`**. Ошибся раньше: эта стадия запускает не `tests/unit/`, а **полный `pytest tests/ --cov=app --cov-fail-under=80`** (см. `.github/workflows/ci.yml:71`). 1605 passed / 1 failed → exit 1 → stage failed.
+
+**Корень бага** — `tests/test_notification/test_telegram_positions.py::test_unrealized_pnl_uses_lot_size`:
+
+```python
+lot_size_synced_at=datetime(2026, 5, 8, 10, 0, 0),
+```
+
+`LOT_SIZE_TTL = timedelta(days=7)`. Сегодня **2026-05-18** = **10 дней с lot_size_synced_at** → кэш считался просроченным → `ensure_lot_size` шёл в T-Invest/MOEX ISS (без mock'а в unit-тесте) → возвращал 1 вместо 10 → assert `"+950" in msg` падал (вместо +950 ₽ получалось +95.00 ₽). Тест был валиден на момент написания (2026-05-08), но «протух» через 10 дней.
+
+**Fix:** `lot_size_synced_at=datetime.utcnow()` — кэш всегда свежий, тест не время-зависимый.
+
+**Проверка других tests:** `grep "lot_size_synced_at=datetime" tests/` нашёл ровно одно проблемное место — здесь. В `tests/unit/test_market_data/test_service_full.py:219` уже используется `datetime.utcnow()` (правильный pattern).
+
+### Результат W8u·2
+
+- `pytest tests/ --cov=app --cov-fail-under=80` (то что прогоняет Coverage gate) — **1606 passed, coverage 84.72%** (gate 80%).
+
+### Файлы W8u·2
+
+- `Develop/backend/tests/test_notification/test_telegram_positions.py` (M, 1 строка + комментарий)
+
 ### Известные ограничения
 
-- Старые failed runs (W8a..W8t) останутся в истории GitHub Actions — нельзя «перезапустить» уже завершённые. CI с этого коммита должен пойти зелёным.
+- Старые failed runs (W8a..W8t, W8u, W8u·1) останутся в истории GitHub Actions — нельзя «перезапустить» уже завершённые. CI с W8u·2 коммита должен пойти зелёным.
 - `actions/checkout@v4`, `actions/setup-python@v5`, `actions/setup-node@v4`, `pnpm/action-setup@v4` — Node 20 deprecation warnings до 2026-06-02. Не блокируют, но в S9 имеет смысл обновить.
-- Тест `test_unrealized_pnl_uses_lot_size` за пределами `tests/unit/` — не запускается в CI, давний техдолг (lot_size mock возвращает 1 вместо 10). В Coverage gate и Unit tests CI не учитывается, но при ручном запуске `pytest tests/` всплывает.
+- Time-bomb тестов больше нет (проверено grep по pattern `lot_size_synced_at=datetime`), но если в S9+ появятся новые фикстуры с hardcoded датами + cache TTL — стоит сразу делать `datetime.utcnow()`.
 
 ---
 
