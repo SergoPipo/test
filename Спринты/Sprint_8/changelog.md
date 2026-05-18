@@ -122,6 +122,107 @@ lot_size_synced_at=datetime(2026, 5, 8, 10, 0, 0),
 
 ---
 
+## 2026-05-18 — Sprint 8 W8v: торговые сессии пропадают и не открываются (`S8R-W8v-WS-SNAPSHOT-MERGE`)
+
+### Что
+
+Заказчик: «обновляю /trading — в виджетах сессий сначала видны данные, потом всё пропадает и пишет "Нет позиции". Кликаю на сессию — крутится синий кружок навсегда. URL становится `/trading/sessions/undefined`».
+
+### Корень
+
+`backend/app/trading/ws_sessions.py::_serialize_session` отдаёт **узкий** WS-snapshot payload:
+```python
+{"session_id": session.id, "ticker": ..., "status": ..., "mode": ..., "strategy_name": ..., "timeframe": ..., "positions": ..., "last_trade_at": ...}
+```
+— без `id`, без `started_at`, `current_pnl`, `initial_capital`, `position_sizing_*`, и др. полей.
+
+`frontend/src/hooks/useTradingSessionsWS.ts::applySnapshot` при получении этого payload **полностью перезаписывал** массив sessions через `setState({sessions: message.sessions})`. После этого:
+- `session.id` становился `undefined` → URL `/sessions/undefined`, React `Each child in a list should have a unique "key" prop` warning, SessionDashboard крутил Loader (потому что `fetchSession(undefined)` падал).
+- `started_at` пропадал → `new Date(undefined)` = «Invalid Date» в карточке.
+- `current_pnl/positions/initial_capital` пропадали → «Нет позиции», «—», `Сделок: —`.
+
+Для одиночных delta-events (`pnl_update`, `trade_filled`, `position_update`) frontend уже делал нормализацию `session_id → id` ([useTradingSessionsWS.ts:76,79](Develop/frontend/src/hooks/useTradingSessionsWS.ts#L76)). В snapshot — забыли.
+
+### Решение
+
+`applySnapshot` переписан на **merge вместо replace**:
+
+```typescript
+useTradingStore.setState((state) => {
+  const existingById = new Map(state.sessions.map((s) => [s.id, s]));
+  const merged: TradingSession[] = [];
+  const seenIds = new Set<number>();
+  for (const ws of items) {
+    const id = (ws.session_id ?? ws.id) as number | undefined;
+    if (typeof id !== 'number') continue;
+    seenIds.add(id);
+    const existing = existingById.get(id);
+    if (existing) {
+      merged.push({ ...existing, ...ws, id } as TradingSession);
+    } else {
+      merged.push({ ...ws, id } as TradingSession);
+    }
+  }
+  for (const s of state.sessions) {
+    if (!seenIds.has(s.id)) merged.push(s);
+  }
+  return { sessions: merged };
+});
+```
+
+- Нормализация `session_id → id` всегда.
+- REST-поля (`started_at`, `current_pnl`, `initial_capital`, …) сохраняются из existing.
+- Новые сессии (не в state) — добавляются с нормализованным id.
+- Сессии в state, но не в snapshot — НЕ удаляются (snapshot перечисляет active/paused/suspended, stopped могут отсутствовать).
+
+### Тесты
+
+`frontend/src/hooks/__tests__/useTradingSessionsWS.test.ts` — **2 новых регрессионных теста**:
+
+1. **`snapshot merge: backend payload session_id нормализуется в id, REST поля сохраняются`** — state имеет полную сессию {id:5, started_at, current_pnl, initial_capital, ...}, snapshot отдаёт {session_id:5, status:'suspended', ticker, ...}. После merge: id=5, status поменялся, started_at/current_pnl/initial_capital остались.
+2. **`snapshot merge: новые сессии (не в state) добавляются с нормализованным id`** — state пустой, snapshot отдаёт session_id 7 и 8. После: sessions[0].id=7, sessions[1].id=8, никаких undefined.
+
+### Восстановление сессий (одноразовая операция)
+
+Заказчик попросил «восстановить» три suspended-сессии (id 1, 2, 3 — SBER paper / LKOH paper / SBER sandbox). У каждой была открытая позиция на момент остановки (status='filled', closed_at IS NULL). Выбран сценарий «resume + позиции остаются открытыми».
+
+```sql
+UPDATE trading_sessions SET status='active' WHERE id IN (1, 2, 3);
+```
+
+Затем `touch backend/app/main.py` для триггера `uvicorn --reload` → `lifespan` вызвал `session_runtime.restore_all(active_sessions)` → SessionRuntime подписался на 3 сессии заново.
+
+### Файлы
+
+- `Develop/frontend/src/hooks/useTradingSessionsWS.ts` (M — applySnapshot merge)
+- `Develop/frontend/src/hooks/__tests__/useTradingSessionsWS.test.ts` (M — +2 тестa)
+
+### Результат
+
+- `tsc --noEmit` 0 errors.
+- `vitest useTradingSessionsWS.test.ts` — **9 passed / 0 failed** (7 → 9).
+- Заказчик подтвердил визуально: торговые сессии открываются, статус корректный, позиции на месте.
+
+### Hotfix W8v·1 — GAZP в LaunchSessionModal (`S8R-W8v-LAUNCH-TICKERS-FROM-BACKTESTS`)
+
+Заказчик: «в выпадающем списке инструментов из торговой сессии есть только тикеры активных сессий. GAZP, который тестировался — нет».
+
+**Корень:** `LaunchSessionModal.tsx` показывал подсказки только из `getRecentInstruments()` ([recentInstruments.ts](Develop/frontend/src/utils/recentInstruments.ts)) — а `addRecentInstrument()` пишет в localStorage **только при успешном запуске сессии**, не при бэктесте. GAZP протестирован, но как сессия не запускался → его не было в recent.
+
+**Fix:** Новый helper `collectSuggestedTickers(strategies)` объединяет `getRecentInstruments()` (на первом месте) с тикерами из `strategies[].instruments[].ticker` (бэктесты). `Set` убирает дубликаты с сохранением порядка. Подписка на `useStrategyStore` через переменную `userStrategies` (имя `strategies` уже занято под локальный Select формы — конфликт names поймал Vite oxc parser).
+
+Применено в 4 точках:
+1. Initial state `useState(() => collectSuggestedTickers(userStrategies))`.
+2. `handleTickerSearch` при пустом query.
+3. Блок при `opened=true` + lazy `fetchStrategies()` если store пустой (открытие напрямую с /trading без посещения дашборда).
+4. `useEffect([userStrategies, opened])` — освежает подсказки если store подгрузился асинхронно после открытия модалки.
+
+**Файлы:** `Develop/frontend/src/components/trading/LaunchSessionModal.tsx` (M).
+
+**Результат:** `vitest LaunchSessionModal` — 5 passed / 0 failed. Заказчик подтвердил: GAZP виден в списке.
+
+---
+
 ## 2026-05-16 — Sprint 8 W8t: email в профиле и notification settings (`S8R-W8t-PROFILE-EMAIL-PERSIST`)
 
 ### Что
