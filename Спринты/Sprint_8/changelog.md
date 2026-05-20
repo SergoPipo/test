@@ -10,6 +10,68 @@
 
 ---
 
+## 2026-05-20 — S8R Acceptance-fix BUG-3: единая формула balance/history (`S8R-ACCEPTANCE-FIX-BUG-3`)
+
+### Что
+
+В ходе acceptance-прохождения Шага 1 Sprint_8_Review заказчик заметил, что виджет Balance на Dashboard показывает фейковый дневной убыток `-80 961 ₽ (-27.00%)` и резкий обрыв на sparkline. Диагностика подтвердила: backend `AccountService.get_balance_history` использовал **две разные формулы** для today и прошлых дней.
+
+### Корневая причина
+
+В `app/account/service.py` функция `get_balance_history` имела `if d == end_d and current_paper_balance > 0`-ветку, которая для today подставляла `sum(PaperPortfolio.balance)`, а для всех остальных дней — `_initial_at(d) + cumulative_pnl`. Это давало:
+1. Sandbox-сессии (нет PaperPortfolio) учитывались во вчера, но не в сегодня.
+2. Открытые позиции в paper-сессиях — `paper.balance` это только cash, без рыночной стоимости бумаг.
+3. На стыке вчера/сегодня — визуальный обрыв вниз.
+
+Для пользователя sergopipo (3 сессии × initial=100K, sandbox добавлена 2026-05-15): вчера = 300K-109.16 = 299 890.84 ₽, сегодня = 108 715.93 + 110 213.89 = 218 929.82 ₽ → фейковая дельта -27%.
+
+### Изменения
+
+- **`Develop/backend/app/account/service.py`** — снят `if d == end_d`-блок, удалена загрузка PaperPortfolio и расчёт `current_paper_balance`, обновлён docstring модуля и метода. Импорт `PaperPortfolio` удалён как unused.
+- **`Develop/backend/tests/unit/test_account/test_balance_history.py`**:
+  - +1 новый regression-тест `test_balance_history_today_and_yesterday_use_same_formula_bug3` — фиксирует, что при отсутствии realized_pnl за сегодня today == yesterday (no jump).
+  - Обновлены `test_balance_history_with_paper_session` (теперь today = initial, а не paper.balance) и `test_balance_history_ownership_isolation` (Alice today = 500K initial вместо 700K paper.balance).
+  - Обновлён module-docstring.
+
+### TDD-цикл
+
+- RED: новый тест → `today (50000.0) != yesterday (100000.0)`.
+- GREEN: после снятия if-ветки — 12/12 тестов `tests/unit/test_account/` зелёные.
+- py_compile passed для `app/account/service.py`.
+
+### Trade-off / ограничения
+
+Sparkline теперь показывает «журнал капитала» (initial + realized PnL), а не equity (cash + market value позиций). Открытые позиции не учитываются ни на сегодня, ни на прошлые дни — но **обе точки сопоставимы**, поэтому ложного скачка нет. Полная equity-кривая со snapshot'ами на каждый день — кандидат в Sprint 9 backlog (тэг `S9-EQUITY-DAILY-SNAPSHOT`).
+
+### Acceptance-чеклист
+
+- BUG-3 заведён в `Спринты/Sprint_8_Review/acceptance_checklist.md` (Найденные баги), severity medium.
+- После UI-верификации в браузере (требуется обновить страницу, чтобы перезагрузить sparkline) — закрыть BUG-3 пометкой `✅ FIXED 2026-05-20`.
+
+### Follow-up: семантика sparkline + UX 0%
+
+В ходе UI-верификации заказчик отметил, что виджет рендерил «+0%» зелёной стрелкой вверх и зелёный sparkline, хотя торговли сегодня не было. Корни две: (1) `dayDelta >= 0` использовал нестрогое неравенство; (2) sparkline показывал `total_value` — открытие новой sandbox-сессии на 2026-05-15 (`initial_capital += 100K`) выглядело как «торговый рост», хотя на самом деле это «пополнение». Расширили фикс:
+
+**Backend (`app/account/schemas.py`, `app/account/service.py`):**
+- В `BalanceHistoryPoint` добавлено новое поле `trading_pnl: float = 0.0` = `cumulative realized_pnl(<=d)` без `initial_capital`. Big-number виджета остаётся `total_value`, но для sparkline и дневной дельты теперь есть отдельная метрика — без шума от deposit-event'ов.
+
+**Frontend (`src/api/accountApi.ts`, `src/components/dashboard/BalanceWidget.tsx`):**
+- Тип `BalanceHistoryPoint` расширен опциональным `trading_pnl?: number` (бэквард-совместимо со старым backend).
+- `useMemo` view: `currentTotal` = `total_value`, `sparkData` = `trading_pnl[]` (с fallback на `total_value` если нет поля), `dayDelta` = `last - prev` по `sparkData`, `dayPct` = `dayDelta / currentTotal` (стабильная база, не prev из trading_pnl).
+- Sparkline color теперь трёхзначный: `green` (last > first), `red` (last < first), `var(--mantine-color-gray-5)` (last == first).
+- Дневная индикация: при `dayDelta > 0` — UP-arrow + green text, при `< 0` — DOWN-arrow + red text, при `== 0` — `IconMinus` + dimmed text. Зелёное «+0%» при отсутствии торговли больше не появляется.
+- ARIA-label обновлён: «График торгового P&L за 30 дней, … за день» (раньше — «график баланса», семантически некорректно).
+
+**Тесты:**
+- `tests/unit/test_account/test_balance_history.py::test_balance_history_trading_pnl_separates_initial_from_pnl` (новый): проверяет, что добавление второй сессии (initial +50K) **не** двигает `trading_pnl` — он отражает только realized PnL. Существующий `test_balance_history_point_schema_shape` обновлён под расширенный set keys.
+- 13/13 backend-тестов `tests/unit/test_account/` GREEN.
+- 6/6 frontend-тестов `BalanceWidget.test.tsx` GREEN.
+- `npx tsc --noEmit` — 0 ошибок.
+
+**Trade-off:** sparkline теперь — это «P&L curve», а не «balance over time». Для реальной equity-кривой (с учётом market value открытых позиций) нужны daily snapshot'ы — задача `S9-EQUITY-DAILY-SNAPSHOT`.
+
+---
+
 ## 2026-05-18 — Sprint 8 W8u: CI lint fixes — moex-terminal Actions снова зелёный (`S8R-W8u-CI-LINT-FIXES`)
 
 ### Что

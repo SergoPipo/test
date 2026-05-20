@@ -24,20 +24,23 @@
 
 ## Шаг 0 — Pre-flight (5–10 минут)
 
-- [ ] `cd Develop && ./scripts/start.sh` — обе строчки `Backend: http://localhost:8000` и `Frontend: http://localhost:5173` появились, ошибок в терминале нет.
+- [x] `cd Develop && ./scripts/start.sh` — обе строчки `Backend: http://localhost:8000` и `Frontend: http://localhost:5173` появились, ошибок в терминале нет.
   > Заметка:
 
-- [ ] `http://localhost:5173` открылся в браузере.
+- [x] `http://localhost:5173` открылся в браузере.
   > Заметка:
 
-- [ ] DevTools (Cmd+Opt+I) → Console: **нет красных ошибок** (warnings ОК).
-  > Заметка (если есть ошибки — первая строка):
+- [x] DevTools (Cmd+Opt+I) → Console: **нет красных ошибок** (warnings ОК).
+  > Заметка: в Console 4 ошибки, но 3 из 4 — dev-only артефакты, не баги продукта:
+  > - `WebSocket ... closed before established` (×2, `/ws` и `/ws/trading-sessions/1`) — поведение React 18 StrictMode в dev: первый `useEffect` отменяется на unmount, второй коннект устанавливается стабильно. Backend log это подтверждает (`ws_connected` → `ws_subscribed channel=notifications:1,health`, держится). В production-сборке отсутствует.
+  > - `T-Invest CDN 403` для `RU000A10DS74x160.png` (логотип облигации Сибур-Холдинг 001P-08) — у CDN нет логотипа для этой бумаги, фронт должен показать дефолтную плашку (UX-минорная вещь).
+  > - **Реальный баг — sparkline 500** (SQLite `database is locked` при startup-конкуренции), вынесен в BUG-2. Симптом «CORS error / Status code: 500» на запросе sparkline — производный от 500 (CORSMiddleware не отдаёт заголовки в exception path).
 
-- [ ] Логин как `sergopipo` прошёл, попадаю на Dashboard.
+- [x] Логин как `sergopipo` прошёл, попадаю на Dashboard.
   > Заметка:
 
-- [ ] DevTools → Network → запрос `/api/v1/health` ответил 200, в теле есть `tinvest_connected`, `scheduler_running`.
-  > Заметка:
+- [x] DevTools → Network → запрос `/api/v1/health` ответил 200, в теле есть `tinvest_connected`, `scheduler_running`.
+  > Заметка: проверено через `curl http://localhost:8000/api/v1/health` — `{"status":"ok","version":"0.1.0","database":"connected","cb_state":"ok","tinvest_connected":true,"scheduler_running":true,"scheduler_jobs":4}`. Все 4 ключевых поля присутствуют (status, database, tinvest_connected, scheduler_running).
 
 **Если хоть один пункт Шага 0 не прошёл — стоп, сообщи мне.**
 
@@ -242,13 +245,21 @@
 
 - **BUG-1 ✅ FIXED 2026-05-14 (Sprint 8 W7) | severity: lethal | `app/trading/engine.py`, `app/trading/runtime.py` | Sandbox/real торговля не была реализована в `engine.process_signal`. Trade создавался со `status=pending`, `TInvestAdapter.place_order` никем не вызывался. Реализовано в W7 (Вариант C++): `_submit_order_to_broker` отправляет market-order и резолвит trade по `OrderResponse.status`; `_recover_orphan_pending_trades` зачищает orphan'ы при старте backend. 13 новых тестов (8 sandbox-flow + 5 orphan-recovery), backend regression 1560/0 passed. ФТ v2.5 → v2.6.** Ожидается live-test заказчиком для финального подтверждения.
 
+- **BUG-3 ✅ FIXED 2026-05-20 (S8R-ACCEPTANCE-FIX-BUG-3 + followup) | severity: medium | `app/account/service.py`, `app/account/schemas.py`, `BalanceWidget.tsx`, `accountApi.ts` | «За день» в виджете Balance показывал фейковый -27% / -80 961 ₽ из-за методологической рассинхронизации формул.** Корневая причина: today считался через `sum(PaperPortfolio.balance)` (только cash, без sandbox, без позиций), прошлые дни — через `initial_capital + cumulative_realized_pnl`. **Фикс**: (a) снят today-special-case в `get_balance_history` — единая формула на все дни; (b) добавлено поле `trading_pnl: float` в `BalanceHistoryPoint` schema = `cumulative_realized_pnl(<=d)` без `initial_capital`; (c) `BalanceWidget` теперь использует `trading_pnl` для sparkline и дневной дельты (а `total_value` — только для большой цифры), чтобы открытие новой сессии не выглядело как «торговый рост»; (d) UX-полировка: при ровно 0 дневной дельте — нейтральный state (`IconMinus`, dimmed-текст, без стрелки); цвет sparkline теперь трёхзначный (green/red/`gray-5`). **Тесты**: +1 новый regression-тест `test_balance_history_today_and_yesterday_use_same_formula_bug3` + 1 для `trading_pnl` separation; 13/13 backend GREEN, 6/6 frontend BalanceWidget GREEN, `npx tsc --noEmit` 0 errors. **Trade-off**: sparkline теперь — «P&L curve», а не «balance over time»; реальная equity-кривая с market value позиций — задача Sprint 9 (`S9-EQUITY-DAILY-SNAPSHOT`). См. `Спринты/Sprint_8/changelog.md` запись `2026-05-20`. UI-верификация заказчиком: 299 891 ₽ + «+0 ₽ серым» + красная sparkline со ступенькой -109.16 (закрытие LKOH на 2026-05-08).
+
+- **BUG-2 | severity: medium | `app/market_data/service.py:168-188` (`_purge_iss_cache`) → `router.py:79` (`get_sparkline`) | Transient HTTP 500 при первом обращении к `/api/v1/market-data/sparkline` на холодном старте backend.** Trace в backend.log: `sqlite3.OperationalError: database is locked`. Корневая причина — конкуренция за SQLite writer-lock между lifespan startup prefill (DELETE из `ohlcv_cache` для прогрева SBER, политика S5R «T-Invest — единственный источник») и параллельным API-запросом с frontend, который через `_purge_iss_cache` запускает аналогичный DELETE. Существующий retry на 3 попытки (S5R hotfix) не всегда спасает при startup-конкуренции. После прогрева — все запросы 200 OK (подтверждено логом `12:46:59 ... 200 OK`). **Симптом в DevTools**: красная строка `Origin http://localhost:5173 is not allowed by Access-Control-Allow-Origin. Status code: 500` — это маскировка от браузера; реальная причина 500, не CORS. **Приоритет фикса**: medium — не блокирует UX (sparkline появится при перезагрузке страницы), но шумит в Console и портит впечатление. Варианты фикса: (a) WAL `busy_timeout` повысить, (b) ретраи увеличить с 3 до 5-7 + экспоненциальный backoff, (c) отложить prefill до окончания startup через `lifespan` deferred-task.
+
 ---
 
 ## Общие замечания
 
 > Сюда пиши любые мысли, идеи, неудобства UX, странности поведения, которые не тянут на «баг», но требуют обсуждения.
 
--
+- **DevTools-шум на dev-сборке (некритично, но мешает приёмке):**
+  - `WebSocket ... closed before the connection is established` — артефакт React 18 StrictMode (двойной mount компонента в dev → отмена первого WS-соединения). В production-сборке `pnpm build && pnpm preview` отсутствует. Если хочется чистый Console при приёмке — можно либо отключить StrictMode в `main.tsx` на время review, либо договориться, что dev-only ошибки игнорируются.
+  - **React HTML-warning**: `<p> cannot contain a nested <div>` (frontend log) — Mantine `Text` (рендерится в `<p>`) содержит вложенный `Group` (`<div>`). Невалидный HTML, но без визуального дефекта. Завести задачу на починку (`component="div"` или `span="true"` для `Text`-обёртки) в S9 backlog.
+  - React Router v7 future-flag warnings (`v7_startTransition`, `v7_relativeSplatPath`) — желательно опт-ин до миграции на v7.
+- **T-Invest CDN logo gracefully fallback**: для облигации `RU000A10DS74` (Сибур-Холдинг 001P-08) Tinkoff CDN отдаёт 403. Фронту стоит подавлять Console-ошибку через `<img onError>` и показывать дефолтную плашку (буква/иконка). Не баг функциональности, но шум в Console.
 
 ---
 
