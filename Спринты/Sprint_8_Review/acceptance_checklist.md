@@ -50,23 +50,23 @@
 
 Открыть каждую страницу. Проверка: загружается без 500/JS-ошибок, видны данные (или понятное пустое состояние).
 
-- [ ] **Dashboard** — виджеты Health, Balance, Active Positions, Sparkline рендерятся.
+- [x] **Dashboard** — виджеты Health, Balance, Active Positions, Sparkline рендерятся.
   > Заметка:
 
-- [ ] **Strategy (список)** — список стратегий, кнопка «Создать» работает.
+- [x] **Strategy (список)** — список стратегий, кнопка «Создать» работает.
   > Заметка:
 
-- [ ] **Backtest** — страница запуска, выбор стратегии работает.
+- [x] **Backtest** — страница запуска, выбор стратегии работает.
   > Заметка:
 
-- [ ] **Trading (paper/live сессии)** — список сессий загружается.
+- [x] **Trading (paper/live сессии)** — список сессий загружается.
   > Заметка:
 
-- [ ] **Chart (график)** — открывается, свечки рендерятся, можно сменить таймфрейм.
+- [x] **Chart (график)** — открывается, свечки рендерятся, можно сменить таймфрейм.
   > Заметка:
 
-- [ ] **Account** — баланс, позиции, операции, налоги отображаются.
-  > Заметка:
+- [!] **Account** — баланс, позиции, операции, налоги отображаются.
+  > Заметка: Я попробовал скачать налоговый отчет за 2026 год. У меня система не выдала никаких ошибок, но и отчет никуда не скачался.
 
 - [ ] **AI Chat** — окно открывается, можно отправить сообщение.
   > Заметка:
@@ -244,6 +244,8 @@
 > Формат: `BUG-N | severity: lethal/critical/medium/low | где | что | приоритет фикса`
 
 - **BUG-1 ✅ FIXED 2026-05-14 (Sprint 8 W7) | severity: lethal | `app/trading/engine.py`, `app/trading/runtime.py` | Sandbox/real торговля не была реализована в `engine.process_signal`. Trade создавался со `status=pending`, `TInvestAdapter.place_order` никем не вызывался. Реализовано в W7 (Вариант C++): `_submit_order_to_broker` отправляет market-order и резолвит trade по `OrderResponse.status`; `_recover_orphan_pending_trades` зачищает orphan'ы при старте backend. 13 новых тестов (8 sandbox-flow + 5 orphan-recovery), backend regression 1560/0 passed. ФТ v2.5 → v2.6.** Ожидается live-test заказчиком для финального подтверждения.
+
+- **BUG-4 ✅ FIXED 2026-05-23 (S8R-ACCEPTANCE-FIX-BUG-4) | severity: medium | `frontend/src/components/account/TaxReportModal.tsx`, `frontend/src/stores/accountStore.ts`, `frontend/src/pages/AccountPage.tsx` | Кнопка «Сгенерировать отчёт» создавала файл на бэкенде, но в UI ничего не происходило — файл не скачивался и не отображался.** Корневая причина: `downloadTaxReport` action и `taxApi.downloadReport` существовали, но **нигде в UI не вызывались** (grep по всем .tsx — 0 хитов). Список `taxReports` тоже нигде не отрисовывался. **Фикс**: (a) `generateTaxReport` теперь возвращает `Promise<TaxReport>` (раньше void) — чтобы UI знал id новой записи; (b) `downloadTaxReport(id, filename?)` — опциональный кастомный filename; (c) на `AccountPage` добавлена обёртка `handleGenerateAndDownload`, которая после `generateTaxReport` сразу запускает `downloadTaxReport(id, "tax_report_${year}.${format}")`; (d) на mount `AccountPage` тянет `fetchTaxReports` и отрисовывает новую секцию «Налоговые отчёты» — таблица с колонками год/статус/дата/налоговая база и кнопкой-иконкой `IconDownload` на каждой строке. **Тесты**: 9/9 AccountPage GREEN, 7/7 accountStore GREEN (+2 новых для BUG-4), 2/2 TaxReportModal GREEN, `npx tsc --noEmit` 0 errors. **UI-верификация заказчика 2026-05-23**: список отчётов отображается, генерация → авто-скачивание работает, кнопка «Скачать» на существующих строках срабатывает. Корневая причина: пропущена интеграция UI. Backend работает (POST `/tax/reports` → файл `data/tax_reports/tax_report_1_2026.xlsx` создаётся, status=ready; GET `/tax/reports/{id}/download` отдаёт blob корректно). На фронте есть `taxApi.downloadReport` и `accountStore.downloadTaxReport` (Blob → click), но **`downloadTaxReport` нигде в UI не вызывается** (grep по всем .tsx — 0 хитов). Модалка после `onGenerate` сразу закрывается (`onClose()`), а отрисовки списка `taxReports` на AccountPage нет. Воспроизведение: Account → «Налоговый отчёт» → выбрать год 2026 → «Сгенерировать отчёт» → модалка закрылась, файл не скачался. Подтверждено в логе backend: POST 200 + GET 200 (список), но **нет** GET `/download`. **Тэг для фикс-ветки**: `S8R-ACCEPTANCE-FIX-BUG-4`.
 
 - **BUG-3 ✅ FIXED 2026-05-20 (S8R-ACCEPTANCE-FIX-BUG-3 + followup) | severity: medium | `app/account/service.py`, `app/account/schemas.py`, `BalanceWidget.tsx`, `accountApi.ts` | «За день» в виджете Balance показывал фейковый -27% / -80 961 ₽ из-за методологической рассинхронизации формул.** Корневая причина: today считался через `sum(PaperPortfolio.balance)` (только cash, без sandbox, без позиций), прошлые дни — через `initial_capital + cumulative_realized_pnl`. **Фикс**: (a) снят today-special-case в `get_balance_history` — единая формула на все дни; (b) добавлено поле `trading_pnl: float` в `BalanceHistoryPoint` schema = `cumulative_realized_pnl(<=d)` без `initial_capital`; (c) `BalanceWidget` теперь использует `trading_pnl` для sparkline и дневной дельты (а `total_value` — только для большой цифры), чтобы открытие новой сессии не выглядело как «торговый рост»; (d) UX-полировка: при ровно 0 дневной дельте — нейтральный state (`IconMinus`, dimmed-текст, без стрелки); цвет sparkline теперь трёхзначный (green/red/`gray-5`). **Тесты**: +1 новый regression-тест `test_balance_history_today_and_yesterday_use_same_formula_bug3` + 1 для `trading_pnl` separation; 13/13 backend GREEN, 6/6 frontend BalanceWidget GREEN, `npx tsc --noEmit` 0 errors. **Trade-off**: sparkline теперь — «P&L curve», а не «balance over time»; реальная equity-кривая с market value позиций — задача Sprint 9 (`S9-EQUITY-DAILY-SNAPSHOT`). См. `Спринты/Sprint_8/changelog.md` запись `2026-05-20`. UI-верификация заказчиком: 299 891 ₽ + «+0 ₽ серым» + красная sparkline со ступенькой -109.16 (закрытие LKOH на 2026-05-08).
 

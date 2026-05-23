@@ -10,6 +10,41 @@
 
 ---
 
+## 2026-05-23 — S8R Acceptance-fix BUG-4: налоговые отчёты — auto-download + UI-список (`S8R-ACCEPTANCE-FIX-BUG-4`)
+
+### Что
+
+На Шаге 1 acceptance (`S8R-Шаг-1.6` Account) заказчик попробовал скачать налоговый отчёт за 2026: модалка закрылась без ошибок, но файл не сохранился в Downloads. Диагностика показала: backend генерирует файл корректно (`data/tax_reports/tax_report_1_2026.xlsx` создаётся, status=ready), но **`downloadTaxReport` action и `taxApi.downloadReport` нигде в UI не вызывались** (grep по всем .tsx — 0 хитов, кроме самих определений в store и api-клиенте). И список `taxReports` нигде не отрисовывался на `AccountPage` — пользователь не мог увидеть ранее сгенерированные отчёты и скачать их повторно.
+
+### Изменения
+
+**`Develop/frontend/src/stores/accountStore.ts`**:
+- `generateTaxReport(data)` теперь возвращает `Promise<TaxReport>` (раньше `Promise<void>`). Нужно вызывающему коду, чтобы знать `id` свежей записи и тут же запустить download.
+- `downloadTaxReport(id, filename?)` — опциональный кастомный filename (раньше всегда `tax_report_${id}.xlsx`, без учёта реального формата/года).
+
+**`Develop/frontend/src/pages/AccountPage.tsx`**:
+- Импортированы `downloadTaxReport`, `fetchTaxReports`, `taxReports` из store, тип `TaxReport`/`TaxReportRequest` из api/types.
+- `useEffect` на mount: `void fetchTaxReports()` — список отображается с первого захода.
+- Новая обёртка `handleGenerateAndDownload(data)` — `const created = await generateTaxReport(data); await downloadTaxReport(created.id, "tax_report_${data.year}.${data.format}");`. Прокидывается в `<TaxReportModal onGenerate>`.
+- Новая обёртка `handleDownloadExisting(report)` для ре-загрузки строки списка.
+- Новая секция «Налоговые отчёты» — `<Paper>` с `<Table>` (год / `<Badge>` статус / дата / налоговая база / кнопка-иконка `<IconDownload>` в `ActionIcon`). Пустое состояние: текст «Отчёты ещё не сгенерированы».
+
+**Тесты:**
+- `Develop/frontend/src/stores/__tests__/accountStore.test.ts` — +2 regression-теста: `generateTaxReport returns the created TaxReport (BUG-4)` и `downloadTaxReport accepts custom filename (BUG-4)`. Подменяем `document.createElement('a')` для замера переданного `filename`.
+- `Develop/frontend/src/pages/__tests__/AccountPage.test.tsx` — починен тест `renders error state`: добавлен мок `fetchTaxReports: vi.fn()`, иначе `set({ error: null })` внутри fetchTaxReports перезатирал тестовое сообщение об ошибке (новый useEffect-вызов).
+- Результат: 9/9 AccountPage GREEN, 7/7 accountStore GREEN, 2/2 TaxReportModal GREEN, `npx tsc --noEmit` 0 errors, Vite HMR подхватил автоматически.
+
+### Trade-off / ограничения
+
+Filename для re-download существующих отчётов из таблицы вычисляется как `tax_report_${year}.xlsx` (предполагаем xlsx) — `TaxReport` response_model не содержит поля `format`. При генерации через модалку формат известен из request → корректное расширение. Для будущей точности `TaxReportSchema` стоит расширить полем `format` (S9 backlog).
+
+### Acceptance-чеклист
+
+- BUG-4 закрыт как `✅ FIXED 2026-05-23` в [`Спринты/Sprint_8_Review/acceptance_checklist.md`](../Sprint_8_Review/acceptance_checklist.md).
+- В ходе UI-верификации заказчик обнаружил **новый баг BUG-5** (содержимое xlsx-файла пустое — реализован отдельно).
+
+---
+
 ## 2026-05-20 — S8R Acceptance-fix BUG-3: единая формула balance/history (`S8R-ACCEPTANCE-FIX-BUG-3`)
 
 ### Что
