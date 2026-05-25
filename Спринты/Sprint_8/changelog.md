@@ -10,6 +10,65 @@
 
 ---
 
+## 2026-05-25 — S8R Acceptance-fix BUG-5 + BUG-6: рефакторинг tax-алгоритма + user_id isolation (`S8R-ACCEPTANCE-FIX-BUG-5+6`)
+
+### Что
+
+После BUG-4 (auto-download заработал) заказчик скачал отчёт за 2026 и обнаружил, что **xlsx-файл абсолютно пустой** — только шапка таблицы и нулевые агрегаты. Аналогично 2025. Параллельно в ходе диагностики обнаружен второй (более серьёзный) дефект: отсутствие фильтра `user_id` в выборке закрытых сделок — data-isolation проблема. Оба фикса свёрстаны в одном коммите.
+
+### Корневая причина BUG-5
+
+В `app/tax/service.py:121-264` функция `_build_fifo_queue` была построена под **фиктивную модель данных** — раздельные buy- и sell-leg записи в `live_trades`:
+1. Разделяет trades на `buys`/`sells` по `direction`.
+2. Из buys создаёт `open_lots`.
+3. Для каждого sell ищет earliest open buy → создаёт TaxLot пару.
+
+Но в этом коде модель `LiveTrade` другая: **одна строка = уже закрытая пара entry+exit** (поля `entry_price`, `exit_price`, `opened_at`, `closed_at`, `pnl` — всё в одной записи). `direction` хранит направление позиции (long='buy' / short='sell'), а не buy/sell-leg.
+
+В БД заказчика 7 closed live_trades, **все с `direction='buy'`** (long-позиции). Алгоритм:
+- buys.append(×7), sells.append(×0)
+- Создал 7 open_lots
+- 0 sells для matching → ни один лот не закрыт
+- `realized_pnl=NULL` у всех 14 tax_lots → агрегаты 0
+
+Существующие тесты (`tests/unit/test_tax/test_fifo.py::TestFIFOSimple` × 5 шт) тестировали **несуществующий код-путь** — синтезировали раздельные sell-записи через `_make_trade(direction="sell")`. Тесты проходили, баг оставался скрытым.
+
+### Корневая причина BUG-6
+
+`_load_trades` использовал `select(LiveTrade).join(TradingSession).where(LiveTrade.status == "closed", ...)` — **без фильтра по user_id**. Цепочка владения: LiveTrade → TradingSession → StrategyVersion → Strategy.user_id. Single-tenant сейчас не страдает (один юзер), но при втором пользователе его сделки попадали бы в чужой 3-НДФЛ. Severity: high (security/isolation).
+
+### Изменения
+
+**`Develop/backend/app/tax/service.py`**:
+- `_build_fifo_queue` **переписан** под closed-pair модель: для каждой `LiveTrade.status='closed'` с заполненными `entry_price` И `exit_price` создаётся один TaxLot. Для long (`direction='buy'`): `price_pnl = (exit - entry) * volume`; для short (`direction='sell'`): `price_pnl = (entry - exit) * volume`. Для облигаций (`instrument_type='bond'`) добавляется разница НКД (`nkd_exit − nkd_entry`). Commission делится 50/50 между entry/exit (модель `LiveTrade` не хранит раздельные комиссии). Итог: `realized_pnl = price_pnl + nkd_pnl − commission_total`. Имя функции сохранено для обратной совместимости с вызовом из `generate_report`; алгоритм больше не использует FIFO.
+- `_load_trades` дополнен **двойным join** через `StrategyVersion` и `Strategy` + `Strategy.user_id == user_id` в WHERE. Импортированы `Strategy`, `StrategyVersion` из `app.strategy.models`.
+
+**Тесты `Develop/backend/tests/unit/test_tax/`**:
+- `test_fifo.py`: удалены 5 устаревших buy/sell-leg тестов (`TestFIFOSimple`), которые тестировали фиктивный код-путь и давали ложное чувство покрытия. Обновлён module-docstring с историческим контекстом. Добавлен новый класс **`TestClosedPairs`** с 8 тестами: long-pair PnL, long-pair с убытком, short-pair с инвертированной формулой, bond + НКД, фильтр по `instrument_type`, skip неполных пар (`exit_price=None`), пустой список, skip `status='filled'`.
+- Новый файл `test_user_isolation.py`: 3 теста с DB-интеграцией (in-memory SQLite, реальная цепочка Strategy→StrategyVersion→TradingSession→LiveTrade): `test_load_trades_filters_by_user_id_bug6` (Alice не видит сделок Bob и наоборот), `test_load_trades_filters_by_year` (фильтр года не сломался после рефакторинга), `test_generate_report_end_to_end_with_real_trade` (полный путь: создать closed-сделку → generate_report → проверить непустые агрегаты + файл создан, REPORTS_DIR подменён через monkeypatch на tmp_path).
+
+### TDD-цикл
+
+- RED: `test_closed_long_pair_produces_realized_pnl` → `assert None is not None` (старый алгоритм возвращал TaxLot с `realized_pnl=None`).
+- GREEN: после рефакторинга `_build_fifo_queue` — 6 новых TestClosedPairs тестов сразу зелёные. Затем 5 старых TestFIFOSimple упали по дизайну (фиктивная модель) → удалены.
+- Прогон полного tax-набора: **32/32 GREEN** (16 unit + 13 router + 3 user-isolation). `py_compile` passed для `app/tax/service.py`. Uvicorn auto-reloaded (видно в `/tmp/moex-dev-logs/backend.log`).
+
+### UI-верификация заказчика
+
+После регенерации отчёта 2026 в xlsx **7 строк** с реальными ценами и PnL (SBER + LKOH paper-сделки), агрегаты `total_profit ≈ +119.02`, `total_loss ≈ -175.11`, `taxable_base = 0` (убыток → база 0). Отчёт за 2025 пустой — корректно, в 2025 нет закрытых сделок.
+
+### Trade-off / ограничения
+
+- Commission делится 50/50 entry/exit как приближение. Если в будущем `LiveTrade` получит раздельные поля `commission_entry`/`commission_exit` — нужно обновить алгоритм. Сейчас в paper-сделках commission=0, в реальных трейдах T-Invest может отличаться.
+- `_detect_instrument_type` остался эвристическим (по тикеру). TODO в коде → S9 (`S9-INSTRUMENT-TYPE-FROM-INSTRUMENT-INFO`).
+- Тэг `_build_fifo_queue` (имя функции) теперь misleading — алгоритм не FIFO. Не переименовываем чтобы не ломать `generate_report` и сторонний import, но в новых вызовах рекомендуется адресоваться через generate_report.
+
+### Acceptance-чеклист
+
+- BUG-5 и BUG-6 закрыты как `✅ FIXED 2026-05-25` в [`Спринты/Sprint_8_Review/acceptance_checklist.md`](../Sprint_8_Review/acceptance_checklist.md).
+
+---
+
 ## 2026-05-23 — S8R Acceptance-fix BUG-4: налоговые отчёты — auto-download + UI-список (`S8R-ACCEPTANCE-FIX-BUG-4`)
 
 ### Что
