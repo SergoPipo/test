@@ -10,6 +10,48 @@
 
 ---
 
+## 2026-05-27 — CI fix: test_email_notifier — deprecated `asyncio.get_event_loop()` → `pytest.mark.asyncio` (`S8R-CI-FIX-EMAIL-ASYNC`)
+
+### Что
+
+После коммита `b08b292` (`S8R-ACCEPTANCE-FIX-BUG-8+9+10`) CI backend job упал в шаге `Coverage gate (TOTAL ≥ 80%)` с одной ошибкой:
+
+```
+FAILED tests/test_security/test_xss_telegram_email.py::test_email_notifier_html_escapes_user_input
+- RuntimeError: There is no current event loop in thread 'MainThread'.
+```
+
+Frontend и security-scan job'ы — GREEN. Локально все 6 тестов файла проходили.
+
+### Корневая причина
+
+Тест использовал deprecated паттерн (Python 3.10+):
+
+```python
+asyncio.get_event_loop().run_until_complete(n.send(...))
+```
+
+В Python 3.11 этот вызов работает только если loop был ранее создан в текущей сессии. Регрессия появилась после коммита `67c2447` (AI deps, `openai>=2.0` + `anthropic>=0.34`) — их transitive deps (`anyio`/`httpx`) меняют порядок инициализации event loop. В CI после новой комбинации deps `MainThread` к моменту запуска теста остаётся без loop → `get_event_loop()` кидает `RuntimeError`. Локально проблема маскировалась другим порядком pytest-asyncio.
+
+Регрессия пришла с коммита `67c2447` (2026-05-27 11:24), но не была замечена сразу — последующие коммиты `de53a8c` и `f35a36f` ломались тем же тестом.
+
+### Фикс
+
+`Develop/backend/tests/test_security/test_xss_telegram_email.py:74-110` переписан как `@pytest.mark.asyncio async def` — стандартный паттерн (тот же, что у соседнего `test_telegram_notifier_escapes_user_input` на строке 50).
+
+Удалены: `import asyncio` внутри `with`, `asyncio.get_event_loop().run_until_complete(n.send(...))`. Заменено на `await n.send(...)`.
+
+### Верификация
+
+- Локально: `pytest tests/test_security/test_xss_telegram_email.py -v` → 6/6 GREEN.
+- CI run `26520345002` (commit `b08b292`): **backend ✅ success, frontend ✅ success, security-scan ✅ success**. Длительность: ~6 минут.
+
+### Trade-off
+
+Альтернативой был бы `asyncio.run(n.send(...))` — он создаёт и закрывает новый loop в текущей frame без глобального состояния. Выбран `@pytest.mark.asyncio` для консистентности с соседним тестом в том же файле и потому, что pytest-asyncio (в `[pyproject.toml]` уже `asyncio_mode = "auto"`) — основной паттерн для async-тестов в проекте.
+
+---
+
 ## 2026-05-27 — S8R Acceptance-fix BUG-8 + BUG-9 + BUG-10: Plotly Dash доступен из браузера + admin видит сессии всех пользователей (`S8R-ACCEPTANCE-FIX-BUG-8`, `S8R-ACCEPTANCE-FIX-BUG-9`, `S8R-ACCEPTANCE-FIX-BUG-10`)
 
 ### Что
