@@ -10,6 +10,89 @@
 
 ---
 
+## 2026-05-27 — S8R Acceptance-fix BUG-8 + BUG-9 + BUG-10: Plotly Dash доступен из браузера + admin видит сессии всех пользователей (`S8R-ACCEPTANCE-FIX-BUG-8`, `S8R-ACCEPTANCE-FIX-BUG-9`, `S8R-ACCEPTANCE-FIX-BUG-10`)
+
+### Что
+
+После того как BUG-7 закрыл доступ в AdminLandingPage, заказчик попытался открыть Plotly Dash через ссылку в Admin Landing — и упёрся в три независимых проблемы, которые в сумме блокировали Сценарий 5 «Admin + Plotly Dash»:
+
+1. **BUG-8** — ссылка `/api/v1/admin/metrics` открывала SPA-404 (Vite отдавал index.html), а при прямой навигации на `:8000` backend возвращал 401: cookie `access_token` нигде не выставлялся.
+2. **BUG-9** — даже с авторизацией Plotly Dash рендерил только статичный «Loading…»: глобальный `SecurityHeadersMiddleware` ставил `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'`, и браузер блокировал 22 inline `<script>`/`<style>` Dash'а.
+3. **BUG-10** — карточка «Активные торговые сессии» показывала только сессии текущего пользователя; для admin-страницы это design gap.
+
+### Корневая причина
+
+**BUG-8.** Два слоя:
+- (8a) `<Anchor href="/api/v1/admin/metrics">` — относительный URL → Vite resolveсит на `localhost:5173/api/v1/admin/metrics`. Vite SPA отдаёт index.html (нет proxy для `/api`), React Router показывает 404.
+- (8b) `AdminAuthASGIMiddleware` принимает JWT через `Authorization: Bearer` ИЛИ cookie `access_token`. При навигации в новой вкладке браузер не подставляет Authorization header — нужен cookie. Но frontend нигде не выставлял `access_token` cookie: login сохранял токен только в localStorage (для axios interceptor), а из cookies сетил только `csrf_token`. Mismatch: middleware дизайнен под cookie, login это не реализует.
+
+**BUG-9.** Plotly Dash bootstrap'ит UI через инлайновые `<script>` и `<style>` теги (это архитектурное ограничение Dash — он не выгружает отдельные .js/.css файлы для динамики). CSP `default-src 'self'` блокирует всё инлайновое без `unsafe-inline`/`unsafe-eval`. Глобальное ослабление CSP — антипаттерн (теряем XSS-защиту на 99% сайта); правильное решение — path-based exception.
+
+**BUG-10.** Endpoint `GET /api/v1/trading/sessions` всегда фильтровал по `user_id=current_user.id`. На single-tenant single-user это незаметно, но для admin-страницы — design gap.
+
+### Изменения
+
+**BUG-8 фикс:**
+- `Develop/backend/app/auth/router.py`:
+  - Добавлен `_set_access_token_cookie(response, token)` helper: `httponly=True, samesite='lax', path='/api', max_age=JWT_ACCESS_TOKEN_EXPIRE_MINUTES*60, secure=False (dev)`.
+  - `POST /auth/setup`, `POST /auth/login`, `POST /auth/refresh` после генерации `access_token` вызывают helper.
+  - `POST /auth/logout` делает `response.delete_cookie(key='access_token', path='/api')`.
+  - `samesite='lax'` — критично: при `strict` cookie не передавался бы при top-level навигации из другой вкладки (`target="_blank"` ссылка на Dash).
+- `Develop/frontend/src/api/client.ts`: `withCredentials: true` для axios — чтобы браузер принимал `Set-Cookie` от backend cross-origin (`:8000` ↔ `:5173`).
+- `Develop/frontend/src/pages/admin/AdminLandingPage.tsx`: `PLOTLY_DASH_URL = ${API_BASE_URL}/admin/metrics/` (абсолютный URL с trailing slash — `:` избегает 307-редиректа от FastAPI mount-point).
+
+**BUG-9 фикс:**
+- `Develop/backend/app/middleware/security_headers.py`:
+  - Добавлены константы `_PLOTLY_DASH_PATH_PREFIX = "/api/v1/admin/metrics"` и `_PLOTLY_DASH_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"`.
+  - `dispatch()` проверяет `request.url.path.startswith(_PLOTLY_DASH_PATH_PREFIX)` → отдаёт `_PLOTLY_DASH_CSP`, иначе `_DEFAULT_CSP`.
+  - `frame-ancestors 'none'` остаётся даже на Dash-эндпоинтах — clickjacking-защита не страдает.
+
+**BUG-10 фикс:**
+- `Develop/backend/app/trading/router.py:list_sessions`: добавлен `all_users: bool = Query(False, ...)`. Admin-gate: `if all_users and not current_user.is_admin: raise HTTPException(403, ...)`. `user_id=None if all_users else current_user.id` передаётся в `service.get_sessions`.
+- `Develop/backend/app/trading/service.py:get_sessions`: при `user_id=None` запрос не фильтрует. Добавлен batch-JOIN `TradingSession → StrategyVersion → Strategy → Strategy.user_id`, результат пакуется в `user_id_by_session: dict[int, int]` и прокидывается в каждый `SessionResponse`.
+- `Develop/backend/app/trading/schemas.py:SessionResponse`: `user_id: int | None = None`.
+- `Develop/frontend/src/api/tradingApi.ts:getSessions`: param `all_users?: boolean`.
+- `Develop/frontend/src/api/types.ts:TradingSession`: `user_id?: number | null`.
+- `Develop/frontend/src/pages/admin/AdminLandingPage.tsx`: вызов с `{ status: 'active', all_users: true }`; в таблице добавлена колонка «User» — отображает `#${user_id}` или `—`.
+
+### Тесты
+
+**BUG-9** (`Develop/backend/tests/test_middleware/test_security_headers.py`):
+- 3 новых regression: `test_admin_metrics_returns_relaxed_csp`, `test_admin_metrics_subpath_returns_relaxed_csp` (для `/admin/metrics/_dash-layout`, `/admin/metrics/assets/dash.css` и т.п.), `test_default_csp_still_strict_for_other_paths`. Все 9/9 GREEN.
+
+**BUG-10** (`Develop/backend/tests/test_trading/test_router.py`):
+- `test_list_sessions_default_filters_by_current_user_bug10` — без флага не-админ видит только свои сессии.
+- `test_list_sessions_all_users_requires_admin_bug10` — `?all_users=true` без `is_admin` → 403.
+- `test_list_sessions_all_users_admin_sees_everyone_bug10` — admin с флагом видит сессии всех + каждый item содержит корректный `user_id`.
+- Все 4/4 GREEN.
+
+**Frontend**: `tsc --noEmit` exit 0, 17 client tests GREEN.
+
+### UI-верификация заказчика 2026-05-27
+
+После `Cmd+R` в браузере:
+1. **Admin Landing → карточка «Активные торговые сессии»** — колонка User видна, показывает `#1` для текущих сессий пользователя.
+2. **Клик по ссылке `/api/v1/admin/metrics/`** — новая вкладка открывается, Plotly Dash рендерит 4 графика (signal→order latency, Dashboard LCP, Telegram latency, backtest jobs rate). DevTools Console clean (нет CSP-блоков).
+
+### Trade-off
+
+**BUG-9.** Path-based CSP-exception добавляет 'unsafe-inline'+'unsafe-eval' для одного path-prefix. Альтернативы:
+- Глобальное ослабление CSP — отбросили, теряем XSS-защиту повсюду.
+- CSP nonce/hash — Dash динамически генерирует inline-теги, поддерживать nonce-injection в a2wsgi-обёртке слишком инвазивно для S8R hotfix.
+- Полностью statics-only Dash mode — Dash не поддерживает этого режима для интерактивных Graph'ов.
+
+Path-based — стандартный компромисс (тот же подход у Prometheus UI, Airflow и т.п.). `frame-ancestors 'none'` остаётся для clickjacking, доступ к этому path-prefix всё равно gated через `AdminAuthASGIMiddleware`.
+
+**BUG-8.** Cookie дублирует JWT, который уже хранится в localStorage. Это намеренно: для top-level навигации к Dash браузер не подставляет Authorization header (нет JS-кода между логином и кликом по ссылке), а cookie — подставляет. Axios также продолжает посылать `Authorization: Bearer` для основного API (обратной совместимости с middleware).
+
+**BUG-10.** Batch-JOIN на каждый list-запрос добавляет 1 SQL-запрос (`SELECT id, user_id FROM strategy_version JOIN strategy WHERE strategy_version.id IN (...)`). Для admin-страницы с активными сессиями (~5-20 записей) overhead незаметен. Если когда-нибудь придёт N=1000 — добавить eager-loading через `selectinload`.
+
+### Acceptance-чеклист
+
+Сценарий 5 — все 4 пункта закрыты `[x]`. BUG-8, BUG-9, BUG-10 → `✅ FIXED 2026-05-27`. Готово к Шагу 2 Сценариям 1-4, 6 и Шагу 3.
+
+---
+
 ## 2026-05-27 — S8R Acceptance-fix BUG-7: CLI `grant_admin` падал на mapper init (`S8R-ACCEPTANCE-FIX-BUG-7`)
 
 ### Что

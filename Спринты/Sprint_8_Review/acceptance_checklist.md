@@ -74,7 +74,7 @@
 - [x] **Settings** — настройки уведомлений + broker settings грузятся.
   > Заметка:
 
-- [ ] **Admin Landing** (если ты admin) — открывается, есть ссылка на Plotly Dash.
+- [x] **Admin Landing** (если ты admin) — открывается, есть ссылка на Plotly Dash.
   > Заметка:
 
 ---
@@ -155,14 +155,14 @@
 - [x] `cd Develop/backend && .venv/bin/python -m app.cli.users grant_admin sergopipo` (выдать себе admin, если ещё нет). Исправлен путь модуля: `app.cli` → `app.cli.users` (см. BUG-7).
   > Заметка: выполнено 2026-05-27, SQL UPDATE прошёл, в логе: `User 'sergopipo' is now admin`.
 
-- [ ] Перезайти. В Sidebar появилась иконка щита (Shield).
-  > Заметка:
+- [x] Перезайти. В Sidebar появилась иконка щита (Shield).
+  > Заметка: 2026-05-27 — после logout/login Sidebar показывает раздел «Администрирование».
 
-- [ ] AdminLandingPage открывается, ссылка на Plotly Dash присутствует.
-  > Заметка:
+- [x] AdminLandingPage открывается, ссылка на Plotly Dash присутствует.
+  > Заметка: 2026-05-27 — открывается, в карточке «Активные торговые сессии» появилась колонка User (BUG-10 фикс).
 
-- [ ] `/api/v1/admin/metrics/` открывается, 4 графика рендерятся (signal→order, dashboard LCP, Telegram latency, backtest jobs rate).
-  > Заметка:
+- [x] `/api/v1/admin/metrics/` открывается, 4 графика рендерятся (signal→order, dashboard LCP, Telegram latency, backtest jobs rate).
+  > Заметка: 2026-05-27 — все 4 графика рендерятся после фикса BUG-9 (path-based CSP для Plotly Dash). Cookie `access_token` выставляется на login (BUG-8).
 
 ### Сценарий 6 — Interactive zones + trade-row click
 
@@ -242,6 +242,12 @@
 ## Найденные баги
 
 > Формат: `BUG-N | severity: lethal/critical/medium/low | где | что | приоритет фикса`
+
+- **BUG-10 ✅ FIXED 2026-05-27 (S8R-ACCEPTANCE-FIX-BUG-10) | severity: medium (multi-user readiness) | `backend/app/trading/router.py:list_sessions`, `backend/app/trading/service.py:get_sessions`, `backend/app/trading/schemas.py:SessionResponse`, `frontend/src/pages/admin/AdminLandingPage.tsx`, `frontend/src/api/tradingApi.ts`, `frontend/src/api/types.ts` | Карточка «Активные торговые сессии» в Admin Landing показывает сессии только текущего пользователя, а не всех (что ожидается от admin-карточки).** Endpoint `GET /api/v1/trading/sessions` фильтрует через `user_id=current_user.id`. **Фикс**: добавлен query-флаг `?all_users=true` с admin-gate (`HTTPException(403)` для не-админа); service делает batch-JOIN через StrategyVersion+Strategy и возвращает `user_id` в каждом item'е; `SessionResponse.user_id: int | None = None`; AdminLandingPage вызывает `tradingApi.getSessions({ status: 'active', all_users: true })` и показывает колонку User (`#${user_id}`). **Тесты**: 4 новых HTTP-теста (`test_list_sessions_default_filters_by_current_user_bug10`, `test_list_sessions_all_users_requires_admin_bug10`, `test_list_sessions_all_users_admin_sees_everyone_bug10`, проверка наличия `user_id` в response). **UI-верификация**: 2026-05-27 — колонка User видна, значения `#1` для текущего пользователя.
+
+- **BUG-9 ✅ FIXED 2026-05-27 (S8R-ACCEPTANCE-FIX-BUG-9) | severity: high (functional blocker) | `backend/app/middleware/security_headers.py`, путь `/api/v1/admin/metrics/*` | Plotly Dash рендерит только статичный «Loading…» из-за CSP, блокирующей inline-скрипты Dash.** Глобальный `SecurityHeadersMiddleware` выставлял `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'`. **Фикс**: path-based exception в middleware — для `request.url.path.startswith('/api/v1/admin/metrics')` отдаётся `_PLOTLY_DASH_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"`. Остальные эндпоинты остаются под строгим `_DEFAULT_CSP`. **Тесты**: 3 новых regression — `test_admin_metrics_returns_relaxed_csp`, `test_admin_metrics_subpath_returns_relaxed_csp`, `test_default_csp_still_strict_for_other_paths`. Все 9/9 GREEN. **UI-верификация**: 2026-05-27 — 4 графика Plotly Dash рендерятся, console clean.
+
+- **BUG-8 ✅ FIXED 2026-05-27 (S8R-ACCEPTANCE-FIX-BUG-8) | severity: high (functional gap + security design) | `backend/app/auth/router.py`, `frontend/src/pages/admin/AdminLandingPage.tsx`, `frontend/src/api/client.ts` | Ссылка на Plotly Dash `/api/v1/admin/metrics` в Admin Landing открывает SPA-404, при попытке прямого доступа backend возвращает 401.** Два слоя: (8a) href относительный → Vite SPA отдаёт index.html (нет proxy для `/api`), React Router показывает 404. (8b) Даже с абсолютным href на `:8000` backend возвращает 401: `AdminAuthASGIMiddleware` ждёт cookie `access_token`, но login сетит только `csrf_token`. **Фикс**: backend `_set_access_token_cookie()` helper выставляет `access_token` как HttpOnly cookie (`samesite='lax'`, `path='/api'`, `max_age=JWT_ACCESS_TOKEN_EXPIRE_MINUTES*60`) на `/setup`, `/login`, `/refresh`; `/logout` чистит cookie. Frontend axios с `withCredentials: true`. AdminLanding `PLOTLY_DASH_URL` строится через `VITE_API_BASE_URL` + trailing slash. **UI-верификация**: 2026-05-27 — ссылка открывает Plotly Dash в новой вкладке без 401/404.
 
 - **BUG-7 ✅ FIXED 2026-05-27 (S8R-ACCEPTANCE-FIX-BUG-7) | severity: low | `backend/app/cli/users.py` | CLI `grant_admin` падал с `sqlalchemy.exc.InvalidRequestError: expression 'Strategy' failed to locate a name` ещё до выдачи прав.** Корневая причина: модуль импортировал только `User`, но у `User` есть relationship на `Strategy` через `relationship('Strategy', ...)` — SQLAlchemy mapper на init не мог разрешить ссылку, потому что `Strategy` ещё не зарегистрирован. **Фикс**: скопирован паттерн «register all models» из `app/main.py` — добавлены `from app.{auth,strategy,backtest,trading,broker,market_data,notification,circuit_breaker,corporate_actions,tax,common} import models as _* # noqa: F401` перед `from app.auth.models import User`. **Дополнительно**: в чеклисте (`Сценарий 5`) была неточная команда `python -m app.cli grant_admin ...` — поправлено на корректную `python -m app.cli.users grant_admin ...` (модуль `app.cli` — package без `__main__.py`, исполняется именно `app.cli.users`). **Верификация**: `python -m app.cli.users grant_admin sergopipo` → `User 'sergopipo' is now admin`, SQL UPDATE проверен. Тэг: `S8R-ACCEPTANCE-FIX-BUG-7`.
 
