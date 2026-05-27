@@ -10,6 +10,42 @@
 
 ---
 
+## 2026-05-27 — S8R Acceptance-fix BUG-7: CLI `grant_admin` падал на mapper init (`S8R-ACCEPTANCE-FIX-BUG-7`)
+
+### Что
+
+В ходе Шага 2 Сценарий 5 (Admin + Plotly Dash) заказчик не увидел AdminLandingPage в Sidebar — потому что ему ещё не была выдана admin-роль. Запуск штатной CLI-команды `python -m app.cli grant_admin sergopipo` упал двумя ошибками:
+
+1. `python -m app.cli` — модуль `app.cli` это **package без `__main__.py`**. Корректно: `python -m app.cli.users grant_admin <username>` (опечатка в чеклисте Sprint_8_Review).
+2. После исправления пути модуль крашился на init SQLAlchemy: `InvalidRequestError: expression 'Strategy' failed to locate a name`. Mapper'у `User` нужно было разрешить `relationship('Strategy', ...)`, но `Strategy` ещё не зарегистрирован в registry.
+
+### Корневая причина
+
+`app/cli/users.py` импортировал ТОЛЬКО `from app.auth.models import User`. У `User` есть relationship через строковую ссылку на `'Strategy'` — SQLAlchemy резолвит её на mapper init, и если `app.strategy.models` ни разу не импортирован — кидает `InvalidRequestError`. В `app/main.py` (FastAPI app) это решено блоком «Register all models so SQLAlchemy can resolve relationships» — все модели импортируются как side-effect перед использованием. В CLI этого блока не было.
+
+Существующие тесты `tests/test_admin/test_admin_cli.py` (5 шт) проходили зелёным потому, что вызывали `_grant_admin()` напрямую внутри pytest-процесса, где все модели уже зарегистрированы через conftest-фикстуры. Они не отлавливали реальный production-сценарий isolated-subprocess.
+
+### Изменения
+
+**`Develop/backend/app/cli/users.py`**:
+- Добавлен блок «register all models» — 11 импортов `from app.{auth,strategy,backtest,trading,broker,market_data,notification,circuit_breaker,corporate_actions,tax,common} import models as _* # noqa: F401` перед `from app.auth.models import User`. Паттерн скопирован один-в-один из `app/main.py`.
+
+**`Develop/backend/tests/integration/test_users_cli.py`** (новый файл):
+- `test_grant_admin_subprocess_imports_all_models_bug7` — regression-тест, запускает CLI как `subprocess.run([sys.executable, "-m", "app.cli.users", "grant_admin", "no_such_user"])` с изолированным sqlite в `tmp_path`. Проверяет, что `InvalidRequestError` и `"failed to locate a name"` НЕ появляются в выводе.
+- `test_users_cli_help_does_not_crash` — smoke на `--help`.
+
+**`Спринты/Sprint_8_Review/acceptance_checklist.md`**:
+- Сценарий 5 пункт 1 (строка 155): исправлена команда `app.cli` → `app.cli.users`, отмечен как `[x]` с заметкой о результате `User 'sergopipo' is now admin`.
+- BUG-7 заведён в секции «Найденные баги» и закрыт как `✅ FIXED 2026-05-27`.
+
+### Верификация
+
+- Manual run: `.venv/bin/python -m app.cli.users grant_admin sergopipo` → `User 'sergopipo' is now admin`, SQL UPDATE подтверждён в логе.
+- Tests: 9/9 GREEN (7 существующих unit + 2 новых integration regression).
+- Заказчик после logout/login должен увидеть AdminLandingPage в Sidebar и иконку щита.
+
+---
+
 ## 2026-05-27 — S8R Acceptance: openai/anthropic SDK подняты в основные deps (`S8R-ACCEPTANCE-FIX-AI-DEPS`)
 
 ### Что

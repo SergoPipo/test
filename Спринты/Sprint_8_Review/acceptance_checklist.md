@@ -65,13 +65,13 @@
 - [x] **Chart (график)** — открывается, свечки рендерятся, можно сменить таймфрейм.
   > Заметка:
 
-- [!] **Account** — баланс, позиции, операции, налоги отображаются.
-  > Заметка: Я попробовал скачать налоговый отчет за 2026 год. У меня система не выдала никаких ошибок, но и отчет никуда не скачался.
+- [x] **Account** — баланс, позиции, операции, налоги отображаются.
+  > Заметка: 
 
-- [ ] **AI Chat** — окно открывается, можно отправить сообщение.
+- [x] **AI Chat** — окно открывается, можно отправить сообщение.
   > Заметка:
 
-- [ ] **Settings** — настройки уведомлений + broker settings грузятся.
+- [x] **Settings** — настройки уведомлений + broker settings грузятся.
   > Заметка:
 
 - [ ] **Admin Landing** (если ты admin) — открывается, есть ссылка на Plotly Dash.
@@ -152,8 +152,8 @@
 
 ### Сценарий 5 — Admin + Plotly Dash /admin/metrics
 
-- [ ] `cd Develop/backend && .venv/bin/python -m app.cli grant_admin sergopipo` (выдать себе admin, если ещё нет).
-  > Заметка:
+- [x] `cd Develop/backend && .venv/bin/python -m app.cli.users grant_admin sergopipo` (выдать себе admin, если ещё нет). Исправлен путь модуля: `app.cli` → `app.cli.users` (см. BUG-7).
+  > Заметка: выполнено 2026-05-27, SQL UPDATE прошёл, в логе: `User 'sergopipo' is now admin`.
 
 - [ ] Перезайти. В Sidebar появилась иконка щита (Shield).
   > Заметка:
@@ -242,6 +242,8 @@
 ## Найденные баги
 
 > Формат: `BUG-N | severity: lethal/critical/medium/low | где | что | приоритет фикса`
+
+- **BUG-7 ✅ FIXED 2026-05-27 (S8R-ACCEPTANCE-FIX-BUG-7) | severity: low | `backend/app/cli/users.py` | CLI `grant_admin` падал с `sqlalchemy.exc.InvalidRequestError: expression 'Strategy' failed to locate a name` ещё до выдачи прав.** Корневая причина: модуль импортировал только `User`, но у `User` есть relationship на `Strategy` через `relationship('Strategy', ...)` — SQLAlchemy mapper на init не мог разрешить ссылку, потому что `Strategy` ещё не зарегистрирован. **Фикс**: скопирован паттерн «register all models» из `app/main.py` — добавлены `from app.{auth,strategy,backtest,trading,broker,market_data,notification,circuit_breaker,corporate_actions,tax,common} import models as _* # noqa: F401` перед `from app.auth.models import User`. **Дополнительно**: в чеклисте (`Сценарий 5`) была неточная команда `python -m app.cli grant_admin ...` — поправлено на корректную `python -m app.cli.users grant_admin ...` (модуль `app.cli` — package без `__main__.py`, исполняется именно `app.cli.users`). **Верификация**: `python -m app.cli.users grant_admin sergopipo` → `User 'sergopipo' is now admin`, SQL UPDATE проверен. Тэг: `S8R-ACCEPTANCE-FIX-BUG-7`.
 
 - **BUG-1 ✅ FIXED 2026-05-14 (Sprint 8 W7) | severity: lethal | `app/trading/engine.py`, `app/trading/runtime.py` | Sandbox/real торговля не была реализована в `engine.process_signal`. Trade создавался со `status=pending`, `TInvestAdapter.place_order` никем не вызывался. Реализовано в W7 (Вариант C++): `_submit_order_to_broker` отправляет market-order и резолвит trade по `OrderResponse.status`; `_recover_orphan_pending_trades` зачищает orphan'ы при старте backend. 13 новых тестов (8 sandbox-flow + 5 orphan-recovery), backend regression 1560/0 passed. ФТ v2.5 → v2.6.** Ожидается live-test заказчиком для финального подтверждения.
 
