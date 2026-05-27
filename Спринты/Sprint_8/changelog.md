@@ -10,6 +10,40 @@
 
 ---
 
+## 2026-05-27 — S8R Acceptance: openai/anthropic SDK подняты в основные deps (`S8R-ACCEPTANCE-FIX-AI-DEPS`)
+
+### Что
+
+На Шаге 1.7 acceptance (Settings → AI-провайдеры) заказчик попытался добавить OpenRouter с моделью DeepSeek V4 Pro и при клике «Проверить ключ» получил красный alert: `Пакет 'openai' не установлен. Установите: pip install openai`. Раньше функция работала — пакет был установлен в `.venv` вручную и пропал при пересоздании окружения.
+
+### Корневая причина
+
+В `app/ai/providers/openai_provider.py:25-31` и `app/ai/providers/claude_provider.py:23-29` SDK подключались через **lazy-import** (`try: import openai except ImportError: raise...`), но при этом **`openai` и `anthropic` отсутствовали в `pyproject.toml`** — ни в `dependencies`, ни в `optional-dependencies`. Это значило, что при `pip install -e .` пакеты не устанавливались, и нужно было вручную их доставлять. После любого пересоздания `.venv` (например, при синхронизации dev-окружения) AI-Provider функционал ломался без явного сигнала в логах backend'а — только при первом вызове на «Проверить ключ».
+
+OpenRouter (мульти-провайдер) и DeepSeek используют OpenAI-совместимый протокол → backend для них использует тот же `OpenAIProvider` с base_url override. Поэтому ошибка про `openai` появлялась даже при попытке подключить DeepSeek-ключ.
+
+### Изменения
+
+**`Develop/backend/pyproject.toml`** — `openai>=2.0` и `anthropic>=0.34` добавлены в `dependencies` (не optional). Комментарий объясняет, что AI Chat — явный S4-сценарий, и держать SDK опциональными контрпродуктивно.
+
+**Локальная установка** в существующее `.venv`:
+- `openai 2.38.0` + transitive (`distro`, `jiter`, `sniffio`)
+- `anthropic 0.104.1` + `docstring-parser`
+
+### UI-верификация заказчика 2026-05-27
+
+После установки пакета функция «Проверить ключ» в форме «Добавить AI-провайдер» отрабатывает корректно — провайдер OpenRouter с моделью `deepseek/deepseek-v4-pro` сохранился без ошибки.
+
+### Trade-off
+
+Размер `.venv` вырастает на ≈3-4 MB (openai 1.3 MB + anthropic ≈800 KB + transitive). Для проекта, где AI Chat и AI Provider Settings — обязательные фичи S4, это приемлемо. Lazy-import в провайдерах оставлен — он обеспечивает читаемое сообщение об ошибке, если кто-то всё-таки развернёт окружение без AI-SDK (например, докер-образ для production без AI features).
+
+### Acceptance-чеклист
+
+Шаг 1.7 (AI Chat) и 1.8 (Settings) — заказчик продолжает приёмку.
+
+---
+
 ## 2026-05-25 — S8R Acceptance-fix BUG-5 + BUG-6: рефакторинг tax-алгоритма + user_id isolation (`S8R-ACCEPTANCE-FIX-BUG-5+6`)
 
 ### Что
