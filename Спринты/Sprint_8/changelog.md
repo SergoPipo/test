@@ -10,6 +10,148 @@
 
 ---
 
+## 2026-05-29 — S8R Acceptance-fix BUG-12: 500 + CORS-маскировка на POST /auth/setup с занятым username (`S8R-ACCEPTANCE-FIX-BUG-12`)
+
+### Что
+
+Заказчик начал Шаг 2 Сценарий 1 «Регистрация нового тестового пользователя». Ввёл `testuser` + `@WSX3edc` → UI показал «Ошибка при создании аккаунта». В DevTools — красные строки:
+```
+Origin http://localhost:5173 is not allowed by Access-Control-Allow-Origin. Status code: 500
+XMLHttpRequest cannot load http://localhost:8000/api/v1/auth/setup due to access control checks
+```
+
+Сценарий 1 заблокирован. Это второй случай CORS-маскировки 500 за S8R (первый — BUG-2 sparkline).
+
+### Корневая причина
+
+`AuthService.register` ([auth/service.py:21-36](Develop/backend/app/auth/service.py)) делал `self.db.add(user); await self.db.commit()` без try/except. Когда username уже существовал, SQLAlchemy/aiosqlite кидали:
+```
+sqlite3.IntegrityError: UNIQUE constraint failed: users.username
+```
+Exception доходил до глобального exception handler → 500. **CORSMiddleware не вешает `Access-Control-Allow-Origin` в exception path** (тот же класс багов, что у BUG-2 sparkline 500) → браузер видит ответ без CORS headers и сообщает «Origin not allowed», маскируя истинную причину.
+
+Подтверждение из backend log (`/tmp/moex-dev-logs/backend.log`):
+```
+2026-05-29 10:52:26 [error] unhandled_exception
+  error="(sqlite3.IntegrityError) UNIQUE constraint failed: users.username
+  ... INSERT INTO users (username='testuser', ...) RETURNING id ..."
+INFO: 127.0.0.1:59704 - "POST /api/v1/auth/setup HTTP/1.1" 500 Internal Server Error
+```
+
+Проверка БД `Develop/backend/data/terminal.db`:
+```
+[(1, 'sergopipo', 1), (2, 'testuser', 0), (3, 'testbot', 0)]
+```
+`testuser` (id=2) — сирота от прежней попытки заказчика.
+
+### Изменения
+
+**Backend:**
+- `Develop/backend/app/auth/service.py:register` — обёрнут `await self.db.commit()` в try/except `IntegrityError`: `await self.db.rollback(); raise ValueError("username_taken") from e`. Добавлен `from sqlalchemy.exc import IntegrityError`.
+- `Develop/backend/app/auth/router.py:setup` — обёрнут вызов `service.register` в try/except `ValueError`: `if "username_taken" in str(e): raise HTTPException(409, "Имя пользователя уже занято")`. Добавлен `HTTPException` в импорт из fastapi.
+
+**Frontend:**
+- `Develop/frontend/src/pages/SetupPage.tsx:handleSubmit` — добавлена ветка `else if (axiosErr.response?.status === 409)` → `setError(detail ?? 'Имя пользователя уже занято')`. Раньше любая 4xx/5xx ошибка показывала обобщённое «Ошибка при создании аккаунта», что и сбивало заказчика с толку.
+
+### Тесты (TDD Red → Green)
+
+**Red phase** (зафиксировал ожидаемое поведение):
+- `tests/unit/test_auth_service.py:test_register_duplicate_username_raises_value_error_bug12` — усилён существующий слабый `pytest.raises(Exception)` до `pytest.raises(ValueError, match=..."username_taken")`.
+- `tests/test_routers/test_auth_router.py:TestSetupConflict.test_setup_duplicate_username_returns_409_bug12` — новый HTTP-тест: повторная регистрация → 409 + detail с «занято» или «taken».
+
+Оба теста FAIL без фикса (`IntegrityError`).
+
+**Green phase**: backend pytest **37/37 GREEN** (auth/service + router + xss + cli). Frontend `tsc --noEmit` — 0 errors.
+
+### Smoke verification
+
+```
+$ curl -sS -i -X POST http://localhost:8000/api/v1/auth/setup \
+    -H "Content-Type: application/json" -H "Origin: http://localhost:5173" \
+    -d '{"username":"testuser","password":"@WSX3edc"}'
+
+HTTP/1.1 409 Conflict
+content-type: application/json
+access-control-allow-origin: http://localhost:5173   ← CORS-заголовки на месте
+access-control-allow-credentials: true
+
+{"detail":"Имя пользователя уже занято"}
+```
+
+CORS-маскировка устранена. Браузер теперь увидит нормальный 409 с понятным сообщением.
+
+### Trade-off
+
+Альтернатива — pre-check `SELECT username FROM users WHERE username=?` перед INSERT. Отброшено: race condition между SELECT и INSERT при параллельных запросах (два пользователя жмут «Создать аккаунт» в одну и ту же секунду с одинаковым username) → один из них всё равно упадёт на UNIQUE constraint, и придётся ловить ту же IntegrityError. Текущий фикс ловит на правильном уровне (DB constraint — источник истины) и работает без race.
+
+### Существующий orphan testuser в БД
+
+`testuser` (id=2) и `testbot` (id=3) остаются в БД заказчика. Acceptance продолжается с новым именем (например, `test_acceptance_002`). Удалить orphan'ов можно вручную: `DELETE FROM users WHERE username IN ('testuser', 'testbot');` — но это вне scope BUG-12.
+
+### Acceptance-чеклист
+
+Сценарий 1 пункт 1 — пока `[!]` с пометкой «BUG-12 заведён и зафиксирован». Заказчик повторит шаг с новым username для перевода в `[x]`.
+
+---
+
+## 2026-05-29 — S8R Acceptance-fix BUG-11: ложный «Backend недоступен» после logout (`S8R-ACCEPTANCE-FIX-BUG-11`)
+
+### Что
+
+Заказчик пожаловался: после кнопки «Выход» на LoginPage появляется красная плашка «Backend недоступен. Убедитесь, что сервер запущен на порту 8000.», хотя backend на самом деле работает. Перезагрузка страницы (F5) убирает сообщение. UX-блокер для acceptance Сценария 1 (smoke login flow).
+
+### Корневая причина (Phase 1)
+
+`authStore.logout()` ([authStore.ts:68-94](Develop/frontend/src/stores/authStore.ts)) последовательно:
+1. `closeWS()`
+2. `abortAllInflight()` — отменяет **глобальный module-level `AbortController`** в `api/client.ts:18`.
+3. `set({ token: null, ... })`
+4. Очищает localStorage.
+
+В `login()` (строка 58-64) есть симметричный `renewAbortController()` после set'а — он пересоздаёт контроллер. В `logout()` его **забыли**.
+
+Дальнейший поток:
+- Router редиректит на `/login`.
+- LoginPage `useEffect` ([LoginPage.tsx:34-44](Develop/frontend/src/pages/LoginPage.tsx)) запускает `apiClient.get('/auth/setup-status')`.
+- Request interceptor (`client.ts:55-57`): `if (!config.signal) config.signal = inflightController.signal;` — привязывает запрос к **уже abort'нутому** signal.
+- Запрос мгновенно отбивается с `ECANCELED`.
+- `.catch(() => setBackendError(true))` ловит — показывается «Backend недоступен».
+
+F5 фиксит, потому что `inflightController` — `let` модульного уровня; при reload модуль `client.ts` перезагружается с новым неабортнутым контроллером.
+
+Баг существовал ещё до Sprint 8 W1 (паттерн AbortController появился раньше моих фиксов BUG-8), но был неочевиден до тех пор, пока в LoginPage не появился `useEffect` с health-check'ом (`/auth/setup-status`).
+
+### Фикс (Phase 4)
+
+`Develop/frontend/src/stores/authStore.ts:logout` — добавлена одна строка `renewAbortController()` сразу после `abortAllInflight()` (импорт уже был). Симметрия с `login()`. Глобально решает баг — все запросы после logout (не только LoginPage useEffect) получают свежий signal.
+
+```python
+# Псевдокод нового logout:
+closeWS()
+abortAllInflight()
+renewAbortController()  # ← NEW: симметрия с login()
+set({ token: null, ... })
+# ...
+```
+
+### Тесты
+
+`Develop/frontend/src/stores/__tests__/authStore.test.ts`:
+- `renews AbortController on logout (BUG-11: запросы после logout не должны cancel'иться)` — новый regression-тест.
+- `cleanup order: closeWS → abort → renew → state → localStorage → clearCache` — обновлён существующий (добавлен шаг `renew` между `abort` и `clearCache`).
+- vitest: **13/13 GREEN** (12 baseline → +1).
+- tsc --noEmit: **0 errors**.
+
+### UI-верификация
+
+Ожидается после `Cmd+R` в браузере: жмём «Выход» — на LoginPage не должно быть плашки «Backend недоступен». Прямой F5 на /login — тоже clean.
+
+### Trade-off
+
+Альтернатива — игнорировать ECANCELED в LoginPage `.catch()`. Отброшен: локальный костыль не решает root cause; ту же логику потребовалось бы повторить в любом компоненте, который монтируется сразу после logout и делает запрос. Текущий фикс — глобальный.
+
+---
+
 ## 2026-05-27 — CI fix: test_email_notifier — deprecated `asyncio.get_event_loop()` → `pytest.mark.asyncio` (`S8R-CI-FIX-EMAIL-ASYNC`)
 
 ### Что
