@@ -10,6 +10,74 @@
 
 ---
 
+## 2026-06-02 — S8R Acceptance-fix BUG-17: exit_date последней сделки за пределами date_to (`S8R-ACCEPTANCE-FIX-BUG-17`)
+
+### Что
+
+После BUG-16 fix у заказчика бэктест #38 (testuser1, SBER 1h, 2024-12-31 → 2026-05-31) успешно прошёл. В аналитике («Бэктест → График») видны зоны для большинства сделок, но **последняя сделка** на графике (между парой стрелок entry/exit справа) **не имеет цветной зоны**. Это блокировало пункт «Hover на зоны equity-curve — tooltip появляется» (Сценарий 6 шаг 3 acceptance).
+
+### Корневая причина
+
+В БД для backtest #38 trade #422:
+- `entry_date='2025-11-10 10:00:00'` (10 ноября 2025) — open long.
+- `exit_date='2026-06-02 14:00:00'` (**2 июня 2026** — сегодня).
+- `date_to` бэктеста = `2026-05-31` — exit на 2 дня после конца периода.
+
+Стратегия не закрыла позицию до конца бэктеста. Backtrader auto-closes остаточные открытые позиции в конце runonce; `bt.num2date(trade.dtclose)` возвращает значение «next-bar-after-end» или близкое к real-time — для нашего случая это `2026-06-02 14:00 UTC`. `TradeRecorder.notify_trade` пишет это в `open_data["exit_date"]` без проверки границ периода.
+
+Frontend `computeChartZones` ([tradeMarkerUtils.ts:99-152](Develop/frontend/src/utils/tradeMarkerUtils.ts)) пытается сопоставить exit-маркер с visible-свечами графика, но `2026-06-02` за пределами последней свечи. Зона между entry и exit не имеет координаты `x2` → не рендерится. Все остальные сделки (37 из 38) с `exit_date` внутри `[date_from, date_to]` имеют корректные profit/loss зоны.
+
+### Изменения
+
+`Develop/backend/app/backtest/service.py:_save_result` — добавлен clamp `exit_date` к `backtest.date_to` ПЕРЕД INSERT в `backtest_trades`. Логика naive-aware compare (sqlite не хранит tzinfo, БД-значение всегда naive; engine может вернуть aware datetime).
+
+```python
+bt_end = backtest.date_to.replace(tzinfo=None) if backtest.date_to and backtest.date_to.tzinfo else backtest.date_to
+for t in result.trades:
+    exit_date = t.exit_date
+    if exit_date is not None and bt_end is not None:
+        ed_naive = exit_date.replace(tzinfo=None) if exit_date.tzinfo else exit_date
+        if ed_naive > bt_end:
+            exit_date = bt_end
+    # ... INSERT BacktestTrade(exit_date=exit_date, ...)
+```
+
+Шапочный комментарий объясняет почему БД-уровень фикса (а не frontend) — это гарантирует корректность CSV/PDF/UI одновременно.
+
+### Тесты (TDD)
+
+`tests/unit/test_backtest/test_service.py:TestSaveResultClampsExitDateBug17` — 2 теста:
+- `test_exit_date_after_date_to_is_clamped_bug17` — exit_date=`2026-06-02` с date_to=`2026-05-31` → в БД должен быть `2026-05-31`.
+- `test_exit_date_within_period_unchanged_bug17` — exit_date=`2025-06-28` с тем же date_to → не меняется.
+
+Полный regression `tests/unit/test_backtest/` — **215/215 GREEN** (213 baseline + 2 BUG-17).
+
+### Trade-off
+
+Альтернатива (a) — фикс в `TradeRecorder.notify_trade`. Отброшен: TradeRecorder не знает `date_to` (это Analyzer Backtrader, ограничен self.strategy.data). Чтобы пробросить, пришлось бы менять API engine.
+
+Альтернатива (b) — frontend clamp в `computeChartZones`. Отброшен: БД и CSV/PDF продолжали бы содержать неверный exit_date. Фикс на одном уровне (БД-источник) корректнее.
+
+Альтернатива (c) — использовать timestamp последней свечи из `data_df` вместо date_to. Более точно (date_to может быть `2026-05-31 00:00` а реальный последний bar `2026-05-30 23:00`), но требует пробрасывать `data_df.index[-1]` в `_save_result`. На SQLite границы дат в `date_to` уже достаточны для UI-цели (зона тянется до конца графика).
+
+### UI-верификация (ожидается у заказчика)
+
+testuser1 после `Cmd+R`:
+1. На текущем backtest #38 — exit_date уже неправильный, его исправить можно только через rerun.
+2. Запустить новый бэктест (или rerun #38) → последняя сделка должна получить корректную цветную зону до конца графика.
+
+Существующий backtest #38 c trade #422 (exit_date=`2026-06-02`) ретроактивно не лечится фиксом — но новые бэктесты пишут корректные значения. Очистка orphan #422 — task для Sprint 9 (SQL migration).
+
+### Дополнительные находки
+
+Заказчик ранее кликнул на сделку **#408** в таблице (entry 10.06.2025 → exit 28.06.2025, P&L +1815.97 ₽, +6.00%). Это **не та сделка**, что справа на графике — она в районе июня 2025 (далеко слева). Стрелки entry/exit справа — это сделка **#422**, и именно у неё не отрисована зона. Frontend корректно открыл детали для #408 по клику в таблице; на отображение зон это не влияет.
+
+### Acceptance-чеклист
+
+Сценарий 6 (Interactive zones + trade-row click) — пункт «Hover на зоны» теперь должен работать для всех 38 сделок после нового бэктеста. BUG-17 → ✅ FIXED 2026-06-02.
+
+---
+
 ## 2026-06-02 — S8R Acceptance-fix BUG-16: sandbox-токен T-Invest блокировался для бэктеста (`S8R-ACCEPTANCE-FIX-BUG-16`)
 
 ### Что
