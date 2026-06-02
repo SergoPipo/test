@@ -85,15 +85,15 @@
 
 ### Сценарий 1 — Новый пользователь → Wizard → стратегия → бэктест → paper → закрытие
 
-- [!] Регистрация нового тестового пользователя (логин типа `test_acceptance_001`).
+- [x] Регистрация нового тестового пользователя (логин типа `test_acceptance_001`).
   > Заметка: Есть ошибка при вводе нового пользователя. Пишет просто ошибка создания пользователя.
   > 2026-05-29: BUG-12 заведён и зафиксирован — попытка создать `testuser` падала с 500 (UNIQUE constraint на username, уже сидел в БД от прежней сессии). Фикс: backend отдаёт 409, frontend показывает «Имя пользователя уже занято». Ожидается перепроверка с новым username (например, `test_acceptance_002`).
 
-- [ ] FirstRunWizard 4 шага проходятся: учётка → broker token → notifications → финиш.
+- [x] FirstRunWizard 4 шага проходятся: учётка → broker token → notifications → финиш.
   > Заметка:
 
-- [ ] Создаётся стратегия (Blockly или AI Chat).
-  > Заметка:
+- [x] Создаётся стратегия (Blockly или AI Chat).
+  > Заметка: После создания стратегии блоков и переноса ее в текстовое значение, при нажатии на кнопку «Генерировать» я получил пайтинг от стратегии, но все блоки на схеме удалились. Текстовое представление стратегии тоже очистилось.
 
 - [ ] Запускается бэктест, дожидаюсь результатов, метрики корректны.
   > Заметка:
@@ -243,6 +243,8 @@
 ## Найденные баги
 
 > Формат: `BUG-N | severity: lethal/critical/medium/low | где | что | приоритет фикса`
+
+- **BUG-13 ✅ FIXED 2026-06-02 (S8R-ACCEPTANCE-FIX-BUG-13) | severity: high (потеря работы пользователя) | `frontend/src/pages/StrategyEditPage.tsx:handleGenerate`, `frontend/src/App.tsx:52-53` | На `/strategies/new` после сборки блоков + наполнения описания нажатие «Генерировать» возвращает Python-код, но Blockly workspace и текстовое описание визуально стираются.** Корневая причина: `App.tsx` объявляет ДВА разных Route с одним и тем же элементом — `strategies/new` и `strategies/:id`. React Router при переходе с одного на другой делает unmount → mount; все `useState`/`useRef` сбрасываются. В `handleGenerate` else-ветке (новая стратегия) последовательность была: `createStrategy(name, description)` → `generateCode(id, apiBlocks)` → `setCode(code)` → `navigate(/strategies/${id})`. Но `createStrategy` НЕ пишет blocks_json/generated_code в БД, `generateCode` тоже не пишет — после navigate новая instance читает пустую v1 из БД (`blocks_json='{}'`, `text_description=''`), useEffect перезаписывает workspace пустотой. **Фикс**: в else-ветке `handleGenerate` после `generateCode` и ДО `navigate` вызывается `saveVersion(newStrategy.id, { text_description, blocks_json, generated_code, parameters_json })` — тот же паттерн, что в `doSave` для `isNew`. После remount данные подтягиваются из БД целые. **Тесты**: vitest 8/8 GREEN (existing StrategyEditPage suite), tsc 0 errors. Manual smoke-проверка ожидается заказчиком. **Trade-off**: альтернатива «объединить две Route» отброшена — инвазивнее, риск других регрессий.
 
 - **BUG-12 ✅ FIXED 2026-05-29 (S8R-ACCEPTANCE-FIX-BUG-12) | severity: high (functional blocker для Сценария 1) | `backend/app/auth/service.py:register`, `backend/app/auth/router.py:setup`, `frontend/src/pages/SetupPage.tsx` | POST /auth/setup с уже существующим username возвращает 500 + сломанные CORS-заголовки, UI показывает «Ошибка при создании аккаунта» + DevTools — «Origin not allowed by Access-Control-Allow-Origin».** Корневая причина: `service.register()` делал `await self.db.commit()` без try/except, SQLAlchemy кидал `sqlite3.IntegrityError: UNIQUE constraint failed: users.username`, exception доходил до глобального handler → 500. CORSMiddleware не вешает заголовки в exception path (тот же класс, что у BUG-2 sparkline) → браузер маскирует ответ как CORS error. **Фикс**: (1) `service.register` ловит `IntegrityError` и кидает `ValueError("username_taken")`; (2) `router.setup` ловит `ValueError("username_taken")` и кидает `HTTPException(409, "Имя пользователя уже занято")`; (3) `SetupPage` различает status 409 и показывает осмысленное сообщение из `data.detail`. **Тесты**: 2 новых regression (`test_register_duplicate_username_raises_value_error_bug12`, `TestSetupConflict.test_setup_duplicate_username_returns_409_bug12`). Backend 37/37 GREEN (auth/service + router + xss + cli), tsc 0 errors. **Smoke**: `curl POST /auth/setup` с занятым именем → `HTTP/1.1 409 Conflict` + `access-control-allow-origin: http://localhost:5173` (CORS headers на месте, browser больше не маскирует).
 

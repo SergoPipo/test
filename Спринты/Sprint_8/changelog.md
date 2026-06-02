@@ -10,6 +10,94 @@
 
 ---
 
+## 2026-06-02 — S8R Acceptance-fix BUG-13: «Генерировать» на новой стратегии теряет блоки и описание (`S8R-ACCEPTANCE-FIX-BUG-13`)
+
+### Что
+
+Заказчик в ходе acceptance Сценария 1 шаг 3 («Создаётся стратегия») собрал блоки в Blockly + наполнил описание стратегии, нажал «Генерировать». Получил Python-код от backend, **но визуально блоки на схеме исчезли и текстовое представление очистилось**. Кнопка «Сохранить» при этом сохранила бы пустоту — вся работа пользователя потерялась бы при первом же save. Это блокер для Сценария 1.
+
+### Корневая причина (Phase 1)
+
+`App.tsx:52-53` объявляет два отдельных Route с одним и тем же элементом:
+
+```tsx
+<Route path="strategies/new" element={<StrategyEditPage />} />
+<Route path="strategies/:id" element={<StrategyEditPage />} />
+```
+
+React Router v6 для разных Route считает их разными «местами в дереве» — переход с `/strategies/new` на `/strategies/2` **размонтирует** первую instance и **монтирует** новую. Все `useState` (`blocksJson`, `code`, `description`) и `useRef` (`initialLoadDoneRef`, `templateAppliedRef`) сбрасываются в дефолт.
+
+`handleGenerate` else-ветка (новая стратегия, `id=undefined`) выглядела так:
+
+```ts
+const newStrategy = await createStrategy(name, description);   // POST /strategies — только name + description
+generatedResult = await generateCode(newStrategy.id, apiBlocks); // вернул Python, но НЕ записал blocks_json в БД
+setCode(generatedResult);
+navigate(`/strategies/${newStrategy.id}`, { replace: true });    // ⚠️ remount StrategyEditPage
+```
+
+После `navigate`:
+- БД: `strategies.description = ''` (если ничего не вписано в свободное описание), `versions[0].blocks_json = '{}'`, `versions[0].generated_code = NULL`, `versions[0].text_description = ''` — потому что `createStrategy` создаёт строку с дефолтной пустой версией, а `generateCode` только генерирует код, не пишет.
+- Frontend: новая instance, все `useState` пустые, `initialLoadDoneRef = false`.
+- `useEffect` (`[currentStrategy, id, setDescription]`) триггерится — читает пустую версию из БД и через `setDescriptionLocal('')`, `setInitialBlocksXml('{}')`, `setCode(null)` визуально стирает workspace.
+
+### Фикс (Phase 4)
+
+`Develop/frontend/src/pages/StrategyEditPage.tsx:handleGenerate` else-ветка — добавлен вызов `saveVersion(newStrategy.id, {...})` между `setCode` и `navigate`:
+
+```ts
+} else {
+  const newStrategy = await createStrategy(name, description);
+  generatedResult = await generateCode(newStrategy.id, apiBlocks);
+  setCode(generatedResult);
+  // S8R-ACCEPTANCE-FIX-BUG-13: persist version BEFORE navigate
+  const meta = JSON.stringify({
+    code_outdated: false,
+    has_warnings: blockWarnings.length > 0,
+    warnings: blockWarnings,
+  });
+  await saveVersion(newStrategy.id, {
+    text_description: storeDescription,
+    blocks_json: getCurrentBlocksJson(),
+    generated_code: generatedResult,
+    parameters_json: meta,
+  });
+  setIsDirty(false);
+  navigate(`/strategies/${newStrategy.id}`, { replace: true });
+}
+```
+
+Паттерн скопирован из `doSave` (строки 536-545), который уже работает корректно при ручном «Сохранить» для новой стратегии. После фикса оба flow (Save и Generate) сохраняют v1 ДО navigate — данные пишутся в БД и remount читает их обратно целыми.
+
+### Тесты
+
+- `npx tsc --noEmit` — 0 errors.
+- `vitest src/components/strategy/__tests__/StrategyEditPage.test.tsx` — 8/8 GREEN (рендер кнопок и tabs).
+- Unit-regression на handleGenerate-flow не добавлен — handleGenerate зависит от Blockly workspace state, который требует слишком многослойного мокирования (Blockly + react-router + 4 store). Полагаемся на manual smoke acceptance.
+
+### Manual verification (ожидается у заказчика)
+
+1. Открыть `/strategies/new`.
+2. Собрать блоки в Blockly + наполнить описание.
+3. Нажать «Генерировать».
+4. **Ожидание**: URL меняется на `/strategies/N`, Python-код виден на вкладке «Редактор», **блоки на схеме остались**, **описание заполнено**. Кнопка «Сохранить» становится недоступной (нет unsaved changes).
+
+### Trade-off
+
+Альтернатива — объединить два Route в один (`strategies/:id` с sentinel `:id='new'`). Отброшено: инвазивнее, риск регрессий в других местах кода (`isNew = !id` логика встречается в 4+ местах StrategyEditPage). Текущий фикс минимальный — одна логическая правка в одном handler'е, симметрия с `doSave`.
+
+### Acceptance-чеклист
+
+Сценарий 1 шаг 3 — `[x]` с пометкой о BUG-13 и manual smoke (заказчик подтвердит после `Cmd+R`).
+
+### Дополнительные ошибки на скриншоте (НЕ баги)
+
+- `409 /auth/setup` — наследие BUG-12: SetupPage делал POST и получал 409 для занятого username. Поведение корректное (после фикса BUG-12), не требует доработки.
+- WebSocket `failed: closed before connection established` × 2 — dev-only артефакт React 18 StrictMode (отмечено в Шаге 0.3 acceptance_checklist).
+- T-Invest CDN `403 RU000A10DS74x160.png` × 2 — отсутствует логотип для облигации Сибур-Холдинг (отмечено в Шаге 0.3 acceptance_checklist).
+
+---
+
 ## 2026-05-29 — S8R Acceptance-fix BUG-12: 500 + CORS-маскировка на POST /auth/setup с занятым username (`S8R-ACCEPTANCE-FIX-BUG-12`)
 
 ### Что
