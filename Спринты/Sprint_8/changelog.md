@@ -10,6 +10,61 @@
 
 ---
 
+## 2026-06-02 — S8R Acceptance-fix BUG-16: sandbox-токен T-Invest блокировался для бэктеста (`S8R-ACCEPTANCE-FIX-BUG-16`)
+
+### Что
+
+После BUG-14 fix заказчик в acceptance Сценария 1 добавил T-Invest **sandbox**-токен для testuser1 (id=4, broker_account #4, is_sandbox=1, баланс пополнен до 1млн в логе `tinvest_sandbox_pay_in_ok`), нажал rerun на backtest #36 — и опять получил тот же `TInvestRequiredError("Подключите T-Invest для запуска бэктеста")`.
+
+### Корневая причина
+
+В `app/market_data/service.py` в 4 callsites фильтр `BrokerAccount.is_sandbox == False` исключал sandbox-аккаунты:
+- строка 160 — `_has_active_tinvest_account` (главный гейт для `mode='backtest'/'trading'`);
+- строка 490 — `_fetch_via_broker` (фактическое получение свечей через T-Invest API);
+- строки 754/861 — `_get_tinvest_token_for_*` (метаданные инструмента, logo lookup).
+
+Это **неверно**: T-Invest sandbox имеет полный доступ к `MarketDataService` (`GetCandles`, `GetLastPrices`, `GetTradingStatus`) — это всё, что нужно бэктесту. Sandbox отличается от production **только** в `OrdersService` (для live-торговли). Комментарий в коде «sandbox не имеет MarketDataService» — заблуждение.
+
+### Изменения
+
+`Develop/backend/app/market_data/service.py` — во всех 4 callsites:
+- Удалена строка `BrokerAccount.is_sandbox == False`.
+- Добавлен `ORDER BY BrokerAccount.is_sandbox.asc()` — чтобы при наличии у пользователя **обоих** аккаунтов (production + sandbox) предпочитался production (`is_sandbox=0 < is_sandbox=1`).
+- Обновлены docstring и комментарии: «sandbox даёт MarketDataService».
+- В `_fetch_via_broker` (строка 490) дополнительно убран `encrypted_api_key.is_not(None)` из WHERE-фильтра, чтобы сохранить старое поведение `ValueError("missing encrypted credentials")` для backwards compat (тест `test_account_without_creds_raises`).
+
+### Тесты
+
+**`tests/unit/test_market_data/test_service.py:TestHasActiveTInvestSandboxBug16`** — 3 новых:
+- `test_sandbox_account_counted_as_active_bug16` — Red→Green: с только sandbox-аккаунтом `_has_active_tinvest_account` возвращает True.
+- `test_production_account_still_counted_as_active` — production остаётся активным.
+- `test_no_account_returns_false` — без аккаунтов False.
+
+**Регрессия**: backend pytest **343/343 GREEN** (auth + backtest + market_data + xss + exceptions). 0 регрессий после фикса (промежуточный fix encrypted_api_key.is_not(None) был откачен).
+
+### Trade-off
+
+Альтернатива (a) — добавить параметр `mode` в `_has_active_tinvest_account` и разрешать sandbox только для backtest/viewer, оставив запрет в trading. Отброшено: `_has_active_tinvest_account` вызывается из `get_candles`, который не имеет понятия о live-trading flow. Live-trading order placement идёт через OrdersService отдельным путём (`app/broker/tinvest/`) и автоматически выберет правильный токен через `account_type`. Сейчас sandbox-токен для live-торговли тоже валиден — это **paper-режим**, как раз для тестирования. Если бизнес-логика требует «только production для real-mode», она ловится отдельно на уровне `OrderManager`.
+
+Альтернатива (b) — оставить запрет sandbox, потребовать production от testuser1. Отброшено: для acceptance это требует от заказчика боевого T-Invest счёта на тестовом юзере, что нелогично.
+
+### UI-верификация (ожидается у заказчика)
+
+`testuser1` после `Cmd+R`:
+1. Открыть стратегию → rerun backtest #36 (или запустить новый бэктест).
+2. Должен пройти normally, появятся метрики (P&L, Sharpe, trades).
+3. Сценарий 1 шаг 4 → `[x]`.
+
+### Дополнительные находки во время расследования
+
+**Telegram-уведомление #324 от 18:53 МСК.** Заказчик во время моих фиксов получил повторное `backtest_completed` для sergopipo backtest #2. Это **тот же orphan**, что породил #290 в 17:35. Каждый `uvicorn --reload` (моих 4 edit'а в `market_data/service.py`) триггерит startup-recovery flow, который повторно запускает `_run_backtest_task(backtest_id=2)`. Это **не cross-user leak** — `notification_service.create_notification(user_id=1)` корректно резолвит к sergopipo's `chat_id=136811697` (личный chat заказчика). **Follow-up для Sprint 9**: расследовать, какой код запускает `_run_backtest_task` для running backtests при startup (см. recovery в `lifespan`), и почему он берёт двухмесячный orphan #2. Возможно — отсутствие `WHERE created_at > now - 24h` фильтра.
+
+### Acceptance-чеклист
+
+Сценарий 1 шаг 4 — после UI-verification → `[x]`. BUG-16 → ✅ FIXED 2026-06-02.
+
+---
+
 ## 2026-06-02 — S8R Acceptance-fix BUG-14: пустой `error_message` и проглоченная TInvestRequiredError на бэктесте без T-Invest (`S8R-ACCEPTANCE-FIX-BUG-14`)
 
 ### Что
