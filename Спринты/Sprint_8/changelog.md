@@ -10,6 +10,82 @@
 
 ---
 
+## 2026-06-02 — S8R Acceptance-fix BUG-18: silent clamp MAX_REQUEST_SPAN=365d ломал детерминизм бэктестов (`S8R-ACCEPTANCE-FIX-BUG-18`)
+
+### Что (severity: HIGH)
+
+После BUG-17 fix заказчик запустил два бэктеста с **идентичными** параметрами (SBER, 1h, период 2024-12-31 → 2026-05-31, capital 300000, strategy v92):
+
+| | #38 | #39 |
+|---|---|---|
+| net_profit | **+4103.49 ₽** | **+1640.61 ₽** |
+| net_pct | 1.37% | 0.55% |
+| total_trades | 38 | 38 |
+| wins/losses | 15/23 | 14/24 |
+| sharpe | 0.44 | 0.19 |
+| max_drawdown_pct | 1.92 | 1.92 |
+
+**37 сделок из 38 идентичны.** Различается только последняя — entry один и тот же (302.12 на 2025-11-10 10:00), но exit разный:
+- #38: exit `2026-06-02 14:00`, exit_price=325.00, P&L=+2288.28.
+- #39: exit `2025-12-31 00:00`, exit_price=300.02, P&L=-210.21.
+
+Это **нарушение детерминизма** — серьёзный bug для торговой системы.
+
+### Корневая причина
+
+`app/market_data/service.py:78-85` (внутри `get_candles`):
+
+```python
+MAX_REQUEST_SPAN = timedelta(days=365)
+
+if (to_dt - from_dt) > MAX_REQUEST_SPAN:
+    logger.warning("request_span_too_large", ...)
+    to_dt = from_dt + MAX_REQUEST_SPAN   # ⚠️ silent clamp
+```
+
+Период бэктеста = 517 дней > 365 → `to_dt` обрезался до `from_dt + 365d = 2025-12-31`. Engine получал только **12 месяцев свечей** из заявленных 17. Backtrader runonce доходил до последней свечи (`2025-12-31`) с открытой позицией → auto-close:
+
+- **#38** (до моего BUG-17 fix): `bt.num2date(trade.dtclose)` вернул значение, оказавшееся за пределами data_df (видимо, next-bar-after-end или live-now на момент прогона) → `exit_date='2026-06-02 14:00'`, `exit_price=325.00` (live SBER price ≈ now). BUG-17 fix позже clamp'нул exit_date к `date_to=2026-05-31` для **новых** бэктестов, но БД-запись #38 уже была сохранена.
+- **#39** (после BUG-17 fix): auto-close дал `2025-12-31` (последняя свеча урезанного data_df), exit_price=300.02 (close 2025-12-31).
+
+Оба значения **«валидные» с точки зрения движка**, но **оба неправильные** — потому что бэктест на самом деле должен был использовать ВСЕ свечи [2024-12-31, 2026-05-31] и стратегия имела бы шанс закрыть позицию по своим условиям между 2026-01-01 и 2026-05-31.
+
+`MAX_REQUEST_SPAN=365d` был введён как защита от больших T-Invest API запросов, но T-Invest API сам разбивает запросы (1h → 1 год за вызов, 1m → 7 дней), и логика `_find_gaps` + `_fetch_candles` в `get_candles` уже делает chunked fetches. Внешний лимит на 365 дней — устаревший и вредный.
+
+### Изменения
+
+`Develop/backend/app/market_data/service.py:33` — `MAX_REQUEST_SPAN` поднят с `timedelta(days=365)` до `timedelta(days=3650)` (10 лет). Шапочный комментарий объясняет почему и зачем оставлен внешний лимит.
+
+Логика clamp (строки 78-85) оставлена как есть, но теперь срабатывает только для запросов > 10 лет — реалистично используется только для случайных багов или fuzzing-сценариев.
+
+### Тесты (TDD)
+
+`tests/unit/test_market_data/test_service.py:TestGetCandlesMaxSpanBug18` — 2 теста:
+- `test_backtest_two_year_span_not_clamped_bug18` — проверка константы: `MAX_REQUEST_SPAN >= timedelta(days=730)`.
+- `test_get_candles_does_not_clamp_to_dt_for_long_span_bug18` — smoke на `get_candles` с 17-месячным span: `_get_cached.call_args[3]` (to_dt) совпадает с переданным.
+
+Red phase: `assert MAX_REQUEST_SPAN >= 2 года` падает (365 days). Второй тест ловит конкретный clamp `2026-05-31 → 2025-12-31` (точное значение из репро заказчика).
+
+**Green phase**: backend pytest `tests/unit/test_market_data/` — **93/93 GREEN** (91 baseline + 2 BUG-18).
+
+### Trade-off
+
+Альтернатива (a) — полностью убрать MAX_REQUEST_SPAN clamp. Отброшена: защита от случайно гигантского запроса (например `to_dt=2099-01-01`) полезна. 10 лет — разумный лимит для бэктестов.
+
+Альтернатива (b) — поднять до 2-3 лет. Отброшена: типичный backtest на 5+ лет (для long-term strategy validation) — реальный сценарий. 10 лет покрывает большинство случаев.
+
+Альтернатива (c) — убрать clamp только для `mode='backtest'`, оставить для viewer. Отброшена: viewer тоже может хотеть видеть 5-летний график. Единое значение проще.
+
+### Существующие бэктесты #38, #39
+
+Backtrader записал их с урезанным data_df. Фикс **применяется только к новым** бэктестам. Заказчик повторит запуск под тем же strategy v92 после `Cmd+R` — должен получить детерминированный результат (одинаковые метрики при повторе).
+
+### Acceptance-чеклист
+
+Сценарий 1 шаг 4 (бэктест + метрики) — после UI-verification BUG-18 → `[x]` с пометкой о детерминизме. BUG-18 → ✅ FIXED 2026-06-02.
+
+---
+
 ## 2026-06-02 — S8R Acceptance-fix BUG-17: exit_date последней сделки за пределами date_to (`S8R-ACCEPTANCE-FIX-BUG-17`)
 
 ### Что
