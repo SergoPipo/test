@@ -10,6 +10,83 @@
 
 ---
 
+## 2026-06-02 — S8R Acceptance-fix BUG-14: пустой `error_message` и проглоченная TInvestRequiredError на бэктесте без T-Invest (`S8R-ACCEPTANCE-FIX-BUG-14`)
+
+### Что
+
+Заказчик после BUG-13 fix успешно создал стратегию и запустил бэктест #36 (`testuser1`, SBER, 1ч, капитал 300 000, 2024-12-31 → 2026-05-31). За 6 миллисекунд бэктест записал в БД `status='failed', error_message=''`. На UI — статус «ОШИБКА» без объяснения, все метрики `--`. Тестер не понимает, что нужно делать.
+
+### Корневая причина (Phase 1)
+
+Backend log `/tmp/moex-dev-logs/backend.log` около 16:01:57:
+
+```
+INSERT INTO backtests (..., status='running', ...)              # 823ms
+UPDATE backtests SET status='failed', error_message='', ...     # 829ms  ← 6мс
+[error] backtest_failed backtest_id=36 error=
+```
+
+Никакого Traceback в логе. error_message пишется как **пустая строка**. БД-снимок:
+```
+users:           (1,'sergopipo',1), (2,'testuser',0), (3,'testbot',0), (4,'testuser1',0)
+broker_accounts: только user_id=1 (sergopipo) имеет активный T-Invest
+```
+
+`testuser1` (id=4) — новый пользователь acceptance — НЕ подключал T-Invest. Поток ошибки:
+
+1. `MarketDataService.get_candles` (`market_data/service.py:92-100`) проверяет `_has_active_tinvest_account(user_id=4) = False` и кидает `TInvestRequiredError(detail="Подключите T-Invest для запуска бэктеста", mode="backtest")` — корректное бизнес-поведение.
+2. `BacktestEngine.run` пробрасывает исключение.
+3. `BacktestService.create_backtest` ловит всё через `except Exception as e:` и пишет `backtest.error_message = str(e)`.
+
+Проблема — в `app/common/exceptions.py:39-53`: `TInvestRequiredError.__init__` сохранял `self.detail = detail`, но НЕ вызывал `super().__init__(detail)`. Без этого `Exception.__str__` не находит сообщения в `self.args` (они пустые) и возвращает **пустую строку**. То же касается остальных 6 классов в файле — `NotFoundError`, `ValidationError`, `AuthenticationError`, `ForbiddenError`, `BrokerError`, `AccountLockedError`. Это маскировало бы корневую причину ошибки везде, где сообщения выводятся через `str(e)`, а не через `e.detail`.
+
+Дополнительная проблема: `BacktestService.create_backtest` ловил `TInvestRequiredError` под общим `except Exception` — `app.common.exceptions.register_exception_handlers` не успевал отработать (HTTP-handler возвращает 409 + JSON `{detail, error_code: tinvest_required}` только при raise наверх). Frontend получал 200 OK с failed-orphan вместо модалки «Подключите T-Invest».
+
+### Изменения (Phase 4)
+
+**`Develop/backend/app/common/exceptions.py`** — во ВСЕ 7 framework-классов (`NotFoundError`, `ValidationError`, `AuthenticationError`, `ForbiddenError`, `BrokerError`, `AccountLockedError`, `TInvestRequiredError`) добавлен `super().__init__(detail)` ПЕРЕД `self.detail = detail`. Теперь `str(e) == e.detail` для всех. Размещён шапочный комментарий `# S8R-ACCEPTANCE-FIX-BUG-14` с объяснением «почему обязательно super».
+
+**`Develop/backend/app/backtest/service.py:create_backtest`** — добавлен отдельный `except TInvestRequiredError as e:` ПЕРЕД generic `except Exception`:
+- Помечает backtest как `failed` с осмысленным `error_message` (теперь не пустым благодаря super().__init__).
+- Логгер вызывается через `warning` (а не `error`) с meta-полем `detail=e.detail` — это бизнес-сигнал, не баг.
+- `raise` пробрасывает наружу → FastAPI exception handler (`register_exception_handlers`) возвращает 409 + JSON `{detail, error_code: "tinvest_required", mode: "backtest"}`.
+
+### Тесты (TDD Red → Green)
+
+**Red phase**:
+- `tests/unit/test_exceptions.py:TestExceptionStrBug14` — 7 тестов: `str(TInvestRequiredError("X")) == "X"` + аналогичные для 6 остальных классов. Все 7 FAIL (str возвращал '').
+- `tests/unit/test_backtest/test_service.py:TestRunBacktestTInvestRequiredBug14.test_tinvest_required_propagates_not_swallowed_bug14` — mock `engine.run` кидает `TInvestRequiredError`, `create_backtest` должен пробросить, не проглотить. FAIL (`DID NOT RAISE`).
+
+**Green phase**: после фикса оба бага закрыты.
+- `tests/unit/test_exceptions.py tests/unit/test_backtest/test_service.py` — 22/22 GREEN.
+- Полный regression `tests/unit/test_exceptions.py + test_auth_service.py + test_backtest/ + test_routers/test_auth_router.py + test_security/test_xss_telegram_email.py` — **259/259 GREEN**, 0 регрессий.
+- `py_compile` для `exceptions.py` и `backtest/service.py` — OK.
+
+### UI-верификация (ожидается у заказчика)
+
+`testuser1` под `Cmd+R`:
+1. Попытка запустить бэктест на стратегии — backend вернёт 409 с `detail="Подключите T-Invest для запуска бэктеста"`.
+2. Frontend должен показать модалку с переходом в настройки брокера (логика существует — см. docstring `TInvestRequiredError`).
+3. После подключения T-Invest token бэктест запустится корректно.
+
+Существующая failed-orphan запись `backtests.id=36` (с `error_message=''`) ретроактивно не лечится — но после фикса новые failed-бэктесты будут иметь осмысленный detail.
+
+### Trade-off
+
+Альтернатива (a) — в `BacktestService.create_backtest` сделать pre-check `_has_active_tinvest_account` ДО создания backtest record (не плодить failed-orphan). Отброшено как scope-creep: pre-check дублирует логику внутри `MarketDataService.get_candles` и потребовал бы протаскивать user_id через 3 слоя. Лучше — централизовать ошибку в одном месте (как сейчас), а cleanup orphan-записей запланировать в Sprint 9 maintenance.
+
+Альтернатива (b) — пробросить `TInvestRequiredError` сразу после `_get_strategy_version`, до создания backtest record. Не позволяет: проверка T-Invest сейчас живёт глубоко в `MarketDataService`, доставать её на уровень `BacktestService` — лишняя связность.
+
+### Дополнительные ошибки на скриншоте
+
+Все 13 строк `Failed to load resource: 403` на `https://invest-brands.cdn-tinkoff.ru/RU000A10*.png` — отсутствуют логотипы для разных корпоративных облигаций на T-Invest CDN. Известная UI-минорная вещь (отмечено в Шаге 0.3 чеклиста). Frontend показывает default-плашку — не баг.
+
+### Acceptance-чеклист
+
+Сценарий 1 шаг 4 «Запускается бэктест, дожидаюсь результатов, метрики корректны» — пока [-], ожидает повтора после подключения T-Invest у testuser1. После UI-verification BUG-14 → [x] с пометкой о фиксе.
+
+---
+
 ## 2026-06-02 — S8R Acceptance-fix BUG-13: «Генерировать» на новой стратегии теряет блоки и описание (`S8R-ACCEPTANCE-FIX-BUG-13`)
 
 ### Что
