@@ -10,6 +10,186 @@
 
 ---
 
+## 2026-06-05 — S8R Acceptance-fix BUG-22: блочная стратегия в live/sandbox НИКОГДА не открывала сделку — невалидные Python-имена из Blockly block_id (`S8R-ACCEPTANCE-FIX-BUG-22`)
+
+### Контекст
+Заказчик запустил sandbox-сессию (testuser1, SBER, 1m, session #5, strategy version 92 «Первая стратегия»). За ~сутки — **ноль сделок**. Просьба: проверить, действительно ли условия стратегии не довели до сделки. Ответ: **нет, условия ни при чём** — это баг кодогенерации, движок физически не мог исполнить стратегию.
+
+### Диагностика (root cause)
+- live/sandbox-движок НЕ исполняет backtrader `generated_code`: при наличии `class GeneratedStrategy` он конвертирует стратегию из `blocks_json` в sandbox-скрипт через `SignalProcessor._blocks_to_sandbox` ([engine.py:478-486](../../Develop/backend/app/trading/engine.py#L478-L486)).
+- `_blocks_to_sandbox` строил имена переменных индикаторов как `f"sma_{block_id}"`, где `block_id` — сырой Blockly-id с символами, недопустимыми в Python-идентификаторах (`= % ^ ) [ | : ` ( `). Реальный id sv=92: `7LDZ=b6%^r%y)4oI[6|u`.
+- Итог: сгенерированный код **не компилировался** → `CodeSandbox.execute` success=False (`SyntaxError: unmatched ')'`) → `_execute_strategy` → None → `process_candle` → None → runtime молча выходил без сигнала ([runtime.py:1252](../../Develop/backend/app/trading/runtime.py#L1252)). Так на КАЖДОЙ свече. Ни одного сигнала, ни одной сделки. `last_signal_at` сессии = NULL, `live_trades` пусто.
+- Воспроизведено на реальной sv=92 + реальном `CodeSandbox`: условие входа SMA(20)≈322 > 70 = True (сигнал ДОЛЖЕН быть `buy`), но движок ДО фикса возвращал пустой output; ПОСЛЕ фикса — `buy`.
+- Масштаб: баг бил по **любой** блочной стратегии в live/sandbox/paper. Бэктест не затронут (идёт по backtrader-пути `generated_code`). Блокер Сценария 2 (Live-торговля) S8-приёмки.
+
+### Фикс
+- `app/trading/engine.py` `_blocks_to_sandbox`: имена переменных индикаторов строятся из монотонного индекса (`ind_sma_0`, `ind_ema_1`, …) вместо сырого block_id. Сам block_id остаётся ключом словаря `ind_vars` (там любые символы безопасны). `_resolve_condition` не менялся — берёт имя из `ind_vars[id]`. Минимальная правка.
+
+### Тесты (TDD Red-Green)
+- Новый `tests/test_trading/test_engine_blocks_to_sandbox.py` (6 тестов):
+  - `test_generated_code_compiles` × 4 враждебных id (включая точный id из инцидента) — главный assert `compile(code)` не падает.
+  - `test_condition_references_same_var_as_assignment` — имя в присваивании == имя в `entry`.
+  - `test_sma_gt_70_emits_buy` — end-to-end через реальный `CodeSandbox`: SMA(20)>70 → `buy`.
+- RED подтверждён: `SyntaxError: unmatched ')'`. GREEN: **6/6**.
+- Регрессия `tests/test_trading/` — **179 passed**. `py_compile engine.py` — OK. Полный backend pytest — **1656 passed, 0 failed** (196s).
+
+### Известные сопутствующие находки (НЕ в scope BUG-22 — на решение заказчика)
+1. **Exit-условие никогда не срабатывает**: `_blocks_to_sandbox` обрабатывает только `condition_compare`, а exit sv=92 построен на `condition_in_zone` → `exit_sig=(False)` всегда ([engine.py:635-639](../../Develop/backend/app/trading/engine.py#L635-L639)). Кандидат на BUG-23.
+2. **SL/TP из management-блоков не применяются** в sandbox-пути: `_blocks_to_sandbox` игнорирует `management_stop_loss`/`management_take_profit` (3%/6% в sv=92).
+3. **1m-свечи прекратились** на 2026-06-04 10:19 (через ~11 мин после старта сессии). Отдельный вопрос потока market-data / рыночных часов — на verdict BUG-22 не влияет.
+
+### Файлы
+- `Develop/backend/app/trading/engine.py` — фикс `_blocks_to_sandbox`
+- `Develop/backend/tests/test_trading/test_engine_blocks_to_sandbox.py` — новый
+
+---
+
+## 2026-06-04 — S8R Acceptance-fix BUG-21: csrf_token cookie path=/api делал её невидимой для JS → 403 на все mutating запросы (`S8R-ACCEPTANCE-FIX-BUG-21`)
+
+### Что (severity: HIGH — блокер mutating запросов после login)
+
+Заказчик после login открыл /trading → «Запустить сессию» (Sandbox/SBER/1m) → получил `Request failed with status code 403`. В консоли красный POST `http://localhost:8000/api/v1/trading/sessions 403 (Forbidden)`. Это блокер для всех POST/PATCH/DELETE: создание сессий, изменение настроек, удаление, любая мутация.
+
+### Корневая причина
+
+В [app/auth/router.py:121](Develop/backend/app/auth/router.py#L121) `/auth/login` выставлял `csrf_token` cookie с `path="/api"`. Frontend [api/client.ts:30](Develop/frontend/src/api/client.ts#L30) читает CSRF token через `document.cookie.match(/csrf_token=([^;]+)/)` — но по спецификации cookies (`RFC 6265 §5.2.4`) `document.cookie` возвращает скриптам только cookies с path, который является **префиксом URL текущей страницы**. Страница фронта `localhost:5173/trading` имеет path `/trading` — `path=/api` НЕ matches, cookie невидима.
+
+При этом сам запрос идёт на `/api/v1/trading/sessions` — там path matches, **browser отправляет cookie в заголовке `Cookie:`**. Backend [middleware/csrf.py:50](Develop/backend/app/middleware/csrf.py#L50) ловит «cookie без header»: `if not cookie_token or not header_token: return JSONResponse(status_code=403, content={"detail": "CSRF token отсутствует"})`.
+
+Запрос даже не доходит до route handler (`POST /api/v1/trading/sessions`) — между OPTIONS и POST в structured log нет ни одной строки от приложения, только access log `403 Forbidden`. Подтверждает: блок в middleware.
+
+Почему раньше работало: max_age csrf cookie = 24h. Если последний login был >24h назад, cookie истекала, frontend `getCSRFToken()` возвращал `null`, browser cookie тоже не слал → middleware пропускал (`not cookie_token and not header_token` → allow). После недавнего login кука свежая → блок включается.
+
+### Изменения
+
+`backend/app/auth/router.py:131` — изменил `path="/api"` → `path="/"` для `csrf_token` cookie. Cookie остаётся:
+- `httponly=False` (frontend читает JS-ом)
+- `samesite="strict"` (same-site protection)
+- `secure=False` (dev; в production через nginx HTTPS → True)
+- `max_age=3600*24` (24h)
+
+Теперь cookie видна в `document.cookie` со страниц `/trading`, `/chart`, `/strategies` и т.д. Frontend кладёт header → backend сравнивает → 200.
+
+`access_token` cookie с `path="/api"` не трогал — она `httponly=True`, JS её не читает, используется только browser-ом для AdminAuthASGIMiddleware (top-level навигация в Plotly Dash). Path-scope логичен.
+
+### Тесты (TDD)
+
+`tests/test_routers/test_auth_router.py::TestLogin::test_login_csrf_cookie_has_root_path_bug21` — regression: после `/auth/login` `Set-Cookie: csrf_token=...; Path=/`, не `Path=/api`. Red phase: с `path="/api"` тест падает на `assert "Path=/api" not in csrf_header`.
+
+Полный regression auth + CSRF — **32/32 GREEN**:
+- `tests/test_routers/test_auth_router.py` — 14 (login/setup/me/password/profile + новый BUG-21)
+- `tests/test_security/test_csrf.py` — 13
+- `tests/unit/test_middleware/test_csrf.py` — 5
+
+### Quality gates
+
+- Backend `py-compile` clean.
+- Backend pytest auth+csrf — **32 passed**.
+
+### Trade-off
+
+Альтернатива (a) — изменить frontend: не читать cookie через `document.cookie`, а получать csrf_token в body `/auth/login` response, хранить в memory store. Отброшена: ломает API контракт, требует изменений в `LoginPage` + `client.ts` + flow refresh-token. Один трогаемый файл vs три.
+
+Альтернатива (b) — снять `samesite="strict"` для совместимости. Отброшена: ослабляет CSRF защиту в production без улучшения dev experience.
+
+Альтернатива (c) — также выставлять csrf cookie в `/setup` и `/refresh`. Отложено: текущий сценарий заказчика — login → POST sessions, /setup и /refresh не на критическом пути; будет отдельным фиксом если всплывёт.
+
+### Что проверить заказчику в браузере
+
+1. F5 / Cmd+R.
+2. **Logout → Login заново** — иначе старый cookie c `path=/api` сохранён в браузере, новый с `path=/` не выставится поверх (это разные cookies по уникальному ключу `name + domain + path`). Либо DevTools → Application → Cookies → http://localhost:8000 → удалить csrf_token вручную → Cmd+R.
+3. /trading → «Запустить сессию» → Sandbox → SBER + 1м → должно успешно создать сессию (200, не 403).
+
+---
+
+## 2026-06-03 — S8R Acceptance-fix BUG-20: list of favorites общий для всех пользователей устройства (`S8R-ACCEPTANCE-FIX-BUG-20`)
+
+### Что (severity: HIGH — privacy/UX)
+
+Заказчик зашёл под тестовым пользователем (только что созданный — без избранных), открыл график торговой сессии, нажал звёздочку «Избранное» — и увидел чужие тикеры (`LKOH`, `SBER`), которые добавлял другой пользователь на этом же устройстве. То же касается избранных таймфреймов в `TimeframeSelector`.
+
+Это **утечка между пользователями**: список избранного должен быть строго per-user.
+
+### Корневая причина
+
+Frontend хранил оба списка в `localStorage` под **глобальными** ключами без user_id-префикса:
+
+- `FavoritesPanel.tsx:16` — `STORAGE_KEY = 'user_favorites'` (избранные тикеры).
+- `marketDataStore.ts:177` — `loadFromStorage('favoriteTimeframes', DEFAULT)` (избранные TF).
+
+`authStore.logout()` очищал `auth-storage` и `background-backtests`, но не эти два ключа — поэтому после logout/login другого пользователя на том же устройстве он видел избранное предыдущего юзера. Bonus: на другом ПК у того же юзера избранное было пустое, потому что localStorage привязан к браузеру.
+
+Сравните с правильным паттерном (для drawings уже было): `chartDrawingsStore.ts:22` — ключ `drawings:{userId}:{ticker}:{tf}`.
+
+### Изменения
+
+**Backend (источник истины — БД):**
+
+Новый модуль `app/user_favorites/` (model + schemas + service + router):
+
+- `models.py` — `UserFavorite(user_id FK, kind, value, created_at)`, `UNIQUE(user_id, kind, value)`, `INDEX(user_id, kind)`. Один dispatcher на два типа: `kind ∈ {'instrument', 'timeframe'}`.
+- `service.py` — `list_for_user(user_id)`, `add(user_id, kind, value)` (идемпотентен — повторный POST не валится), `remove(user_id, kind, value)` (тоже идемпотентен).
+- `router.py` — три эндпоинта под `Depends(get_current_user)`:
+  - `GET /api/v1/user-favorites` → `FavoritesList(instruments[], timeframes[])`
+  - `POST /api/v1/user-favorites/{kind}` body `{value}` → 201
+  - `DELETE /api/v1/user-favorites/{kind}/{value}` → 204
+- `alembic/versions/a7b3c9d5e1f2_s8r_bug20_user_favorites.py` — миграция таблицы.
+- `app/main.py` — регистрация модели и роутера.
+
+**Frontend (источник истины — backend, in-memory state, без persist):**
+
+- `api/userFavoritesApi.ts` — REST клиент.
+- `stores/userFavoritesStore.ts` — Zustand store, **НЕ persist**. Optimistic update + rollback при ошибке backend. Метод `reset()` для logout.
+- `components/charts/FavoritesPanel.tsx` — переключён с `localStorage.getItem('user_favorites')` на `useUserFavoritesStore`. `useEffect → load()` при первом mount.
+- `stores/marketDataStore.ts` — `favoriteTimeframes` стартует с `DEFAULT_FAVORITES`, читает backend через `syncFavoriteTimeframesFromServer()`. Сеттеры `setFavoriteTimeframes` / `toggleFavoriteTimeframe` шлют diff в backend через `useUserFavoritesStore.add/remove`. `saveToStorage('favoriteTimeframes', ...)` удалён.
+- `pages/ChartPage.tsx` — `useEffect`: `await load(); syncFavoriteTimeframesFromServer()` — точка bootstrap для обоих списков.
+- `stores/authStore.ts:logout()` — добавлены: `useUserFavoritesStore.reset()`, удаление legacy ключей `user_favorites` и `favoriteTimeframes` из localStorage.
+- `api/types.ts` — удалён неиспользуемый `FavoriteInstrument` интерфейс.
+
+### Тесты (TDD)
+
+**Backend** — `tests/test_routers/test_user_favorites_router.py` (11 тестов):
+- Empty state для нового user; 401 без авторизации.
+- POST instrument/timeframe, GET возвращает разделённый список.
+- Идемпотентность POST дубликата (двойной клик не должен валить 500).
+- Unsupported kind → 422 (`ValidationError`); пустой value → 422 (Pydantic).
+- DELETE существующего и отсутствующего значения (оба 204).
+- **Главный инвариант:** `test_user_a_favorites_invisible_to_user_b` — user A добавляет SBER+LKOH+1h, user B видит `{instruments: [], timeframes: []}`.
+- `test_user_b_deletes_only_own_records` — B удаляет свой дубликат SBER, у A SBER сохранён.
+
+Stack Gotcha (новый): два независимых `httpx.AsyncClient` с разными `app.dependency_overrides[get_current_user]` ломают друг друга (overrides — глобальные). Решение в тестах — `switch_user_client(user)` фабрика на mutable holder.
+
+**Frontend** — `src/components/charts/__tests__/FavoritesPanel.test.tsx` (5 тестов): empty state, add/remove, click select, **`BUG-20 regression: НЕ читает localStorage user_favorites`** — засеяли legacy ключ, проверили что компонент его игнорирует.
+
+### Quality gates
+
+- Backend `pytest tests/` — **1649 passed**.
+- Backend `py-compile` — clean.
+- Frontend `tsc --noEmit` — clean.
+- Frontend `vitest run` — **597 passed (86 files)**.
+
+### Trade-off
+
+Альтернатива (a) — frontend-only фикс с ключом `user_favorites:{userId}`. Отброшена заказчиком: backend-persistence нужен для кросс-устройства (вход с другого ПК тоже должен видеть избранное).
+
+Альтернатива (b) — две отдельные таблицы (`user_favorite_instruments` + `user_favorite_timeframes`). Отброшена: один `kind`-дискриминатор удобнее для расширения (`'strategy'`, `'screener'` без миграций).
+
+### Follow-up UX-fix (2026-06-03, fix-волна 2)
+
+После того как backend и stores заработали, заказчик нашёл UX-баг в [TimeframeSelector.tsx](Develop/frontend/src/components/charts/TimeframeSelector.tsx): клик по звезде в выпадающем меню «Все таймфреймы» переключал график на этот TF, но НЕ делал его избранным. Звезда визуально выглядела кликабельной, но toggle избранного работал только по **правому клику** (`onContextMenu`) — недокументированный hotkey, который обычный пользователь не угадает.
+
+**Корневая причина:** `leftSection={IconStar}` рендерился как пассивный элемент внутри `Menu.Item`; левый клик по любой части пункта меню вызывал родительский `onClick = handleTimeframeClick(tf) = setTimeframe`.
+
+**Фикс:** обернул иконку в интерактивный `<Box component="span" role="button">` с `onClick` (плюс `onKeyDown` для Enter/Space — a11y). `e.stopPropagation()` предотвращает срабатывание родительского setTimeframe. Использовал `Box`, а не `ActionIcon`, чтобы не получить nested `<button>` warning (Menu.Item уже `<button>`).
+
+**Файлы:**
+- `frontend/src/components/charts/TimeframeSelector.tsx` — звезда теперь интерактивная.
+- `frontend/src/components/charts/__tests__/TimeframeSelector.test.tsx` — новый тест `S8R BUG-20: клик по звезде в dropdown переключает избранное, НЕ таймфрейм`. Заодно поправил legacy fixture (`['Д', '1ч', '5м']` → `['D', '1h', '5m']`, англ. ключи как в production).
+
+**Quality gates:** TimeframeSelector vitest **4/4**, tsc clean.
+
+---
+
 ## 2026-06-02 — S8R Acceptance-fix BUG-18: silent clamp MAX_REQUEST_SPAN=365d ломал детерминизм бэктестов (`S8R-ACCEPTANCE-FIX-BUG-18`)
 
 ### Что (severity: HIGH)
