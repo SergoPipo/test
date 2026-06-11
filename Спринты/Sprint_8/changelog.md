@@ -10,6 +10,597 @@
 
 ---
 
+## 2026-06-11 — Фиксы приёмки (в текущем спринте): BUG-24, BUG-25 (SP-B), доводки гейта BUG-23
+
+- **Что:** реализованы 4 фикса по итогам приёмки (все по TDD Red→GREEN, в рамках Sprint 8 Review — НЕ S9). Код-ревью изменений: **APPROVED**. Полный backend pytest: **1806 passed, 1 xfailed, 0 failed** (было 1801 → +5 новых тестов).
+- **BUG-25 (SP-B) — `app/broker/tinvest/multiplexer.py`:** watchdog на тихий обрыв gRPC-стрима. `_run_stream` больше не использует `async for` (висел вечно при полуоткрытом TCP), а драйвит стрим вручную: `await asyncio.wait_for(stream_iter.__anext__(), timeout=self._stream_idle_timeout)`. При TimeoutError → `raise ConnectionError` → существующая ветка backoff+resubscribe. Константы: `_STREAM_IDLE_TIMEOUT_SEC=180` (> серверного ping ~120с — здоровый стрим получает ping как response и сбрасывает таймер), `_GRPC_KEEPALIVE_OPTIONS` (keepalive_time=60с/timeout=20с/permit_without_calls=1, передаётся в `AsyncClient(options=...)` — подтверждено сигнатурой SDK). Инстансный `self._stream_idle_timeout` (тесты ставят низкий). `finally: stream.aclose()`. **Enum-mismatch (bonus-находка SP-B) НЕ воспроизводится** в SDK 0.2.0-beta117 — значения `CandleInterval`/`SubscriptionInterval` совпадают для всех ТФ (проверено enum-инспекцией), правка не нужна. Тест: `test_idle_stream_triggers_reconnect` (RED: call_count=1 висел; GREEN: ≥2). Регресс multiplexer 13/13.
+- **BUG-24 — `app/strategy/code_generator.py:220`:** `Stochastic(..., d_period=...)` → `period_dfast=...` (у backtrader нет `d_period` → TypeError на `Cerebro.run()`; подтверждено `Stochastic.params._getpairs()`). Тест: `test_stochastic_generated_code_runs_in_backtrader` (реальный backtrader-прогон, не `compile_restricted`). Семантический xfail Stochastic (fast vs slow) сохранён (strict).
+- **Доводки гейта BUG-23 — `app/trading/service.py` `_check_parity_gate`:** (1) `parity_signals_match is False` → `is not True` (аномальный `checked=True`+`match=None` больше не обходит гейт молча); (2) зафиксирована версионность гейта (parity = свойство версии стратегии, не тикера) комментарием + тестом-замком. Тесты: +3 в `test_parity_gate.py` (10/10).
+- **Файлы:** `Develop/backend/app/broker/tinvest/multiplexer.py`, `app/strategy/code_generator.py`, `app/trading/service.py` + 3 тест-файла. **Плагины:** py_compile OK (pyright-в-venv отсутствует, harness-диагностика — только import-false-positives без venv); код-ревью subagent'ом (trading/broker критпуть, как требует Develop/CLAUDE.md).
+- **Результат:** BUG-24, BUG-25 закрыты; находки финального ревью BUG-23 устранены. Готово к коммиту на `s8r/bug-23-interpreter` + merge в `s8/sprint-8`.
+
+---
+
+## 2026-06-11 — Приёмка BUG-23: финальное код-ревью + E2E под testuser1 + диагностика SP-B + BUG-24/25
+
+- **Что:** Завершающая приёмка BUG-23 по 4 направлениям заказчика (финальное whole-branch код-ревью, полный E2E от бэктеста до live, отдельная задача BUG-24, диагностика SP-B). Кода не менял — только верификация + документирование находок.
+- **Финальное код-ревью BUG-23** (фоновый агент, весь дифф `s8/sprint-8..s8r/bug-23-interpreter`, 15 коммитов): **APPROVED, блокеров нет.** Подтверждено: `evaluate`→`engine.py:509`, `_check_parity_gate`→`service.py:122`, shadow-run→`service.py:288` (последним, после `commit()`, в `try/except` с `rollback()` → НЕ ломает основной бэктест); миграция single-head аддитивная; `all([])` трап закрыт; `compare_signals` (fill_offset=1) не даёт ложных расхождений. Находки (не блокеры): 🟡 `_check_parity_gate` не фильтрует по ticker/timeframe (по дизайну — parity это свойство версии стратегии; зафиксировать комментарием+тестом); 🟢 `parity_checked=True`+`signals_match=None` обходит гейт (защитнее `is not True`); 🟢 volume игнорирует `source` молча; 🟢 дублирование trade-folding.
+- **E2E-прогон playwright под testuser1 (sandbox, рыночные часы):**
+  - **Гейт `parity_no_backtest`** ✅ — старт sandbox-сессии без parity-бэктеста: алерт «Для запуска live нужен бэктест со сверкой движков», кнопка «Запустить» **disabled** (POST /trading/sessions → **409**). Paper — без гейта (проверено: режим Paper не показывает блок).
+  - **Бейдж сверки в бэктесте** ✅ — новый бэктест #42 (SBER, Д, 01.12.25–01.06.26): бейдж **«⚠ Live-движок расходится с бэктестом на 2 барах»** (Бар 0: бар выхода; Бар 1: кол-во сигналов) + «P&L (ориентировочно): бэктест 2186.16 / интерпретатор 21.55, расхождение +99.0%». Старые бэктесты (до BUG-23, `parity_checked=False`) — бейдж молча не рендерится (graceful).
+  - **Причина расхождения #42** — НЕ codegen-баг: сохранённый `generated_code` устарел (exit-условие = `elif sma>70`, недостижимо после entry `if sma>70`), а текущие блоки задают выход «EMA(12) в зоне 30–70». Интерпретатор читает актуальные блоки → расходится с устаревшим артефактом бэктеста. **Parity-гейт сработал ровно по назначению** — поймал дрейф `generated_code` от блоков. Рекомендация заказчику: «Генерировать» → перезапуск бэктеста снимет расхождение. (Структурно `_gen_next` ставит exit через `elif` после entry — `code_generator.py:512`; для вырожденного always-true entry exit-ветка недостижима — латентный нюанс, не баг.)
+  - **Гейт `parity_signals_diverged` + override** ✅ — ретрай sandbox по #42: алерт «Сигналы бэктеста и live-движка расходятся (2)…» + чекбокс «Понимаю риск, запустить всё равно», «Запустить» disabled до отметки. После override — сессия стартовала (audit `parity_override`).
+  - **Live sandbox #6 (SBER 1m) — BUG-22 окончательно закрыт** ✅ — сессия **сразу** исполнила `buy 31 лот @ 322,00` (тосты «Позиция открыта / Ордер выставлен / Сделка исполнена»). Доказывает: live-путь интерпретатора получает свечи (warmup 20 баров для SMA), вычисляет SMA(20)>70 (для SBER всегда истина) → buy. Исходный «0 сделок за сутки» больше не воспроизводится.
+- **Диагностика SP-B (находка #3, «1m-свечи прекратились»)** → **BUG-25** (см. acceptance_checklist). Root cause (systematic-debugging, фоновый агент): нет Ping/keepalive в gRPC `market_data_stream` (`multiplexer.py`) → тихий обрыв → `async for` зависает без Exception → reconnect (на Exception) не вызывается → канал пуст навсегда; сессия числится `active`. Runtime: #6 поток СТАРТУЕТ (сделка в первые секунды) → симптом «встаёт спустя время», а не «не стартует»; «Текущая» цена #6 застыла на 322,06 ~8 мин (корроборирует, троттлинг ревальвации не исключён); историческая #5 встала ~11 мин после старта (changelog 2026-06-05). Bonus: enum-mismatch `SubscriptionInterval` vs `CandleInterval` для 2m/3m/10m/30m/2h/4h.
+- **BUG-24** заведён (см. acceptance_checklist): `code_generator.py:220-227` генерит `Stochastic(d_period=…)`, у backtrader параметра нет (`period`/`period_dfast`/`period_dslow`) → любая Stochastic-стратегия падает в бэктесте. Подтверждено `Stochastic.params._getpairs()`. Фикс: `d_period=`→`period_dfast=`.
+- **Файлы:** `Спринты/Sprint_8_Review/acceptance_checklist.md` (+BUG-24, +BUG-25), этот changelog, `sprint_state.md`. Скриншоты: `Спринты/Sprint_8_Review/screenshots/{parity-badge-divergence,parity-gate-override,sandbox-1m-first-trade}.png`.
+- **Результат:** BUG-23 принят (код-ревью APPROVED + E2E зелёный: оба пути гейта, бейдж сверки, override, live-сделка). Новые задачи на S9: **BUG-24** (Stochastic codegen, medium), **BUG-25** (keepalive стрима, HIGH — до реальной торговли). Сессия #6 оставлена активной для подтверждения долгого стопора SP-B. Код не изменён — приёмочная верификация.
+
+---
+
+## 2026-06-10 — 🏁 BUG-23 ЗАВЕРШЁН (сводка): единый интерпретатор стратегий + differential-сверка backtest⇄live
+
+### Что (роллап; детали — в per-task записях ниже)
+- **Проблема:** два независимых переводчика блоков (бэктест → backtrader `code_generator`; live → урезанный `_blocks_to_sandbox`) расходились → пользовательская стратегия в live вела себя не так, как в протестированном бэктесте (для sv=92 exit `condition_in_zone` молча не срабатывал). Продолжение находки #1 из BUG-22.
+- **Решение:** единый интерпретатор `evaluate(ir, candles)` (live) + differential-сверка сигналов в бэктесте (один движок логики). 17 задач по TDD (subagent-driven, два-стадийное ревью spec→quality), 15 коммитов `a0a825c`…`50119f1` на ветке `s8r/bug-23-interpreter`.
+- **Новые модули:** `app/strategy/indicators.py` (8 индикаторов, выверены к backtrader: RSI Wilder, BB population-std, ATR Wilder; parity rel=1e-9/1e-6), `app/strategy/ir.py` (`parse_blocks`→`StrategyIR`), `app/strategy/evaluator.py` (`evaluate`/`evaluate_series`, кеш серий O(N)), `app/backtest/parity.py` (`interpreter_trades`/`compare_signals`/`compare_metrics`), `app/strategy/params.py` (правка параметров на IR).
+- **Интеграция:** live `SignalProcessor`→`evaluate` (legacy fallback для IR-less); бэктест shadow-run + parity-поля (+Alembic `b8c4d2e6f3a1`) + API; гейт live (sandbox/real, paper exempt): 409 `parity_no_backtest`/`parity_signals_diverged` + override + audit; UI бейдж + override-модалка; `generated_code` сохранён.
+
+### Результат
+- **Доказано backtest=live** для 7 форм стратегий (SMA-compare, EMA-in_zone, SMA-crossover, RSI-compare, logic_and, MACD, Bollinger) — `test_signal_parity.py`, реальный backtrader ⇄ интерпретатор, 7/7 signals_match, non-vacuous.
+- **Полный backend pytest: 1801 passed, 1 xfailed, 0 failed** (baseline 1656 + 145). Frontend vitest **618 passed**, `tsc -p tsconfig.app.json` чист по затронутым. pyright 0 errors (per-file, venv).
+- **Известное расхождение:** Stochastic (интерпретатор Fast vs codegen slow) — `xfail(strict=True)`, P&L в UI «ориентировочно».
+- **⚠️ Новый найденный баг (кандидат BUG-24, НЕ в scope):** `code_generator` генерит `bt.indicators.Stochastic(d_period=...)`, а параметр backtrader — `period_dfast` → любая Stochastic-стратегия падает в бэктесте (`TypeError: unexpected keyword 'd_period'`).
+- **⚠️ Поведенческое изменение:** старт sandbox/real-сессии теперь требует бэктест со сверкой движков (жёсткий блок) и блокирует при расхождении сигналов (override доступен). Paper — без гейта.
+
+### Статус
+Всё локально на ветке `s8r/bug-23-interpreter` (inner-репо). Outer-репо (changelog/acceptance_checklist/sprint_state) — изменены, не закоммичены. Push/merge — по команде заказчика. Спека/план: `docs/superpowers/specs|plans/2026-06-10-strategy-interpreter*`.
+
+---
+
+## 2026-06-10 — BUG-23 финал: signal-parity турнир backtrader ⇄ интерпретатор
+
+### Что
+- Доказательство (тестом), что движок **бэктеста** (backtrader, `CodeGenerator().generate`)
+  и **live**-движок (`parse_blocks` → `interpreter_trades`) принимают ОДИНАКОВЫЕ торговые
+  решения на одной истории свечей — для набора репрезентативных стратегий по типам блоков.
+- Харнес: генерируем код стратегии → компилируем через **тот же** `BacktestEngine._compile_strategy`
+  (с `WrappedStrategy`, форс-закрытие позиции на последнем баре, как в проде) → прогон через
+  минимальный `bt.Cerebro` → снятие bar-индексов входа/выхода через `notify_trade` + маппинг
+  fill-datetime → индекс бара. Сравнение `compare_signals(..., fill_offset=1)`.
+- Серии свечей сконструированы детерминированно: каждая стратегия даёт ≥1 реальную сделку
+  (вход+выход), все сделки закрываются настоящим exit-сигналом ДО последнего бара (чтобы
+  не сработал force-close-at-end, при котором обе стороны закрываются на одном баре без
+  fill_offset → ложное расхождение exit_bar).
+
+### Файлы
+- **`backend/tests/unit/test_strategy/test_signal_parity.py`** — новый параметризованный тест
+  (7 GREEN-семплов + 1 xfail Stochastic). Без правок production-кода.
+
+### Результат
+- `tests/unit/test_strategy/test_signal_parity.py` — **7 passed, 1 xfailed**.
+- `tests/unit/test_strategy/` (вся сюита) — **273 passed, 1 xfailed**, регрессий нет.
+- pyright 3.11 — **0 errors**; ruff — clean.
+- **Доказан паритет** для: SMA compare, EMA in_zone exit, SMA-fast/slow crossover, RSI compare,
+  logic_and (двух compare), MACD compare, Bollinger(mid) compare.
+- **Задокументированное расхождение (xfail, strict):** Stochastic — интерпретатор реализует
+  StochasticFast (%K=raw), сгенерированный код использует `bt.indicators.Stochastic` (slow).
+  Паритет недостижим без изменения семантики — НЕ чинили (см. шапку `app/strategy/indicators.py`).
+
+### Находка (не в scope этого теста, не чинилось)
+- `app/strategy/code_generator.py` генерит для Stochastic kwarg `d_period`, которого нет у
+  `bt.indicators.Stochastic` (там `period_dfast`) → backtrader падает на компиляции индикатора
+  любой Stochastic-стратегии ещё до прогона. xfail ловит это как ожидаемый отказ. Требует
+  отдельной задачи + `/code-review` (правила плагинов для `code_generator.py`).
+
+---
+
+## 2026-06-10 — BUG-23 Task 17: правка параметров стратегии через IR (blocks_json)
+
+### Что
+- **`backend/app/strategy/params.py`** — новый модуль (BUG-23 Task 17):
+  - `extract_params_from_blocks(blocks_json)` — читает flat-list blocks_json и возвращает
+    dict параметров с теми же ключами, что и `extract_strategy_params` (контракт с фронтендом
+    сохранён): `sma_period`, `rsi_period`, `rsi_2_period`, `stop_loss_pct`, `take_profit_pct`,
+    `position_size_pct`/`position_size_lots`, MACD `_fast/_slow/_signal`, Stochastic `_k/_d`,
+    BB `_period/_dev`.
+  - `replace_params_in_blocks(blocks_json, new_params)` — возвращает новый blocks_json
+    (тот же тип: str→str, dict→dict) с заменёнными значениями. Не мутирует вход.
+  - `_has_meaningful_blocks(blocks_json)` — True если есть хотя бы один индикатор или риск-блок.
+- **`backend/app/strategy/router.py`** — endpoint `POST .../versions/from-params`:
+  - IR-путь (версия с блоками): `replace_params_in_blocks` + `CodeGenerator.generate` для
+    регенерации `generated_code` из обновлённых блоков.
+  - Lockstep-supplement: если в `source.generated_code` есть параметры, которых нет в блоках
+    (мисматч/orphan), применяется text-based replace поверх source.generated_code — оба артефакта
+    обновляются.
+  - Legacy-fallback (нет блоков): старый `replace_strategy_params` путь без изменений.
+- **`backend/tests/unit/test_strategy/test_params_ir.py`** — 36 новых тестов:
+  extract/replace для SMA, RSI (×2), MACD, Stochastic, BB, stop_loss/take_profit/position_size,
+  дубликаты, строковый вход, роутер IR-путь, lockstep orphan, legacy fallback.
+
+### Файлы
+- `backend/app/strategy/params.py` (новый)
+- `backend/app/strategy/router.py` (изменён)
+- `backend/tests/unit/test_strategy/test_params_ir.py` (новый)
+
+### Результат
+- pytest `tests/unit/test_strategy/ + tests/test_routers/`: **486/486 passed**, 0 failures
+- pyright `app/strategy/params.py`: **0 errors**
+- py_compile router.py + params.py: OK
+- Коммит: `9a81576` на ветке `s8r/bug-23-interpreter`
+
+---
+
+## 2026-06-10 — BUG-23 Tasks 15+16: UI сверки движков (бейдж бэктеста + override при старте live)
+
+### Что
+- **`frontend/src/api/backtestApi.ts`** — интерфейс `Backtest` расширен 4 полями сверки:
+  `parity_checked`, `parity_signals_match`, `parity_divergences` (массив `ParityDivergence`),
+  `parity_metrics_diff` (интерфейс `ParityMetricsDiff`). Все поля опциональны для
+  бэквард-совместимости со старыми результатами.
+- **`frontend/src/api/types.ts`** — `SessionStartRequest` получил опциональное поле
+  `override_parity?: boolean` (передаётся при повторном запуске после 409 `parity_signals_diverged`).
+- **`frontend/src/components/backtest/ParityBadge.tsx`** — новый компонент:
+  - `parity_checked=true && parity_signals_match=true` → зелёный Badge «сигналы совпадают»
+  - `parity_checked=true && parity_signals_match=false` → жёлтый Alert с раскрываемым списком
+    расхождений (reason + бар)
+  - `parity_checked=false` / не задано → `null` (тихо)
+  - `parity_metrics_diff` → информационный текст «P&L (ориентировочно): …» (не ошибка)
+- **`frontend/src/pages/BacktestResultsPage.tsx`** — `ParityBadge` добавлен в вкладку
+  «Обзор» (overview-panel) над `MetricsGrid`.
+- **`frontend/src/components/trading/LaunchSessionModal.tsx`** — обработка 409 parity:
+  - `parity_no_backtest` → Alert «Запустите бэктест…», кнопка задизейблена, override невозможен
+  - `parity_signals_diverged` → Alert с `divergence_count` + Checkbox «Понимаю риск» (override).
+    При отмеченной галочке повторный запрос уходит с `override_parity: true`.
+  - Паттерн: `err.response?.status === 409` + `err.response?.data?.error_code` — по образцу
+    `BrokerAccountList.tsx` (`resp.data.error_code`).
+- **`frontend/src/components/backtest/__tests__/ResultsPanel.parity.test.tsx`** — 7 vitest-тестов
+  для `ParityBadge`: null при `checked=false`, зелёный бейдж, жёлтый alert + список расхождений,
+  metrics_diff с меткой «ориентировочно».
+- **`frontend/src/components/trading/__tests__/LaunchSessionModal.parity.test.tsx`** — 5 vitest-тестов
+  для parity 409-логики через минимальный хост-компонент (изолирован от Mantine SegmentedControl /
+  use-merged-ref React 19 + jsdom несовместимости).
+
+### Тесты
+- `ResultsPanel.parity.test.tsx` — **7 passed**
+- `LaunchSessionModal.parity.test.tsx` — **5 passed**
+- `tsc --noEmit` — **0 ошибок**
+- Существующие `LaunchSessionModal.test.tsx`, `BacktestResultsPage.test.tsx` — **9 passed**
+
+### Playwright visual verification
+Отложена (пароль тестового пользователя недоступен агенту). Требует ручной проверки.
+
+---
+
+## 2026-06-10 — BUG-23 Task 14: гейт live-сессии по сверке движков
+
+### Что
+- **`app/trading/schemas.py`** — `SessionStartRequest` получил поле `override_parity: bool = False`.
+  Явное подтверждение запуска при расхождении сигналов (для sandbox/real).
+- **`app/common/exceptions.py`** (code-review Important) — новое исключение `ParityGateError`
+  по образцу `TInvestRequiredError`: HTTP **409** + машиночитаемый `error_code` в теле, чтобы
+  фронт (Task 16) отличал parity-блок от обычной валидации и показывал нужный UI. Два кода:
+  - `parity_no_backtest` — нет бэктеста со сверкой движков (override НЕдоступен);
+  - `parity_signals_diverged` — расхождение сигналов (override доступен), в теле `divergence_count`.
+  Зарегистрирован `parity_gate_handler` в `register_exception_handlers`.
+- **`app/trading/service.py`** — новый метод `TradingService._check_parity_gate`:
+  1. **Жёсткий блок** (нет ни одного бэктеста с `parity_checked=True`) —
+     `ParityGateError(error_code="parity_no_backtest")`, независимо от `override_parity`.
+  2. **Мягкий блок** (`parity_signals_match=False`, `override_parity=False`) —
+     `ParityGateError(error_code="parity_signals_diverged", divergence_count=len(divergences))`.
+  3. **Override** (`parity_signals_match=False`, `override_parity=True`) — разрешено; пишется
+     `AuditLog(action="parity_override", entity_type="strategy_version", ...)` с деталями
+     (strategy_version_id, mode, ticker, timeframe, parity_backtest_id, divergences).
+  4. **Пройдено** (`parity_signals_match=True`) — разрешено без ограничений.
+- Гейт применяется **только для sandbox/real**. Paper полностью освобождён.
+- Гейт вызывается в `start_session` ДО создания `SessionStartParams` и `TradingSession`.
+- **`tests/test_trading/test_parity_gate.py`** — 7 TDD-тестов; для обоих блок-кейсов
+  ассерты на `error_code` + HTTP-статус 409 (через зарегистрированный handler, без магических
+  чисел): no-backtest → `parity_no_backtest`; diverged-no-override → `parity_signals_diverged`
+  + `divergence_count`. Остальные: override → AuditLog, signals_match=True → OK, paper → OK
+  (exempt), выбор последнего parity-checked бэктеста.
+- **`tests/test_trading/test_service.py`** — минимальный фикс теста
+  `test_start_sandbox_session_no_trading_rights_ok`: добавлен parity-checked backtest
+  с `parity_signals_match=True` (ожидаемое изменение поведения из-за нового гейта).
+
+### Минор-правки code-review (сохранены)
+- `service.py`: `import json` поднят на top-level (убран отложенный `import json as _json`).
+- `test_parity_gate.py`: убраны неиспользуемые `import pytest_asyncio` и `import asyncio`.
+
+### Тесты
+- `tests/test_trading/test_parity_gate.py` — **7 passed**
+- `tests/test_trading/ -q` — **191 passed**, 0 failed (регрессий нет)
+- `py_compile` exceptions.py, service.py — OK
+- `pyright --pythonpath .venv/bin/python --pythonversion 3.11 service.py exceptions.py` — **0 errors**
+  (преэкзистинговый `round@~595` и union-артефакты — не трогались)
+
+### Коммит
+`<amend e72b908>` — `feat(s8r-bug23): гейт live по сверке движков (жёсткий блок + override + audit)`
+(добавлены `ParityGateError` + error_code'ы parity_no_backtest / parity_signals_diverged)
+
+---
+
+## 2026-06-10 — BUG-23 Task 13: вшивка shadow-run в pipeline + parity-поля + миграция
+
+### Что
+- **`app/backtest/models.py`** — в модель `Backtest` (метрики) добавлены 4 столбца parity:
+  `parity_checked` (Boolean, default False, server_default "0"), `parity_signals_match`
+  (Boolean nullable), `parity_divergences` (JSON nullable), `parity_metrics_diff` (JSON nullable).
+- **Миграция `b8c4d2e6f3a1_s8r_bug23_backtest_parity_fields.py`** — чисто аддитивная
+  (`op.add_column` ×4), `down_revision = a7b3c9d5e1f2`. `downgrade` дропает столбцы.
+  Применена: `alembic current` a7b3c9d5e1f2 → **b8c4d2e6f3a1**. Колонки подтверждены в
+  `data/terminal.db`. `alembic check` — drift по `backtests` отсутствует.
+- **`app/backtest/engine.py`** — `BacktestResult.candle_series` заполняется точной серией
+  свечей (timestamp + OHLCV), скормленной Backtrader (из `data_df`). Поле `exclude=True`,
+  не персистится и не отдаётся через API — используется только для shadow-run.
+- **`app/backtest/schemas.py`** — `BacktestResult.candle_series` (внутреннее, exclude);
+  в `BacktestResponse` добавлены 4 parity-поля для frontend (Task 15).
+- **`app/backtest/service.py`** — новый `_run_parity_check(backtest, result)`, вызывается
+  в конце `_save_result` **после** commit'а основного результата:
+  1. `_has_meaningful_blocks`-эквивалент: незначимый IR (None/""/"{}"/без entry и exit) → skip.
+  2. `parse_blocks` → `interpreter_trades` над той же серией свечей.
+  3. Маппинг `entry_date`/`exit_date` сделок Backtrader → индекс бара по timestamp;
+     даты вне серии (BUG-17 clamp `exit_date` к `date_to`) → последний бар.
+  4. `compare_signals(fill_offset=1)` + `compare_metrics(tol_pct=1.0)`. Interp P&L =
+     Σ (exit−entry)·sign по сделкам интерпретатора (при ошибке → None).
+  5. Persist parity-полей отдельным commit'ом.
+- **`app/backtest/router.py`** — `_build_backtest_response` отдаёт 4 parity-поля.
+
+### SAFETY (критическое требование)
+- Весь `_run_parity_check` обёрнут в `try/except Exception` → при любом сбое
+  `logger.warning("parity_check_failed")`, `parity_checked` остаётся False, основной
+  результат бэктеста (уже закоммичен ВЫШЕ отдельной транзакцией) **не затрагивается**.
+  В `except` — `db.rollback()` для чистого состояния сессии. Тест
+  `test_safety_exception_does_not_break` подтверждает: исключение не пробрасывается,
+  `net_profit` не изменён.
+
+### Тесты
+- **`tests/unit/test_backtest/test_parity_persistence.py`** — 7 новых тестов: persistence
+  4 полей (default + set + None-P&L), полный путь `_run_parity_check` (parity_checked=True),
+  skip для IR-less / пустой серии, safety при исключении.
+- Регрессия: `tests/unit/test_backtest/ -q` — **233 passed** (было 226 + 7 новых).
+- `tests/unit/test_strategy/ -k "ir or evaluator or parity"` — 26 passed.
+
+### Статика
+- `pyright --pythonpath .venv/bin/python` на models/schemas/router/migration — **0 errors**;
+  service.py — **0 errors**; engine.py — 28 ошибок, все ПРЕД-существующие (backtrader optional
+  typing, `WrappedStrategy.close` override; до изменений тоже 28, новых нет). `py_compile` — OK.
+
+### Code review follow-up (amend, intraday-дрейф — important)
+- **Проблема:** `_date_to_bar` при непопадании даты безусловно возвращал `last_bar`. На
+  внутридневных ТФ (1m/1h) `bt.num2date()` round-trip через float даёт суб-секундный дрейф
+  (`10:00:00.000001` против pandas `10:00:00`) → exact-match по timestamp промахивался → entry
+  маппился на последний бар → `compare_signals` фиксировал **ложное** расхождение `entry_bar` →
+  `signals_match=False`. Поскольку сигнальная сверка — gate-критерий live (Task 14), это **молча
+  блокировало бы рабочую стратегию** в реальной торговле.
+- **Фикс (`service.py`):**
+  1. Ключ `ts_to_bar` и искомая дата нормализуются до секунды (`_norm`: drop tzinfo + `microsecond=0`)
+     на ОБЕИХ сторонах — устраняет float-дрейф num2date.
+  2. `last_bar`-fallback оставлен только для реально выходящих за серию дат (BUG-17 clamp);
+     при срабатывании логируется `logger.warning("parity_date_unmapped", ...)` — настоящий промах
+     теперь ВИДЕН, а не превращается в тихое ложное расхождение.
+  3. Docstring `_run_parity_check` дополнен явной пометкой: `parity_metrics_diff` — ГРУБЫЙ per-unit
+     ориентир (interp_pnl без лотов/комиссий vs net_profit в рублях), не точное сравнение P&L; гейт
+     его не использует, Task 15 показывает «ориентировочно».
+- **Тест:** `test_intraday_subsecond_drift_maps_to_correct_bar` — 1h-серия, `entry_date` бара 6
+  со сдвигом +1 мкс → должен смаппиться на бар 6 (а не last_bar); проверка: расхождение `entry_bar`
+  ОТСУТСТВУЕТ. Проверено инверсией: с сохранёнными микросекундами тест падает (entry → last_bar 11,
+  ложный divergence) — антитавтологичность подтверждена.
+- Регрессия: `tests/unit/test_backtest/ -q` — **234 passed** (233 + 1 новый). `pyright service.py` — 0 errors.
+- amend в **6965f82** (был 1fbc469).
+
+### Известное ограничение (concern)
+- Stochastic: интерпретатор использует Fast %K (`indicators.stochastic[...]["k"]`), тогда как
+  Backtrader-стратегия может опираться на Slow %K/%D. Для стохастик-стратегий это может давать
+  ложные `divergences` в parity-сверке. Сигнальная сверка вторична (не gate) — для UI Task 15
+  следует пометить как информационную, не как «движки расходятся».
+
+---
+
+## 2026-06-10 — BUG-23 Task 11: interpreter_trades (shadow-прогон бэктеста)
+
+### Что
+- **`app/backtest/parity.py`** — новый модуль, функция `interpreter_trades(ir, candles) -> list[dict]`:
+  - Запускает `evaluate_series(ir, candles)` и сворачивает per-bar решения `"buy"`/`"sell"`/`"hold"` в список сделок.
+  - Модель: одна позиция одновременно. `"buy"` открывает (если нет открытой), `"sell"` закрывает (если открыта).
+  - Направление из `ir.entry_direction`. Незакрытая позиция в конце истории закрывается по последнему бару.
+  - Возвращает `[{"direction", "entry_bar", "entry_price", "exit_bar", "exit_price"}, ...]`.
+- **`tests/unit/test_backtest/test_parity.py`** — 3 unit-теста (TDD Red→Green):
+  - `test_interpreter_trades_long_entry_then_exit` — SMA(3) > 70 открывает, < 70 закрывает.
+  - `test_interpreter_trades_no_signals_empty` — порог недостижим → пустой список.
+  - `test_interpreter_trades_open_position_closed_at_end` — позиция закрыта на баре 8 (последний).
+
+### TDD (Red-Green)
+- **RED:** `ModuleNotFoundError: No module named 'app.backtest.parity'` — подтверждено.
+- **GREEN:** 3/3 passed (`0.01s`).
+
+### Регрессия
+- `tests/unit/test_backtest/ -q` — **218/218 passed** (включая 3 новых теста).
+
+### Статика
+- `py_compile app/backtest/parity.py` — OK
+- `pyright app/backtest/parity.py` — **0 errors, 0 warnings, 0 informations**
+
+### Code review follow-up (amend в f975fd7)
+- Удалён неиспользуемый `import pytest` из теста (правка ревьюера).
+- Усилен `test_interpreter_trades_long_entry_then_exit`: добавлены детерминированные проверки `entry_bar == 5`, `exit_bar == 7` (SMA(3) превышает 70 на баре 5, опускается ниже на баре 7).
+- `tests/unit/test_backtest/test_parity.py -q` — **3 passed**; `pyright` — 0 errors.
+
+### Коммит
+- SHA: `f975fd7` (base: `a621977`) — ветка `s8r/bug-23-interpreter` (amend caa57b3)
+- Место тестов: `tests/unit/test_backtest/` (там уже живут все backtest unit-тесты)
+
+---
+
+## 2026-06-10 — BUG-23 Task 12: compare_signals / compare_metrics
+
+### Что
+- **`app/backtest/parity.py`** — добавлены две чистые функции (Task 12):
+  - `compare_signals(bt_trades, interp_trades, fill_offset=1) -> dict` — сравнивает списки сделок Backtrader и интерпретатора с учётом сдвига исполнения (`fill_offset`). Проверяет count, direction, entry_bar, exit_bar. Возвращает `{signals_match, divergences, bt_count, interp_count}`.
+  - `compare_metrics(bt_pnl, interp_pnl, tol_pct=1.0) -> dict` — информационное сравнение P&L. Если любой аргумент `None` — возвращает `pnl_match=None`. Иначе сравнивает относительное отклонение с `tol_pct`. Возвращает `{pnl_match, bt_pnl, interp_pnl, diff_pct}`.
+- **`tests/unit/test_backtest/test_parity.py`** — 7 новых тестов (TDD Red→Green):
+  - `test_compare_signals_match_with_fill_offset` — точное соответствие с offset=1
+  - `test_compare_signals_divergence_detected` — exit_bar расходится → `signals_match=False`
+  - `test_compare_signals_count_mismatch` — разное количество сделок → reason `count_mismatch`
+  - `test_compare_signals_direction_mismatch` — long vs short → reason `direction`
+  - `test_compare_metrics_within_tolerance` — 1000 vs 1005, tol=1% → `pnl_match=True`
+  - `test_compare_metrics_out_of_tolerance` — 1000 vs 1200 → `pnl_match=False`, `diff_pct>1`
+  - `test_compare_metrics_none_inputs` — None вход → `pnl_match=None`
+
+### TDD (Red-Green)
+- **RED:** `ImportError: cannot import name 'compare_signals'` — подтверждено.
+- **GREEN:** 11/11 passed (3 prior Task 11 + 8 функций Task 12).
+
+### Регрессия
+- `tests/unit/test_backtest/ -q` — **225/225 passed**.
+
+### Статика
+- `py_compile app/backtest/parity.py` — OK
+- `pyright app/backtest/parity.py` — **0 errors, 0 warnings, 0 informations**
+
+### Code review follow-up (amend в a83fe53)
+- `compare_signals`: ветвление `exit_bar` переписано — асимметрия open/closed (одна сторона имеет `exit_bar`, другая нет) теперь даёт divergence (reason `exit_bar`); оба `None` (обе позиции открыты) — не divergence.
+- `compare_metrics`: None-путь возвращает консистентную форму dict с `"diff_pct": None`; docstring `diff_pct: float | None`.
+- Тесты: добавлен `test_compare_signals_exit_bar_asymmetry`; `test_compare_metrics_none_inputs` усилен (`"diff_pct" in res`, `is None`).
+- `tests/unit/test_backtest/test_parity.py -q` — **11 passed**; `pyright` — 0 errors.
+
+### Коммит
+- SHA: `a83fe53` (base: `f975fd7`, amend поверх `9b4d616`) — ветка `s8r/bug-23-interpreter`
+- Сервисная интеграция (Task 13) — НЕ выполнялась, функции чистые/изолированные.
+
+---
+
+## 2026-06-10 — BUG-23 Task 10: live SignalProcessor → interpreter + legacy fallback
+
+### Что
+- **`app/trading/engine.py` — `SignalProcessor.process_candle`** переключён на interpreter-путь для blocks-стратегий:
+  - Новый метод `_get_version(id)` загружает `StrategyVersion` из БД.
+  - `_has_meaningful_blocks(blocks_json)` — определяет «значимость» через `parse_blocks` + проверку `ir.entry is not None or ir.exit is not None`. None / `"{}"` / IR без entry и exit → legacy.
+  - `_interpreter_process_candle(session, candles, version)` — конвертирует `CandleData` → `list[dict]` (open/high/low/close/volume как float/int), вызывает `evaluate(ir, candle_dicts)`, маппит `'buy'→BUY`, `'sell'→SELL`, `'hold'→None`.
+  - `_legacy_process_candle(session, candles, current)` — прежнее тело `process_candle` (sandbox-путь); `_blocks_to_sandbox` сохранён (BUG-22 тесты).
+- **Файлы:** `app/trading/engine.py` (+~120 строк, -26 строк)
+- **`evaluate(` CONNECTED:** `app/trading/engine.py:496`
+
+### TDD (BUG-23 Red-Green)
+- **RED (до фикса):**
+  - `test_process_candle_uses_interpreter_buy` — FAIL (sandbox не возвращал BUY при ценах ~320)
+  - `test_process_candle_exit_in_zone_now_sells` — **FAIL** (sandbox игнорировал `condition_in_zone` → SELL никогда не генерировался, это и есть BUG-23)
+  - `test_process_candle_hold_returns_none` — FAIL (sandbox возвращал `Signal(HOLD)` вместо `None`)
+- **GREEN (после фикса):** 5/5 passed (3 основных + 2 guard-теста)
+
+### Регрессия
+- `tests/test_trading/ -q` — **184/184 passed** (включая BUG-22 тесты `test_engine_blocks_to_sandbox.py`)
+
+### Статика
+- `py_compile app/trading/engine.py` — OK
+- `pyright app/trading/engine.py` — 4 ошибки `reportMissingImports` (structlog/sqlalchemy) — **pre-existing**, без изменений; ноль новых ошибок.
+
+### Code review follow-up (amend в 4d4f9d0)
+- **`_has_meaningful_blocks`:** в `except` добавлен `logger.warning("blocks_json_parse_failed_fallback_to_legacy", error=...)` — молчаливый fallback на legacy при битом blocks_json теперь виден в логах.
+- **`_interpreter_process_candle`:** поправлен docstring (убрана ссылка на несуществующий `_parse_ir_or_none`).
+- **`_get_version`:** явная аннотация возврата `-> "StrategyVersion | None"` (+ импорт `StrategyVersion` в `TYPE_CHECKING`); `# type: ignore[return]` удалён.
+- **Техдолг (на след. спринт, НЕ трогаем сейчас):** двойной `parse_blocks` на свечу (routing-проверка + interpreter), N+1 SELECT версии стратегии, отдельный лог interpreter-ошибок.
+- Регрессия после amend: `tests/test_trading/ -q` — **184/184 passed**. `pyright` — 4 pre-existing `reportMissingImports`, 0 новых.
+
+### Коммит
+- SHA: `a621977` (base: `d734d1c`) — обновлён амендом после code review.
+- Ветка: `s8r/bug-23-interpreter`
+
+---
+
+## 2026-06-10 — BUG-23 Task 9: evaluate_series + кеш серий индикаторов (O(N))
+
+### Что
+- **Рефакторинг `evaluator.py`:** введён `_build_series_cache(ir, candles)` — строит `dict[str, list[float|None]]`, вычисляя каждый индикатор **один раз** вместо пересчёта при каждом вызове `_val_at`.
+- **Изменены сигнатуры внутренних функций:**
+  - `_val_at(ref, cache, i)` — принимает кеш вместо candles
+  - `_eval_crossover(cond, cache, i)` — работает с `cache[ref.id]` напрямую
+  - `_eval_condition(cond, cache, i)` — пробрасывает кеш во все рекурсивные вызовы
+- **`evaluate(ir, candles)`** — сохранено прежнее поведение; внутри теперь строит кеш и вызывает `_eval_condition` с ним.
+- **Новая функция `evaluate_series(ir, candles) -> list[str]`:** возвращает решение `'buy'|'sell'|'hold'` на каждом баре; серии строятся один раз → O(N) вместо O(N²).
+
+### TDD
+- RED: 2 failed (`ImportError: cannot import name 'evaluate_series'`) — подтверждено.
+- GREEN: **230/230** passed после реализации.
+
+### Статические проверки
+- Исходная ошибка pyright: `_SeriesCache = dict[str, list[float | None]]` — runtime-синтаксис `X | None` 3.10+ в module-level алиасе без `TypeAlias`. Финальный вариант (после code review): `dict[str, list[Optional[float]]]` — оставлен только `Optional` (pyright без конфига капризен к `X | None` на уровне модуля).
+- `pyright app/strategy/evaluator.py` — **0 errors, 0 warnings, 0 informations**
+- `py_compile app/strategy/evaluator.py` — OK
+
+### Code review (одобрено) — follow-up в amend
+- **Алиас кеша:** `Dict/List` (typing) → `dict[str, list[Optional[float]]]`.
+- **Импорт:** `evaluate_series` импортируется на module-level (строка 13), локальные импорты внутри тестов убраны.
+- **Усилен тест `test_evaluate_series_returns_decision_per_bar`** (review #3): помимо концов ряда зафиксирована граница перехода hold→buy. Для `[10.0]*25 + [320.0]*5` SMA(20) на баре 27 = 56.5 (≤70, `hold`), на баре 28 = 72.0 (>70, `buy`). Добавлены `assert decisions[27] == "hold"` и `assert decisions[28] == "buy"` — теперь ловится регрессия ±2 бара.
+- Повторная верификация: `tests/unit/test_strategy/` — **230/230** passed; `pyright app/strategy/evaluator.py` — 0 errors.
+
+### Файлы
+- `Develop/backend/app/strategy/evaluator.py` — рефакторинг + `evaluate_series`
+- `Develop/backend/tests/unit/test_strategy/test_evaluator.py` — 2 новых теста (итого 14, suite 230)
+
+### Коммит (inner repo Develop/)
+- Ветка `s8r/bug-23-interpreter`, SHA `d734d1c` (amend поверх `49b5b35`), base `ab8002d`
+
+---
+
+## 2026-06-10 — BUG-23 Tasks 6+7+8: crossover impl + регресс-тесты in_zone/logic
+
+### Что
+- **Task 6 (регрессия in_zone):** добавлен тест `test_exit_in_zone_emits_sell` — проверяет, что `signal_exit` с `condition_in_zone` корректно эмитирует `"sell"` (оригинальный симптом BUG-23: выход через `in_zone` никогда не срабатывал). Тест проходит сразу — реализация была добавлена в Task 5.
+- **Task 7 (crossover):** заменена заглушка `_eval_crossover` в `evaluator.py` полноценной реализацией:
+  - Для направления `"up"`: `l0 <= r0 and l1 > r1` (fast пересекает slow снизу вверх)
+  - Для направления `"down"`: `l0 >= r0 and l1 < r1`
+  - Граничные случаи: `i < 1`, `cross_left/cross_right is None`, любой из 4 значений `None` → `False`.
+  - TDD: RED `test_crossover_up_emits_buy` (stub→hold) подтверждён перед реализацией. GREEN — после замены заглушки.
+- **Task 8 (logic and/or/not):** добавлены 4 регресс-теста существующей реализации: `and` истинный, `and` ложный, `or` с одним истинным, `not` инверсия.
+
+### Верификация crossover-серии
+Закрытия `[100, 99, 98, 97, 96, 95, 94, 93, 92, 91, 90, 120]`:
+- i=10: SMA3=91.0, SMA8=93.5 → fast < slow
+- i=11: SMA3=100.33, SMA8=96.375 → fast > slow
+- `l0(91.0) <= r0(93.5) and l1(100.33) > r1(96.375)` → **True** (подлинное пересечение снизу вверх)
+
+### TDD
+- RED: 1 failed (crossover stub), 11 passed — подтверждено.
+- GREEN: **12/12** passed после замены заглушки.
+
+### Статические проверки
+- `py_compile app/strategy/evaluator.py` — OK
+- `pyright app/strategy/evaluator.py` — **0 errors, 0 warnings, 0 informations**
+
+### Файлы
+- `Develop/backend/app/strategy/evaluator.py` — `_eval_crossover` реализован (заглушка удалена)
+- `Develop/backend/tests/unit/test_strategy/test_evaluator.py` — 7 новых тестов (итого 12)
+
+### Code review (одобрено) — follow-up в amend
+- **Правка ревьюера:** хелпер `_cmp` в тесте теперь подставляет `"PERIOD": period` вместо хардкода 5 (корректность фикстуры).
+- **Docstring:** обновлена шапка модуля `evaluator.py` — убрана устаревшая формулировка «crossover — заглушка (всегда False)»; теперь явно указано, что все типы условий (compare/in_zone/crossover/and/or/not) полностью реализованы.
+- Повторная верификация: `tests/unit/test_strategy/` — **228/228** passed; `pyright app/strategy/evaluator.py` — 0 errors.
+
+### Коммит (inner repo Develop/)
+- Ветка `s8r/bug-23-interpreter`, SHA `ab8002d` (amend поверх `8cf54e7`), base `6d7c2b8`
+
+---
+
+## 2026-06-10 — BUG-23 Task 5: evaluator.evaluate + condition_compare
+
+### Что
+- Создан `app/strategy/evaluator.py` — единственная точка истины для принятия торгового решения:
+  - `evaluate(ir, candles) → 'buy' | 'sell' | 'hold'` — решение по последней свече.
+  - `_series(ref, candles)` — диспетчер индикаторных серий для всех 8 видов индикаторов.
+  - `_pi / _pf` — helper'ы безопасного извлечения int/float из `dict[str, object]` (решение аналогично `_to_float` из ir.py — pyright-clean без дополнительных cast'ов).
+  - `_eval_condition` — полный диспетчер: `compare`, `in_zone`, `and`, `or`, `not`; `crossover` — заглушка `return False` (Task 7).
+  - `_apply_op` — 6 операторов сравнения: `> < >= <= == !=`.
+
+### TDD (Red-Green)
+- RED: `ModuleNotFoundError: No module named 'app.strategy.evaluator'` — подтверждён.
+- GREEN: **4/4** новых теста — все пройдены (`compare buy`, `compare false→hold`, `warmup→hold`, `empty→hold`).
+- Полный прогон `tests/unit/test_strategy/` — **220/220** пройдены, регрессий нет.
+- **`pyright app/strategy/evaluator.py` — 0 errors, 0 warnings, 0 informations** (CLI, подтверждено).
+
+### Pyright-чистка
+- Первичный вариант давал 18 `reportArgumentType`: `params.get(...)` возвращает `object | T`, `int(object)` не принимается. Добавлены `_pi` / `_pf` с isinstance-narrowing.
+- `volume()` возвращает `list[float]`, не `list[float | None]`: исправлено через явное `list[float | None] = list(...)`.
+
+### Code review (Critical + Minor)
+- **Critical:** пустой `logic_and` без под-условий давал `all([]) == True` → ложный buy/sell, когда пользователь бросил блок `logic_and` без детей. Исправлено: `return bool(cond.children) and all(...)`. Добавлен регресс-тест `test_empty_logic_and_emits_hold` (5-й тест).
+- **Minor:** убран неиспользуемый `parse_blocks` из импорта `from app.strategy.ir import ...` (оставлены `StrategyIR, Condition, IndicatorRef` — нужны в аннотациях, `# noqa: F401` сохранён).
+- После фиксов: `tests/unit/test_strategy/` — **221/221** passed; pyright `app/strategy/evaluator.py` — 0 errors.
+
+### Файлы
+- `Develop/backend/app/strategy/evaluator.py` — создан
+- `Develop/backend/tests/unit/test_strategy/test_evaluator.py` — создан (5 тестов)
+
+### Коммит (inner repo Develop/)
+- Ветка `s8r/bug-23-interpreter`, SHA `6d7c2b8` (amend поверх `0b31e31`), base `0c352be`.
+
+---
+
+## 2026-06-10 — BUG-23 Task 4: StrategyIR + parse_blocks (нормализация формата Blockly)
+
+### Что
+- Создан новый модуль `app/strategy/ir.py` с тремя датаклассами и публичным парсером:
+  - `IndicatorRef(id, kind, params)` — ссылка на индикатор.
+  - `Condition(kind, left, op, right_value, right_ind, value_ind, zmin, zmax, cross_dir, cross_left, cross_right, children)` — нормализованное условие.
+  - `StrategyIR(entry, entry_direction, exit, indicators)` — корневой IR, потребляется эвалюатором (Task 5).
+  - `parse_blocks(blocks_json: dict | str) -> StrategyIR` — принимает Blockly workspace (dict или JSON-строку), обходит цепочку `next` и рекурсивно разбирает условия.
+- Поддерживаемые типы блоков: `signal_entry`, `signal_exit`, `condition_compare` (индикатор vs число и индикатор vs индикатор), `condition_in_zone`, `condition_crossover`, `logic_and`, `logic_or`, `logic_not` + все 8 индикаторных типов из `_IND_MAP`.
+- Все поля читаются через явные isinstance-проверки (pyright-clean: нет `dict | None` без narrowing).
+
+### TDD (Red-Green)
+- RED: `ModuleNotFoundError: No module named 'app.strategy.ir'` — подтверждён.
+- GREEN: **11/11** тестов — все пройдены (`test_ir.py`: базовые entry/exit, ind-vs-ind, crossover, logic_and, logic_not, indicators_dict + 3 edge-кейса).
+- Полный прогон `tests/unit/test_strategy/` — **216/216** пройдены, регрессий нет.
+
+### Code review follow-up
+- Исходное «pyright-clean» было неверным: pyright давал 3 `reportArgumentType` (`float(object)` на THRESHOLD/MIN/MAX). Добавлен helper `_to_float(v, default)` (безопасное приведение int|float|str → float), которым заменены все `float(...)` call-site'ы.
+- Чистка I-1 в `_ind_from_block`: убрано двойное `str(btype) if ... else ""` → `btype_str` + `_IND_MAP.get(btype_str, btype_str)`.
+- Удалён неиспользуемый `import pytest` из теста.
+- Добавлены 3 edge-теста: `parse_blocks({})` без краша; `condition_compare` без `LEFT` → `left is None`; `condition_in_zone` со строковыми `MIN`/`MAX` (`"30"`/`"70"`) → `zmin/zmax == 30.0/70.0` (ветка строк `_to_float`).
+- **`pyright app/strategy/ir.py` — 0 errors, 0 warnings, 0 informations** (подтверждено CLI).
+
+### Файлы
+- `Develop/backend/app/strategy/ir.py` — создан (новый модуль) + `_to_float`, чистка I-1
+- `Develop/backend/tests/unit/test_strategy/test_ir.py` — создан (11 тестов)
+
+### Коммит (inner repo Develop/)
+- Ветка `s8r/bug-23-interpreter`, amend поверх `4023b4c`, base `e1603c2`. Новый SHA — см. отчёт.
+
+---
+
+## 2026-06-10 — BUG-23 Task 3: MACD/Bollinger/ATR/Stochastic/Volume в indicators.py
+
+### Что
+- Добавлены 5 новых индикаторов в `app/strategy/indicators.py`:
+  - `macd(data, fast=12, slow=26, signal=9)` → `{"macd","signal","hist"}` — паритет rel=1e-6 vs `bt.indicators.MACD`.
+  - `bollinger(data, period=20, dev=2.0)` → `{"mid","top","bot"}` — SMA mid + population stddev; паритет rel=1e-6 vs `bt.indicators.BollingerBands`.
+  - `atr(highs, lows, closes, period=14)` → series — TrueRange (max(h,prev_c)−min(l,prev_c)) + Wilder SMMA; паритет rel=1e-6 vs `bt.indicators.ATR`.
+  - `stochastic(highs, lows, closes, k_period=14, d_period=3)` → `{"k","d"}` — raw %K + SMA %D; паритет rel=1e-3 vs `bt.indicators.StochasticFast` (фактически 0).
+  - `volume(vols)` → series — float-cast объёмов.
+- **Конвенция Stochastic:** `bt.indicators.Stochastic` (slow) применяет дополнительную SMA к raw-%K (percK_slow = SMA(raw_k, period_dfast)), что принципиально меняет семантику. Функция реализует StochasticFast. Это задокументировано в шапке модуля, тестах и docstring.
+- Расширен helper в тестах: добавлен `_run_bt_multiline` / `_MultiLineStrategy` для multi-output индикаторов.
+
+### TDD (Red-Green)
+- RED: `AttributeError: module 'app.strategy.indicators' has no attribute 'macd'` — подтверждён.
+- GREEN: **45/45** тестов — все пройдены (26 новых тестов для 5 новых индикаторов).
+- `py_compile app/strategy/indicators.py` — OK.
+
+### Файлы
+- `Develop/backend/app/strategy/indicators.py` — добавлены `macd`, `bollinger`, `atr`, `stochastic`, `volume`, вспомогательные `_stddev_pop`, `_true_range`; обновлена шапка модуля
+- `Develop/backend/tests/unit/test_strategy/test_indicators.py` — добавлены `TestMACD`, `TestBollinger`, `TestATR`, `TestStochastic`, `TestVolume`; расширен helper `_run_bt_multiline`
+
+### Коммит (inner repo Develop/)
+- Ветка `s8r/bug-23-interpreter`, SHA `8b53923`
+
+---
+
+## 2026-06-10 — BUG-23 Task 2: RSI (Wilder/SMMA) в indicators.py
+
+### Что
+- Добавлена функция `rsi(data, period)` в `app/strategy/indicators.py`.
+- Реализует RSI со сглаживанием Уайлдера (SMMA), совместимый с `bt.indicators.RSI` (числовой паритет rel=1e-9; фактически совпадает побитово, rel diff = 0.0).
+- Seed: простое среднее первых `period` дельт (data[1]..data[period]); далее SMMA: `avg = (avg*(period-1) + new) / period`.
+- Возвращает `list[float | None]`, длина = len(data), первые `period` элементов — None (прогрев).
+
+### TDD (Red-Green)
+- RED: `AttributeError: module 'app.strategy.indicators' has no attribute 'rsi'` — подтверждён.
+- GREEN: **19/19** тестов — все пройдены, включая `test_rsi_matches_backtrader_wilder` (rel=1e-9).
+- `py_compile app/strategy/indicators.py` — OK.
+
+### Code-review follow-up (M1)
+- Допуск паритета приведён к единообразию с SMA/EMA: тест и docstring `rel=1e-6` → `rel=1e-9` (RSI совпадает с backtrader побитово, занижать точность не нужно).
+- Шапка модуля переформулирована: утверждение о паритете `rel=1e-9` теперь явно покрывает все три индикатора (SMA/EMA/RSI).
+- M2–M4 (доп. тесты seed/строго-убывающая серия, переименование `ag/al`) — отложены по решению заказчика.
+
+### Файлы
+- `Develop/backend/app/strategy/indicators.py` — добавлена функция `rsi`
+- `Develop/backend/tests/unit/test_strategy/test_indicators.py` — добавлен `TestRSI` (6 тестов)
+
+### Коммит
+Ветка `s8r/bug-23-interpreter`, SHA см. в отчёте (commit --amend после code-review M1).
+
+---
+
 ## 2026-06-05 — S8R Acceptance-fix BUG-22: блочная стратегия в live/sandbox НИКОГДА не открывала сделку — невалидные Python-имена из Blockly block_id (`S8R-ACCEPTANCE-FIX-BUG-22`)
 
 ### Контекст
