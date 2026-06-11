@@ -10,6 +10,18 @@
 
 ---
 
+## 2026-06-11 — Telegram-спам demo-бэктеста + диагностика авто-restore сессий
+
+- **Симптом (заказчик):** (1) после тестовых прогонов все торговые сессии «остановлены»; (2) регулярный Telegram «Бэктест завершён · SBER · 1h · 0 сделок» приходит sergopipo.
+- **Диагностика #2 (Telegram):** из dev-БД — все 19 таких уведомлений это `backtest_completed` для **backtest id=2** (demo-стратегия «Тестовая» sergopipo, v79, 0 сделок), `related_entity_id=2`, `channels_sent=in_app,telegram` (реальный Telegram). Бэктест #2 пере-прогоняется **in-place** (`started_at`=10 апр, `completed_at` обновляется), кластерами по дням S8R-работы. Корень: dev-бэкенд подключён к РЕАЛЬНОМУ Telegram-боту, а `NotificationService.dispatch_external` не имел dev/prod-гейта → любой бэктест против живого dev-бэкенда (e2e `reuseExistingServer:true`, ручные прогоны под sergopipo) слал реальный Telegram. `scheduler`/`startup`/`trading`/`recovery` бэктест НЕ запускают — `_run_backtest_task` только в `backtest/router.py` (HTTP), т.е. триггер внешний.
+- **Фикс #2 (TDD) — `app/notification/service.py` `dispatch_external`:** при `DEV_MODE=true` внешняя доставка (telegram/email) **полностью подавляется**, остаётся только in-app. Тест: `test_notification_service.py::TestDispatchExternal::test_dispatch_external_suppressed_in_dev_mode` (RED: `['telegram']`; GREEN: `[]`). ⚠️ **Требуется действие заказчика:** добавить `DEV_MODE=true` в `Develop/backend/.env` (сейчас False; `.env` мне править нельзя). В production `DEV_MODE=false` → доставка как прежде.
+- **Диагностика #1 (сессии):** артефакт dev-режима `uvicorn --reload` — правка backend `.py` (BUG-24/25) перезапускает worker-подпроцесс, in-memory runtime сессий обнуляется. shutdown помечает активные сессии `suspended` (`runtime.py:1074`), startup `restore_all` конвертит `suspended→active` (`runtime.py:473-484`, main.py запрашивает `active/paused/suspended`). Сессия #6 и старые остались `suspended` — по средовой причине (rapid --reload / sandbox-старт требует брокера), НЕ из-за бага.
+- **Фикс #1 (регресс-тест) — `tests/test_trading/test_runtime_recovery.py`:** `test_suspended_session_restored_to_active` — фиксирует `restore_all`: `suspended→active` в БД + listener запущен. **Тест проходит** → механизм авто-restore корректен (защищён от будущих поломок). Спекулятивно править критический trading-путь без воспроизведённого бага не стал.
+- **Тесты:** notification 147 passed; trading recovery+runtime 23 passed; py_compile OK. Прод-код #1 не менялся (механизм уже верен).
+- **Результат:** Telegram-спам устранён (после установки `DEV_MODE=true` в dev). Авто-restore верифицирован тестом. Сессии заказчика сейчас `suspended` — поднимутся при чистом рестарте бэкенда (или вручную по запросу).
+
+---
+
 ## 2026-06-11 — Фиксы приёмки (в текущем спринте): BUG-24, BUG-25 (SP-B), доводки гейта BUG-23
 
 - **Что:** реализованы 4 фикса по итогам приёмки (все по TDD Red→GREEN, в рамках Sprint 8 Review — НЕ S9). Код-ревью изменений: **APPROVED**. Полный backend pytest: **1806 passed, 1 xfailed, 0 failed** (было 1801 → +5 новых тестов).
