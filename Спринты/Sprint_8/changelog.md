@@ -10,6 +10,16 @@
 
 ---
 
+## 2026-06-25 — S8R Acceptance-fix BUG-31: единый кодоген стратегий через StrategyIR (`S8R-ACCEPTANCE-UNIFIED-CODEGEN`)
+
+- **Что:** настоящий корень бага «от ДС» (был частично прикрыт гейтом BUG-30) + доводка застрявших бэктестов (BUG-29). Подробности — `Sprint_8_Review/acceptance_checklist.md` (BUG-31). Подход — **Вариант 2 «единый кодоген»**, утверждён заказчиком; brainstorm → план → TDD.
+  - **Проблема B (рассинхрон кода↔блоков):** backtrader-код строила ОТДЕЛЬНАЯ цепочка (фронт Blockly-генераторы → flatten → `CodeGenerator`), терявшая Stochastic из-за рассинхрона регистра имён (`STOCHASTIC`↔`Stochastic`) и не вставлявшая `buy` → 0 сделок, parity `count_mismatch`. Перегенерация давала тот же сломанный код (v96==v97). Фикс: один источник правды — блоки → `parse_blocks` → `StrategyIR` → `ir_to_backtrader_code` (тот же IR кормит интерпретатор/parity). Stochastic → `StochasticFast` (паритет %K). IR расширен на SL/TP/position_size/time_filter. parity-shadow дополнен warmup/тайм-фильтром/SL-TP → совпадение по построению.
+  - **Проблема A (Лукойл «вечно в ожидании»):** финальная запись результата (equity 5 МБ) + IMOEX-бенчмарк упали «database is locked» (busy_timeout не покрывает снапшот-конфликт), статус ошибки тоже не записался → backtest застрял. Фикс: реконсиляция осиротевших на старте (починила backtest #45/job dcb008) + `persist_with_retry` (rollback+retry) + retry терминального статуса job + прорежение equity_curve до 2000 точек.
+- **Файлы:** `backend/app/strategy/ir_codegen.py` (новый), `ir.py`, `strategy/router.py`, `backtest/parity.py`, `service.py`, `jobs.py`, `common/database.py`, `main.py`, `frontend/src/pages/StrategyEditPage.tsx`; тесты `test_ir.py`, `test_ir_codegen.py`, `test_ir_codegen_parity.py`, `test_db_resilience.py`, `test_jobs.py`, `test_strategy_router.py`; `stack_gotchas/gotcha-35-*` + INDEX.
+- **Результат:** backend **1856 passed, 1 xfailed, coverage ≥80, ruff ✓**; фронт **626 passed, tsc ✓**. parity backtrader⇄интерпретатор: RSI/Stochastic/SL-TP/тайм-фильтр совпадают (Stochastic был ДО фикса принципиально нерешаем). Develop ветка `s8r/bug-31-unified-codegen` (commit acdd5c3). Существующие stale-версии (v96/v97) заказчик перегенерирует в UI.
+
+---
+
 ## 2026-06-11 — Telegram-спам demo-бэктеста + диагностика авто-restore сессий
 
 - **Симптом (заказчик):** (1) после тестовых прогонов все торговые сессии «остановлены»; (2) регулярный Telegram «Бэктест завершён · SBER · 1h · 0 сделок» приходит sergopipo.
