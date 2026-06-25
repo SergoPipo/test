@@ -14,6 +14,7 @@
 | 003 | Корректный T+1 расчёт | Средний | Текущая реализация упрощена: единая дата блокировки, нет фоновой разблокировки, не учитывается торговый календарь MOEX | [003_t1_settlement_improvement.md](003_t1_settlement_improvement.md) |
 | 004 | Стриминг свечей в реальном времени | Высокий | График не показывает текущую формирующуюся свечу — T-Invest и MOEX ISS отдают только завершённые. Нужен gRPC стриминг + WebSocket | [004_realtime_candle_streaming.md](004_realtime_candle_streaming.md) |
 | 005 | Real-time обновление торговых сессий | Средний | Карточки торговых сессий обновляются polling-ом (10 сек). Нужна WS-подписка на `trades:{session_id}` для мгновенного обновления позиций, сделок, P&L | [005_realtime_trading_session_updates.md](005_realtime_trading_session_updates.md) |
+| 006 | Расширение конструктора стратегий | Высокий | В Blockly нельзя сослаться на цену, разделить полосы BB/линии MACD/Stoch, привязать стоп к ATR, вести трейлинг, фильтровать по старшему ТФ. Расчётное ядро уже готово — узкое место в UI→IR→evaluator. 4 фазы. Трейлинг-стоп перенесён сюда из 001 | [006_strategy_builder_enhancements.md](006_strategy_builder_enhancements.md) |
 
 ---
 
