@@ -10,6 +10,23 @@
 
 ---
 
+## 2026-06-26 — BUG-31 ревью: строгий parity-гейт по классу расхождений + 12 доводок
+
+- **Запрос:** заказчик попросил исправить все 12 находок code-review доводок BUG-31 (предыдущие записи 2026-06-26). Реализованы по TDD, на ветке Develop `s8r/bug-31-unified-codegen` (коммит `e4aad3d`).
+- **🔴 #1 — гейт делит расхождения на КЛАССЫ (`app/backtest/parity.py::compare_signals`):** `SIGNAL` (`direction`/`entry_bar` — некорректная трансляция логики, ровно класс BUG-23) → **СТРОГО**: любое такое расхождение блокирует live, допуск к ним НЕ применяется. `EXEC` (`exit_bar`/`count_mismatch` — slippage/SL-TP/лотность) → под допуском. **Корень находки:** прежний единый допуск 3% гладил ВСЕ расхождения, включая `direction` → до 3% настоящих сигнальных багов молча проходили в live с зелёным бейджем. Новые поля ответа `signal_divergences`/`exec_divergences`.
+- **🟡 #9 — единый источник лотности (`app/strategy/sizing.py`, new):** `percent_lot_size(cash, pct, price)` + канон `PERCENT_LOT_EXPR`. Генерируемый backtrader-код (`ir_codegen._gen_next`) выводится из канона (строка побитово прежняя), `parity._affordable` и `router._position_size_warning` зовут helper. Формула жила в 3 местах — рассинхрон вернул бы BUG-31. Pin-тест `test_generated_expr_matches_helper_formula` от дрейфа.
+- **🟡 #3 — допуск `max(1, round(3%×N))` вместо `int(...)`:** низкочастотные стратегии (N<17) больше не блокируются единичным slippage-артефактом (`int(3%×5)=0` → блок; теперь floor=1).
+- **🟡 #2 — running-cash (`parity.interpreter_trades`):** капитал стартует с `initial_capital`, сдвигается реализованным P&L + комиссией обеих ног (как backtrader `get_cash()`); affordability — от текущего капитала, не статичного. Параметр `commission_pct` прокинут из `service._run_parity_check`.
+- **🟡 #4 — снято бакетингом #1:** в бюджет допуска попадает ≤1 расхождение на сделку (только `exit_bar`); раньше одна сделка могла дать до 3 (direction+entry+exit).
+- **🟢 #7 — forced-close выровнен с движком:** тень фиксирует выход открытой позиции на баре `n-2` (а не `n-1`) — backtrader `WrappedStrategy.next` закрывает на предпоследнем баре, ордер исполняется на открытии последнего. Off-by-one убран. (Находка sweep «backtrader не фиксирует открытую сделку» — неточна: фиксирует.)
+- **🟢 #6 — инвариант `match_window`:** тест-замок, что сделки, разнесённые на 2 бара (минимум по построению вход→выход≥+1→ре-вход≥+1), сопоставляются 1:1, не склеиваясь.
+- **🟢 #5/#8/#10/#11/#12:** `_position_size_warning` оговаривает, что 0 сделок может быть и из-за несработавшего условия входа; `not min_price` → явная проверка (#5). runtime-код собирается 1× на запуск (валидатор+stale+enqueue) во всех 3 хендлерах — было 3× (#10). `tolerance_pct`/floor → именованные константы `_PARITY_TOLERANCE_PCT/_FLOOR` (#11). UI `ParityBadge` показывает реальный бар/направление (`d.backtrader`/`d.interpreter`) вместо порядкового `index`; заголовок «расхождений: N» вместо ложного «на N барах» (#8). falsy-zero чистка; дубль `_fmt_money` опровергнут — общего форматтера в backend нет (#12).
+- **Файлы:** `Develop/backend/app/strategy/sizing.py` (new), `ir_codegen.py`, `app/backtest/parity.py`, `service.py`, `router.py`, `frontend/.../ParityBadge.tsx` + 4 теста (`test_sizing.py` new, `test_parity.py`, `ResultsPanel.parity.test.tsx`).
+- **Тесты:** backend **1890 passed, 1 xfailed** (было 1878 → +12); frontend **631 passed**; `ruff` + `tsc --noEmit` чисто.
+- **⚠️ Продуктовое решение к сведению заказчика:** гейт теперь СТРОГ к `direction`/`entry_bar` и допускает до 3% (но ≥1) расхождений `exit_bar`/`count_mismatch`. Если по дорогой бумаге с высоким slippage останется exec-остаток > допуска — гейт честно флагует (нужен override+audit), но сигналы при этом совпадают.
+
+---
+
 ## 2026-06-26 — BUG-31 parity-slippage: моделирование slippage в тени + допуск 3%
 
 - **Запрос:** заказчик пересоздал стратегию как **v8 (версия 100, размер позиции 1%→3%)**, прогнал бэктесты — теперь со сделками, но каждый показывал расхождения (T id 51: 27, LKOH id 52: 14). Вопрос: откуда и насколько критично.
