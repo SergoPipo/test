@@ -4,6 +4,8 @@
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
 > Последнее обновление: 2026-05-14 (Sprint_8_Review в процессе. BUG-1 обнаружен в ходе приёмки: sandbox/real торговля не реализована в `engine.process_signal` (lethal). Открыта Sprint 8 W7 = `S8R-W7-SANDBOX-FLOW` hotfix в s8/sprint-8 ветке. Acceptance Сценарий 2 (live торговля) пока blocked).
+>
+> **2026-07-06 — Полное код-ревью всей кодовой базы + исправление всех 7 критических (P0).** Многоагентный аудит (~344 находки): `Спринты/Code_Review_Full_2026-07/` (отчёт, бэклог, верификация, TDD-задачи P0/P1). Все 7 critical (C1–C7: webhook fail-open, IDOR сессий, дефолтные ключи, cookie Secure, утёкший секрет, close_all_positions, реверс-сплит) исправлены test-first (Opus 4.8), `/code-review` по trading пройден, смёржено в `s8r/bug-31-unified-codegen` и запушено (`1107ec3`). Детали: `Code_Review_Full_2026-07/P0_FIXES_LOG.md`. **Осталось:** ручная ротация webhook-секрета + чистка git-истории (C5); P1 (68 High) развёрнуты в TDD-задачи, ещё не исправлены.
 
 ---
 
