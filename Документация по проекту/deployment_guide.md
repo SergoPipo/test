@@ -59,9 +59,11 @@ git clone <REPO_URL> moex-terminal && cd moex-terminal
 ### 3.2 Production `.env`
 
 ```bash
-cd Develop/backend
-cp .env.example .env.production
-# Откройте `.env.production` и заполните:
+cd Develop
+# Шаблон .env.example лежит в корне Develop/; docker-compose (env_file)
+# читает production-конфиг из backend/.env.production — туда и копируем.
+cp .env.example backend/.env.production
+# Откройте `backend/.env.production` и заполните:
 ```
 
 | Переменная | Назначение | Как получить |
