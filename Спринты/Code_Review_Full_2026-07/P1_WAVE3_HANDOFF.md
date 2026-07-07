@@ -15,7 +15,7 @@
 
 | Ветка | Пункты (строки) | Примечания |
 |---|---|---|
-| `fix/fe-security` | CFG-FE-01 (401), CFG-FE-02 (407), FE-STOR-12 (413), FE-STOR-13 (419) | **⚠️ КРУПНЫЙ, cross-cutting.** CFG-FE-01 (токены из localStorage → HttpOnly cookie) требует СОГЛАСОВАННЫХ правок backend (выдача cookie в be-auth). Связан с backlog `P1W2-REFRESH-GRACE`. **Рекомендую brainstorm + отдельное согласование scope перед кодом** — возможно, координированный backend+frontend фикс, а не чисто фронт. CFG-FE-02 (токен в WS query-string) — можно закрыть nginx-стороной (`access_log off` для `/ws/`) как переходный минимум. |
+| `fix/fe-security` | CFG-FE-02 (407), FE-STOR-12 (413), FE-STOR-13 (419) | **CFG-FE-01 ВЫНЕСЕН** из Волны 3 в отдельную координированную auth-мини-волну (backend+frontend) — см. `P1_AUTH_HARDENING_HANDOFF.md`. В Волне 3 CFG-FE-01 **не делать**. Остаётся: CFG-FE-02 (токен в WS query-string) — закрыть nginx-стороной (`access_log off` для `/ws/`) как переходный минимум либо subprotocol/handshake; FE-STOR-12/13 (утечка токенов в логи/хранение). |
 | `fix/fe-network` | FE-NET-01 (434), FE-NET-02 (440), FE-NET-03 (446), FE-NET-04 (452) | FE-NET-04 — **подтверждён реальным** (WS фонового бэктеста без reconnect; соседний `useBacktestJobWS` с backoff — мёртвый код). Fix: добавить exponential backoff в `onclose` или переиспользовать `useBacktestJobWS`. |
 | `fix/fe-charts` | FE-CHART-01 (467), FE-CHART-02 (473), FE-CHART-03 (479) | FE-CHART-01 — **подтверждён реальным** (VlinePrimitive рисует по unix-времени, а intraday-серия в sequential mode индексирована 0..N → линия не видна/не там). Fix: `pointToCoord({t, logical})` вместо `timeToX`, сохранять `logical` при создании. **context7 по lightweight-charts.** |
 | `fix/fe-backtest-ui` | FE-BTST-13 (494), FE-BTST-14 (500), FE-BTST-15 (506), FE-BTST-16 (512) | FE-BTST-15 — **подтверждён реальным** (rAF-цикл перерисовки зон крутится на скрытом компоненте, `display:none`). Fix: стоп rAF при `document.hidden`/`IntersectionObserver` или перерисовка по `subscribeVisibleTimeRangeChange`. |
@@ -65,18 +65,21 @@ diagnostic после каждого Edit; context7 по lightweight-charts/Bloc
 Спеки — в tdd_tasks_P1.md (frontend с строки 394; номера строк в таблице HANDOFF).
 
 ВНИМАНИЕ:
-- fix/fe-security (CFG-FE-01 — токены localStorage→HttpOnly cookie) КРУПНЫЙ и
-  cross-cutting: требует согласованных backend-правок (be-auth) и связан с backlog
-  P1W2-REFRESH-GRACE. Сделай brainstorm и согласуй scope со мной ПЕРЕД кодом
-  (возможно, координированный backend+frontend фикс).
+- CFG-FE-01 (токены localStorage→HttpOnly cookie) в Волну 3 НЕ входит — вынесен в
+  отдельную координированную auth-мини-волну (backend+frontend), см.
+  P1_AUTH_HARDENING_HANDOFF.md. В fix/fe-security делать только CFG-FE-02 +
+  FE-STOR-12/13.
 - FE-TRAD-02 — это backend (trading/schemas.py), не фронт.
 - ❓-пункты FE-NET-04/FE-CHART-01/FE-BTST-15 — подтверждены реальными, делать по
   спеке (быстрая sanity-проверка сценария перед фиксом).
 
+Ветвление: база — p1/wave2-backend (@9cd44aa). Пушить в отдельную ветку
+p1/wave3-frontend, remote s8r/bug-31 НЕ трогать. Итоговое сведение всех p1/wave*
+в s8r/bug-31 — одним PR/мержем с финальным ревью ПОСЛЕ всех волн (решение заказчика).
+
 После сборки веток: мерж + гейт (pnpm test + npx tsc --noEmit 0 errors + Playwright)
 + /code-review по fe-security (хранение токенов) и fe-core-refactor + фиксы находок +
-push в отдельную ветку p1/wave3-frontend. Модель Opus 4.8, коммиты/push — только по
-подтверждению, ветки для обоих репо (Develop + Test) спрашивать отдельно. Если увидишь
-приближение лимита сессии — остановись и спроси. После Волны 3 — свести P1-итог
-(Волны 1+2+3) и предложить мерж p1/wave*-веток в s8r/bug-31.
+push в p1/wave3-frontend. Модель Opus 4.8, коммиты/push — только по подтверждению,
+ветки для обоих репо (Develop + Test) спрашивать отдельно. Если увидишь приближение
+лимита сессии — остановись и спроси.
 ```
