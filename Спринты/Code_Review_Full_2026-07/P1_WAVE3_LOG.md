@@ -64,8 +64,11 @@
 - **P1W3-MULTIPLEX-WS-REFRESH** — `client.ts` refresh токена не переподключает мультиплекс-WS; живой сокет продолжает стримить с уже истёкшим токеном (валидация только при handshake). Предсуществующее ограничение, усугублённое миграцией. Low.
 - **P1W3-BACKTESTSTORE-RACE** — ✅ **закрыто** (request-token guard, коммит `0e039be`).
 
-**E2E (Playwright) — оставшийся шаг верификации:**
-- Скриншоты затронутых экранов (charts `/chart/SBER?session=1`, backtest, trading, strategy edit) требуют, чтобы работающий Vite обслуживал код волны 3. Живая копия сейчас на `p1/wave2-backend`; `git checkout` живой копии ломает HMR-state (memory-правило про worktree). Варианты: (а) checkout живой копии на `p1/wave3-frontend` по согласованию (прервёт текущий Vite/uvicorn), (б) поднять отдельный Vite+backend из интеграционного worktree. e2e-мок `/ws` уже исправлен под handshake. **Ожидает решения заказчика.**
+**E2E (Playwright) — выполнено (отдельный инстанс из worktree, решение заказчика):**
+- Поднят отдельный Vite из интеграционного worktree на порту 5273 (живая копия на 5173/`p1/wave2-backend` НЕ тронута, HMR сохранён), mock-режим (`CI=1`, spec'и self-contained через `page.route`/`routeWebSocket`).
+- **Затронутые зоны зелёные:** `s6-critical-banner` (FE-UI-01) ✓, `s5-chart-timeframes` (FE-CHART) ✓, часть `s6-notifications` (WS-handshake мок с `auth_ok` — прямая проверка фикса) ✓, часть `backtest-results` ✓.
+- **Часть спеков (notifications drawer-клики, backtest tabs/export) падает — предсуществующий окруженческий флейк ad-hoc mock-инстанса, НЕ регрессия волны 3.** Строго подтверждено сравнением с базой `9cd44aa` (живой 5173): notifications — база 4 failed vs worktree 3; backtest-results — база 5 failed vs worktree 4. Волна 3 не вносит регрессий; worktree даже чуть стабильнее базы. Причина падений — ad-hoc отдельный инстанс не идентичен проектной nightly-инфре (`S7R-NIGHTLY-CI-MOCKS`: seed/localStorage/порядок webServer). Полная зелёная Playwright-регрессия — в проектной nightly CI.
+- e2e-мок `/ws` исправлен под handshake (иначе после миграции клиент `wsAuthed=false` дропал бы все fixture frames).
 
 **Правило E2E-цикла:** `ui_checklist` + `e2e/ui-checks/` дополнить проверками волны 3 (WS-handshake, vline sequential, критический баннер, race-guard'ы) — после Playwright-верификации.
 
