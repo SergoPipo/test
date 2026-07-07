@@ -67,7 +67,7 @@ cp .env.example .env.production
 | Переменная | Назначение | Как получить |
 |------------|-----------|--------------|
 | `SECRET_KEY` | JWT signing key | `python3 -c "import secrets; print(secrets.token_hex(32))"` (≥ 32 байт, см. Security audit §S8R-SEC-JWT) |
-| `MASTER_KEY` | AES-256-GCM master key для шифрования broker token'ов | `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `ENCRYPTION_KEY` | AES-256-GCM master key для шифрования broker token'ов (**≥ 32 байт**, не начинается с `dev-`) | `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `TINVEST_TOKEN` | Production T-Invest API token | Личный кабинет T-Invest |
 | `DATABASE_URL` | SQLite путь внутри контейнера | `sqlite+aiosqlite:////app/data/app.sqlite` (НЕ менять) |
 | `TZ` | Часовой пояс торговли | `Europe/Moscow` (НЕ менять) |
@@ -314,6 +314,8 @@ docker compose logs backend | tail -100
 | `alembic.util.exc.CommandError: Can't locate revision` | свежий clone, не применились миграции | `docker compose exec backend alembic upgrade head` |
 | `ModuleNotFoundError: tinkoff` | T-Invest SDK не установился в builder | очистить `docker compose build --no-cache backend` |
 | `KeyError: 'SECRET_KEY'` | `.env.production` не загружен | проверить `docker compose config` (секция env_file) |
+| контейнер backend сразу выходит (`exit 1`), в логах `check_production_env`: обнаружены dev-значения / нет `.env.production` | preflight-проверка секретов (CFG-BE-02): `.env.production` отсутствует, либо `SECRET_KEY`/`ENCRYPTION_KEY` начинаются с `dev-` или короче 32 байт | заполнить `.env.production` реальными значениями (см. §3.2); ключи ≥ 32 байт, без префикса `dev-` |
+| `ValueError: master_key too short` при первом брокер/AI-запросе | `ENCRYPTION_KEY` короче 32 байт (production, DEBUG=false — fail-fast) | сгенерировать новый ключ ≥ 32 байт; ⚠️ смена ключа делает уже сохранённые broker-токены нерасшифровываемыми — пользователям нужно заново ввести токены |
 
 ### 9.2 Cloudflare Tunnel 502 Bad Gateway
 
