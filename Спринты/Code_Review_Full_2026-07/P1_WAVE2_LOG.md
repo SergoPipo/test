@@ -42,13 +42,24 @@
 ### auth (BE-AUTH-03) — `ee98302`, 1 дефект
 - **неатомарная reuse-detection:** отдельный SELECT + SELECT-then-INSERT с await'ами между ними → два конкурентных `/refresh` с одним токеном давали `IntegrityError→500` или оба получали свежие пары (обход reuse). `_revoke_jti` → атомарный `INSERT ... ON CONFLICT(jti) DO NOTHING` с возвратом факта вставки; `inserted=False` → «Token отозван».
 
-### notification (BE-NOTIF-02) — `b5ddb76`, 2 дефекта
+### notification (BE-NOTIF-02) — `fa8d887`, 2 дефекта
 - **потеря уведомлений при shutdown:** `wait_for_pending_dispatch` был построен, но не подключён к lifespan → уведомления «система остановлена»/critical, ушедшие в fire-and-forget задачу, уничтожались при закрытии loop. Подключено в `main.py` lifespan (timeout=15с) после `session_runtime.shutdown()`.
 - **shield-сирота при двойной отмене:** незащищённый `await handler` в ветке `except CancelledError` → повторная отмена осиротеляла handler посреди транзакции. Handler регистрируется в реестре фоновых задач (strong ref + done-callback), дожидается в `wait_for_pending_dispatch`.
 
+### broker / мультиплексор (BE-BROK-01) — `9cd44aa`, 5 дефектов (до-верификация критпути)
+
+Мультиплексор `/code-review` не успел довести (верификаторы упёрлись в лимит субагентов) — до-верифицирован отдельно. Все 5 кандидатов угла E подтверждены, исправлены test-first:
+- **K1 двойной SUBSCRIBE при reconnect:** `_resubscribe_all` клал SUBSCRIBE в очередь, а начальный цикл нового `_request_iterator` подписывал те же пары повторно → 2×N `SubscribeCandlesRequest` на reconnect (риск 429/RESOURCE_EXHAUSTED при reconnect-шторме, профиль Gotcha 4). → `_drain_command_queue` (только дренаж; переподписку делает initial-loop итератора).
+- **K2 reconnect без backoff при graceful close:** `StopAsyncIteration → break` уводил во внешний while без `_sleep` и без сброса `_connected` — плотный цикл connect→subscribe→close при штатном закрытии сервером. → тот же backoff, что на error-пути.
+- **K3 «отравленная пара»:** `subscribe()` принимал любой int; невалидный interval уронил бы `SubscriptionInterval(...)` в `_request_iterator` → вечный crash-reconnect всего стрима. → валидация interval (1..13) на входе.
+- **K4 interval-less broadcast (self-inflicted BE-BROK-01):** fallback при candle без interval рассылал свечу ВСЕМ interval-подписчикам figi — реинтродукция cross-interval утечки. → свеча дропается с warning.
+- **K5 воскрешение остановленного mux:** адаптер кэшировал ссылку и не проверял `is_stopped` → `subscribe()` воскрешал остановленный mux вне singleton-реестра (ghost-стрим / 2 стрима на токен). → property `is_stopped` + re-check в `_ensure_multiplexer`.
+
+**Новая Stack Gotcha (для ARCH):** `TIMEFRAME_MAP` хранит значения `CandleInterval`, но для всех 13 таймфреймов они численно СОВПАДАЮТ с `SubscriptionInterval` (расходятся только секундные 14-16, которых в карте нет) — маршрутизация корректна, но это совпадение value-space двух разных enum, не тождество. Комментарий в `_dispatch_candle` («тот же enum») формально неточен.
+
 ## Верификация (объединённый результат)
 
-- **pytest** (весь backend): **2124 passed, 2 xfailed, 0 failed** (было 2114 @ мерж — +10 review-тестов).
+- **pytest** (весь backend): **2129 passed, 2 xfailed, 0 failed** (было 2114 @ мерж — +15 review-тестов: 10 по CB/AI/auth/notification + 5 по мультиплексору).
 - **pyright** по всем изменённым prod-файлам: **0 новых ошибок** (50 предсуществующих — openpyxl None-cell в tax, RestrictedPython-dict в sandbox, типизация SDK-сообщений в claude/openai провайдерах; счётчики идентичны baseline @ `a936e1a`).
 
 ## Осталось / заведено в backlog
@@ -60,7 +71,7 @@
 - **P1W2-SSRF-PINNING** — полный anti-DNS-rebinding через кастомный httpx transport с IP-pinning (K2 из ревью). `follow_redirects=False` закрыл redirect-вектор (K1); rebinding TOCTOU остаётся (валидатор и httpx резолвят независимо). Средне-крупная задача (кастомный transport + тесты).
 - **P1W2-REFRESH-GRACE (Волна 3, фронт+бэк)** — ротация refresh без grace-окна + два независимых refresh-клиента фронта (`client.ts` + `aiStreamClient`) + отсутствие cross-tab sync → принудительный разлогин при двух вкладках/активном AI-чате (~каждые 30 мин). Атомарность отзыва (бэк) уже сделана; нужен grace-период на бэке + общий single-flight и storage-listener на фронте.
 - **P1W2-AI-LOCAL-PROVIDER-UPGRADE** — существующие локальные AI-провайдеры (Ollama `http://localhost:11434`) из БД ломаются после апгрейда при дефолтном `AI_ALLOW_PRIVATE_PROVIDER_URLS=false` (теперь 422 с подсказкой вместо 500). Нужна data-migration/уведомление или флаг в setup.
-- **P1W2-MULTIPLEXER-RECONNECT** (broker критпуть, НЕ до-верифицировано — верификаторы упёрлись в лимит субагентов) — кандидаты угла E: двойной SUBSCRIBE каждой пары при reconnect (initial-loop + очередь `_resubscribe_all`), мгновенный reconnect без backoff при graceful close сервера, «отравленная пара» (невалидный interval роняет весь стрим), interval-less broadcast fallback, воскрешение остановленного mux через `subscribe()`. Требуют отдельной верификации + фикса (профиль Gotcha 4/BUG-27).
+- ~~**P1W2-MULTIPLEXER-RECONNECT**~~ — ✅ **закрыто** (до-верифицировано + исправлено, коммит `9cd44aa`, см. раздел «broker / мультиплексор» выше). Остаётся отдельный **P1W2-MULTIPLEXER-STOPPED-CANDLE-RACE** (низкий приоритет): доставка in-flight свечи после `unsubscribe` во время `await callback` — snapshot listeners не видит завершившийся конкурентный unsubscribe (кандидат угла E, не критичный).
 - **P1W2-SANDBOX-EPHEMERAL-PROC** — жёсткий лимит памяти (`setrlimit`) + отдельная rate-limit категория для `/sandbox` (BE-RT-02 опциональная часть). Крупный рефактор, ~1–2 дня.
 - **P1W2-BE-MISC-19-TAX-CATEGORIES** — раздельная налоговая база по share/bond/etf реализована по спеке, но по ст. 214.1 НК обращающиеся на MOEX бумаги всех трёх типов в общем случае входят в ОДНУ сальдируемую базу; правильная граница — «обращающиеся vs необращающиеся/ПФИ». Требует решения заказчика.
 
