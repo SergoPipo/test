@@ -21,11 +21,15 @@
 
 ---
 
-## Текущая фаза: **Sprint 8 W7 (lethal hotfix) — sandbox/real torgovlya implementation**
+## Текущая фаза: **P1 hardening завершён; открыт только BE-TRAD-06 + сведение волн**
+
+> ⚠️ 2026-07-09: секция ниже актуализирована — W7 давно сделан (был устаревший статус «стартует 2026-05-14»).
 
 - **Sprint 8 (код, основной scope)** — 🏁 закрыт окончательно 2026-05-13 (W3+8.R+W4+W5+W5-hotfix). M4 Production-ready тэг по факту относится только к paper-trading.
-- **Sprint_8_Review** — 🔄 в процессе (старт 2026-05-14). Прохождение `Sprint_8_Review/acceptance_checklist.md` приостановлено на Сценарии 2 до завершения W7.
-- **Sprint 8 W7 (НОВАЯ волна, реакция на BUG-1)** — 🔄 стартует 2026-05-14. `S8R-W7-SANDBOX-FLOW`, ~2.5–3 дня, вариант A (immediate sandbox response + OrdersStream WS для real + recovery orphan pending). Карточка: `Sprint_8_Review/backlog.md` секция "Sprint 8 W7". Tag `v1.0-m4-production-ready` будет переместить после успешного live-теста sandbox.
+- **Sprint 8 W7 (BUG-1, sandbox/real trading)** — ✅ **сделан** (коммит `fbd616b` + доработки `s8-w8a…w8h`, Вариант C++ синхронный fill). 33 юнит-теста зелёные. **Живо переподтверждён 2026-07-09** (свежий реальный sandbox buy→sell на текущем коде: filled + `broker_order_id`, per-share цена через GetOrderState). ⚠️ При этом выявлено: T-Invest пересоздал sandbox-аккаунт — старый `account_id` в БД протух, обновлён на живой `f925da17…` (иначе новая sandbox-сессия падала «Account not found»). См. backlog `S8R-SANDBOX-ACCOUNT-STALE-REOPEN`.
+- **Sprint_8_Review** — 🔄 приёмка: `acceptance_checklist.md` **Сценарий 2 (live) — все пункты `[x]`** (W7 больше не блокирует).
+- **P1 код-ревью (P0+P1)** — ✅ волны 1/2/3 + auth-hardening + E2E готовы, PR #7 (`p1/auth-hardening` → `s8r/bug-31-unified-codegen`) открыт, ждёт мержа. Единственная открытая P1-находка — **BE-TRAD-06** (денежный учёт paper-портфеля в 3 точках + T+1 + CB-drawdown), есть xfail-репро `test_paper_accounting_be_trad_06.py`, брейнсторм → в отдельной сессии.
+- **Sprint 9 "Перевод в продуктив"** — ⬜ запланирован, стартует после Gate Sprint_8_Review. Содержание: фаза 9.1 = Mac mini Docker prod (18080) + LAN + backup; фаза 9.2 = canary (18081) + автоматизация.
 - **Sprint 9 "Перевод в продуктив"** — ⬜ запланирован, стартует после Gate Sprint_8_Review (PASS / PASS WITH NOTES, который зависит от W7). Содержание: фаза 9.1 = Mac mini Docker prod (18080) + LAN + backup; фаза 9.2 = canary (18081) + автоматизация. Спека-черновик: `docs/superpowers/specs/2026-05-13-s8-w6-design.md`.
 
 ## Прогресс по спринтам

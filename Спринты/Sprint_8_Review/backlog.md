@@ -4,6 +4,17 @@
 
 ---
 
+## S8R-SANDBOX-ACCOUNT-STALE-REOPEN — ⬜ OPEN (обнаружено 2026-07-09) — авто-переоткрытие протухшего sandbox-аккаунта
+
+- **Источник:** живая переверификация W7 (2026-07-09). При попытке sandbox-операции T-Invest вернул `NOT_FOUND '50004' Account not found` для `account_id`, записанного в `broker_accounts` (id=3).
+- **Причина:** T-Invest-**sandbox-аккаунты эфемерны** — периодически удаляются/пересоздаются на стороне брокера. Токен при этом остаётся валиден, но `get_accounts()` возвращает **новый** `account_id` (в нашем кейсе старый `8de9093c-…` → новый `f925da17-…`). В БД хранился старый → **любая новая sandbox-сессия падала «Account not found»** (не баг W7 — операционный дрейф).
+- **Ручной обход (сделан 2026-07-09):** `broker_accounts.id=3.account_id` обновлён на живой `f925da17-…` напрямую в БД + `sandbox_pay_in` для фондирования. Sandbox-торговля снова рабочая.
+- **Fix (предложение):** при `NOT_FOUND` на sandbox-операции (connect/get_balance/place_order) — адаптер/сервис детектит исчезнувший аккаунт → `get_accounts()`; если есть активный sandbox-аккаунт, обновить `broker_accounts.account_id` (+опц. `open_sandbox_account`, если нет ни одного) и повторить. UI: кнопка «Пересоздать sandbox-счёт» на /broker-settings.
+- **Severity:** medium (sandbox-only; real/paper не затронуты). Не блокер сдачи.
+- **Файлы (ориентир):** `app/broker/tinvest/adapter.py` (get_accounts/open_sandbox_account), `app/trading/engine.py` (`_resolve_broker_adapter` — точка `NOT_FOUND`), `app/broker/service.py`, `components/settings/BrokerSettings`.
+
+---
+
 ## S7R-PDF-EXPORT-INSTALL — ✅ DONE 2026-04-26 — установлен в среде разработки, проверен endpoint
 
 - **Источник:** Sprint 7, BACK2 W2, задача 7.3 (CSV/PDF export бэктеста).
