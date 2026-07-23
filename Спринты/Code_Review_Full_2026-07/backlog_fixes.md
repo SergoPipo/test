@@ -125,7 +125,7 @@
 | BE-TRAD-03 | `backend/app/trading/engine.py:904` | 🐛 баг | ✅ | Exit-сигнал стратегии никогда не закрывает позицию — блокируется `max_concurrent_positions` |
 | BE-TRAD-04 | `backend/app/trading/runtime.py:246` | 🐛 баг | ✅ | Каждое intra-bar обновление свечи обрабатывается как закрытый бар |
 | BE-TRAD-05 | `backend/app/trading/runtime.py:1010` | 🐛 баг | ✅ | Сверка позиций real-сессий при рестарте не выполняется никогда |
-| BE-TRAD-06 | `backend/app/trading/paper_engine.py:172` | 🐛 баг | ✅ | Paper-портфель: покупка не списывает средства, ручное закрытие зачисляет выручку «из воздуха» |
+| BE-TRAD-06 | `backend/app/trading/paper_engine.py:172` | 🐛 баг | ✅ | Paper-портфель: покупка не списывает средства, ручное закрытие зачисляет выручку «из воздуха» — **✅ РЕШЕНО 2026-07-22 (Model A, ветка `p1/be-trad-06`, коммиты `035f817..50f3335`; `BE_TRAD_06_LOG.md`)** |
 | BE-TRAD-07 | `backend/app/trading/engine.py:1465` | 🐛 баг | ✅ | Ручное закрытие pending-сделки (entry_price=NULL) записывает фиктивную прибыль |
 | BE-TRAD-08 | `backend/app/trading/engine.py:929` | качест | ✅ | Нарушение границ: FIGI для sandbox/real-сделок берётся из paper-заглушки |
 | BE-TRAD-09 | `backend/app/trading/engine.py:938` | качест | ✅ | Проглоченный `except Exception` при получении lot_size — молчаливый fallback на 1 даёт 10-кратный оверсайз позиции |
