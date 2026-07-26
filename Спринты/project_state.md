@@ -23,14 +23,14 @@
 
 ---
 
-## Текущая фаза: **P1 hardening завершён (P0+P1); открытых P1 не осталось — BE-TRAD-06 закрыт, осталось сведение волн в `s8r/bug-31`**
+## Текущая фаза: **P1 hardening завершён (P0+P1), сведён в `s8r/bug-31`; открытых P1 нет. Далее — Gate Sprint_8_Review → Sprint 9**
 
 > ⚠️ 2026-07-09: секция ниже актуализирована — W7 давно сделан (был устаревший статус «стартует 2026-05-14»).
 
 - **Sprint 8 (код, основной scope)** — 🏁 закрыт окончательно 2026-05-13 (W3+8.R+W4+W5+W5-hotfix). M4 Production-ready тэг по факту относится только к paper-trading.
 - **Sprint 8 W7 (BUG-1, sandbox/real trading)** — ✅ **сделан** (коммит `fbd616b` + доработки `s8-w8a…w8h`, Вариант C++ синхронный fill). 33 юнит-теста зелёные. **Живо переподтверждён 2026-07-09** (свежий реальный sandbox buy→sell на текущем коде: filled + `broker_order_id`, per-share цена через GetOrderState). ⚠️ При этом выявлено: T-Invest пересоздал sandbox-аккаунт — старый `account_id` в БД протух, обновлён на живой `f925da17…` (иначе новая sandbox-сессия падала «Account not found»). См. backlog `S8R-SANDBOX-ACCOUNT-STALE-REOPEN`.
 - **Sprint_8_Review** — 🔄 приёмка: `acceptance_checklist.md` **Сценарий 2 (live) — все пункты `[x]`** (W7 больше не блокирует).
-- **P1 код-ревью (P0+P1)** — ✅ волны 1/2/3 + auth-hardening + E2E + **BE-TRAD-06** готовы. PR #7 (`p1/auth-hardening` → `s8r/bug-31-unified-codegen`) **смёржен** (`94721e8`). **BE-TRAD-06 закрыт** (2026-07-22, ветка `p1/be-trad-06`, коммиты `035f817..50f3335`, гейт 327 passed / 0 failed, финальное ревью 0 Critical) — см. `Code_Review_Full_2026-07/BE_TRAD_06_LOG.md`. **Открытых P1-находок не осталось.** Осталось: сведение `p1/be-trad-06` (и при необходимости `p1/wave3-frontend`) в `s8r/bug-31` + деплой-нюанс BE-TRAD-06 (drain paper-сессий, `deployment_guide.md` §7).
+- **P1 код-ревью (P0+P1)** — ✅ волны 1/2/3 + auth-hardening + E2E + **BE-TRAD-06** готовы. PR #7 (`p1/auth-hardening` → `s8r/bug-31-unified-codegen`) **смёржен** (`94721e8`). **BE-TRAD-06 закрыт** (2026-07-22, ветка `p1/be-trad-06`, коммиты `035f817..50f3335`, гейт 327 passed / 0 failed, финальное ревью 0 Critical) — см. `Code_Review_Full_2026-07/BE_TRAD_06_LOG.md`. **Открытых P1-находок не осталось.** **Сведение в `s8r/bug-31-unified-codegen` ЗАВЕРШЕНО** (PR #7 `94721e8` + PR #8 `eba6427`; wave2/wave3 уже содержались) — s8r содержит все P0/P1 + BE-TRAD-06. Осталось только: деплой-нюанс BE-TRAD-06 (разовый drain paper-сессий при выкатке, `deployment_guide.md` §7).
 - **Sprint 9 "Перевод в продуктив"** — ⬜ запланирован, стартует после Gate Sprint_8_Review. Содержание: фаза 9.1 = Mac mini Docker prod (18080) + LAN + backup; фаза 9.2 = canary (18081) + автоматизация.
 - **Sprint 9 "Перевод в продуктив"** — ⬜ запланирован, стартует после Gate Sprint_8_Review (PASS / PASS WITH NOTES, который зависит от W7). Содержание: фаза 9.1 = Mac mini Docker prod (18080) + LAN + backup; фаза 9.2 = canary (18081) + автоматизация. Спека-черновик: `docs/superpowers/specs/2026-05-13-s8-w6-design.md`.
 
