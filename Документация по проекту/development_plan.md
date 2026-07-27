@@ -631,7 +631,7 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 | Performance: Telegram webhook p95 | s | < 3 | `@timed_event("telegram.handle")` |
 | Security audit | high findings open | 0 | **0** ✅ (3 high закрыты в W2) |
 | Deployment | артефакты | Docker compose + launchd + Cloudflare Tunnel | ✅ deployment_guide.md, launchd plist, Dockerfile×2, nginx.conf, docker-compose.yml |
-| Документация | актуальность | ФТ + ТЗ + deploy guide + dev plan + project_state | ✅ ФТ v2.5, ТЗ v1.5, deployment_guide v1.0, dev plan v2.1 |
+| Документация | актуальность | ФТ + ТЗ + deploy guide + dev plan + project_state | ✅ ФТ v2.8, ТЗ v1.6 (синхронизированы 2026-07-27 по итогам код-ревью P0–P1 и Sprint_8_Review), deployment_guide v1.0, dev plan v2.1 |
 
 8.R ARCH-вердикт оформляется отдельно в `Спринты/Sprint_8_Review/code_review_s8.md` (по образцу Sprint_6_Review).
 

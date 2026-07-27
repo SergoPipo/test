@@ -370,8 +370,8 @@ docker compose up -d frontend
 
 - [README.md](../README.md) — общее описание проекта и Quick Start (для разработки).
 - [Develop/INSTALL.md](../Develop/INSTALL.md) — локальная установка для разработки (без Docker).
-- [functional_requirements.md](functional_requirements.md) v2.5 — функциональные требования (M4 production-ready).
-- [technical_specification.md](technical_specification.md) v1.5 — техническое задание (раздел «Deployment Architecture»).
+- [functional_requirements.md](functional_requirements.md) v2.8 — функциональные требования (M4 production-ready).
+- [technical_specification.md](technical_specification.md) v1.6 — техническое задание (раздел «Deployment Architecture»; §8 — Alembic и `DATABASE_URL`, drain paper-сессий при выкатке).
 - [development_plan.md](development_plan.md) — дорожная карта (M4 ✅, Sprint_8_Review план).
 - [Sprint_8/arch_design_s8.md](../Спринты/Sprint_8/arch_design_s8.md) §7 — Deployment target rationale.
 - [Sprint_8/security_audit_s8.md](../Спринты/Sprint_8/security_audit_s8.md) — security findings и принятые fix'ы.
