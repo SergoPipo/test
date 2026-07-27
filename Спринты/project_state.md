@@ -3,7 +3,9 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-07-22 (BE-TRAD-06 закрыт — последняя открытая P1 полного код-ревью 2026-07: денежный учёт paper-портфеля Model A в 3 точках + T+1 + CB-drawdown. PR #7 смёржен. Хронология — в блоке записей ниже.)
+> Последнее обновление: 2026-07-26 (**Gate Sprint_8_Review пройден — вердикт PASS WITH NOTES**. Приёмка завершена на `s8r/bug-31-unified-codegen`; в цикле исправлены BUG-32/FIND-06/FIND-01. Следующий шаг — старт Sprint 9 «Перевод в продуктив».)
+>
+> **2026-07-26 — Gate Sprint_8_Review: ✅ PASS WITH NOTES.** Финальный прогон приёмки выполнен на изолированном стенде (worktree `s8r-acceptance` от `s8r/bug-31-unified-codegen`, копия рабочей БД `acceptance.db`, backend :8100 / frontend :5173, T-Invest-стримы придержаны). UI-секции **S8.1–S8.12 + S8.17 пройдены через Playwright** со скриншотами-evidence (`Sprint_8_Review/screenshots/`, 39 файлов): админ-меню и отказ non-admin, Dash-метрики, error-boundary (сбой сымитирован перехватом сети — соседние блоки живы, «Повторить» лечит), статус-бейджи + переходы + фильтр «Пауза», 4 виджета дашборда, Telegram-мастер (+ **реальная доставка**: `telegram_notification_sent`, `email_notification_sent`), 17 типов уведомлений, рисование на графике (клик–клик, drag, persist после F5, удаление, внутридневные ТФ), AI-описание → блоки на **живом** `deepseek-v4-pro`, панель фоновых бэктестов (лимит 3 + автосворачивание), вкладки результата бэктеста (зоны, `TradeDetailsPanel`, запуск торговли). Ф2b: WS-рукопожатие `connected → auth_ok → subscribed` (cookie-auth Model A) и арифметика BE-TRAD-06 на UI (позиция −273,50 ₽ = (269,14−296,49)×10, −9,22% поз. / −0,27% кап.). **Исправлено test-first прямо в цикле приёмки:** **BUG-32** (HIGH — AI-помощник был полностью нерабочим: SSE-клиент `aiStreamClient.ts` ходил голым `fetch` без `X-CSRF-Token` → 403 «CSRF token отсутствует»; тот же класс, что BUG-21, но другой клиент), **FIND-06** (MEDIUM — `alembic/env.py` игнорировал `DATABASE_URL` и катил миграции в БД из `alembic.ini`; всплыло как 500 `ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint` при сохранении настроек уведомлений — прямая грабля деплоя Sprint 9), **FIND-01** (LOW — «Запустить торговлю из бэктеста» не переносила капитал). **Гейт после фиксов: backend 2186 passed / 1 xfailed / 0 failed, frontend vitest 765 passed, tsc 0, eslint 0, bandit 0 medium+.** Открытых багов severity ≥ medium нет. Остаток (S9-backlog, косметика): пустой SPA-роут `/admin/metrics`, сырое «Request failed with status code 503» при залповом запуске 4 фоновых бэктестов (+ осиротевшие `queued`-строки), молчаливое игнорирование ввода AI на несохранённой стратегии, англоязычные предупреждения парсера блоков, Email-тумблер для событий вне `EMAIL_ALLOWED_EVENTS`, автозаполнение менеджером паролей в поле «Bot token». Требует прод-условий: живые p50/p95 «сигнал→ордер» под нагрузкой и визуальный resize фигуры на графике. Детали: `Sprint_8_Review/acceptance_checklist.md` (вердикт внизу) + `Sprint_8_Review/s8r_acceptance_run_2026-07-26.md`.
 >
 > **2026-07-06 — Полное код-ревью всей кодовой базы + исправление всех 7 критических (P0).** Многоагентный аудит (~344 находки): `Спринты/Code_Review_Full_2026-07/` (отчёт, бэклог, верификация, TDD-задачи P0/P1). Все 7 critical (C1–C7: webhook fail-open, IDOR сессий, дефолтные ключи, cookie Secure, утёкший секрет, close_all_positions, реверс-сплит) исправлены test-first (Opus 4.8), `/code-review` по trading пройден, смёржено в `s8r/bug-31-unified-codegen` и запушено (`1107ec3`). Детали: `Code_Review_Full_2026-07/P0_FIXES_LOG.md`. C5-чистка git-истории пропущена по решению заказчика (репозиторий приватный).
 >
@@ -23,13 +25,13 @@
 
 ---
 
-## Текущая фаза: **P1 hardening завершён (P0+P1), сведён в `s8r/bug-31`; открытых P1 нет. Далее — Gate Sprint_8_Review → Sprint 9**
+## Текущая фаза: **Gate Sprint_8_Review пройден (PASS WITH NOTES, 2026-07-26) → старт Sprint 9 «Перевод в продуктив»**
 
 > ⚠️ 2026-07-09: секция ниже актуализирована — W7 давно сделан (был устаревший статус «стартует 2026-05-14»).
 
 - **Sprint 8 (код, основной scope)** — 🏁 закрыт окончательно 2026-05-13 (W3+8.R+W4+W5+W5-hotfix). M4 Production-ready тэг по факту относится только к paper-trading.
 - **Sprint 8 W7 (BUG-1, sandbox/real trading)** — ✅ **сделан** (коммит `fbd616b` + доработки `s8-w8a…w8h`, Вариант C++ синхронный fill). 33 юнит-теста зелёные. **Живо переподтверждён 2026-07-09** (свежий реальный sandbox buy→sell на текущем коде: filled + `broker_order_id`, per-share цена через GetOrderState). ⚠️ При этом выявлено: T-Invest пересоздал sandbox-аккаунт — старый `account_id` в БД протух, обновлён на живой `f925da17…` (иначе новая sandbox-сессия падала «Account not found»). См. backlog `S8R-SANDBOX-ACCOUNT-STALE-REOPEN`.
-- **Sprint_8_Review** — 🔄 приёмка: `acceptance_checklist.md` **Сценарий 2 (live) — все пункты `[x]`** (W7 больше не блокирует).
+- **Sprint_8_Review** — ✅ **ЗАКРЫТ 2026-07-26, вердикт PASS WITH NOTES.** Все шаги чеклиста закрыты (102 `[x]`, 2 `[-]` — resize фигуры глазами и живые p95 «сигнал→ордер», оба требуют прод-условий). В цикле приёмки исправлены BUG-32 (HIGH), FIND-06 (MEDIUM), FIND-01 (LOW). Гейт: backend 2186 / frontend 765 / tsc 0 / eslint 0 / bandit 0 medium+. Артефакты: `Sprint_8_Review/acceptance_checklist.md`, `s8r_acceptance_run_2026-07-26.md`, `screenshots/`.
 - **P1 код-ревью (P0+P1)** — ✅ волны 1/2/3 + auth-hardening + E2E + **BE-TRAD-06** готовы. PR #7 (`p1/auth-hardening` → `s8r/bug-31-unified-codegen`) **смёржен** (`94721e8`). **BE-TRAD-06 закрыт** (2026-07-22, ветка `p1/be-trad-06`, коммиты `035f817..50f3335`, гейт 327 passed / 0 failed, финальное ревью 0 Critical) — см. `Code_Review_Full_2026-07/BE_TRAD_06_LOG.md`. **Открытых P1-находок не осталось.** **Сведение в `s8r/bug-31-unified-codegen` ЗАВЕРШЕНО** (PR #7 `94721e8` + PR #8 `eba6427`; wave2/wave3 уже содержались) — s8r содержит все P0/P1 + BE-TRAD-06. Осталось только: деплой-нюанс BE-TRAD-06 (разовый drain paper-сессий при выкатке, `deployment_guide.md` §7).
 - **Sprint 9 "Перевод в продуктив"** — ⬜ запланирован, стартует после Gate Sprint_8_Review. Содержание: фаза 9.1 = Mac mini Docker prod (18080) + LAN + backup; фаза 9.2 = canary (18081) + автоматизация.
 - **Sprint 9 "Перевод в продуктив"** — ⬜ запланирован, стартует после Gate Sprint_8_Review (PASS / PASS WITH NOTES, который зависит от W7). Содержание: фаза 9.1 = Mac mini Docker prod (18080) + LAN + backup; фаза 9.2 = canary (18081) + автоматизация. Спека-черновик: `docs/superpowers/specs/2026-05-13-s8-w6-design.md`.
@@ -55,7 +57,14 @@
 ## Что делать дальше
 
 ```
-ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 8 — 🏁 ЗАКРЫТ (2026-05-13). M4 Production-ready достигнут.
+ТЕКУЩЕЕ ДЕЙСТВИЕ (2026-07-26): Gate Sprint_8_Review ПРОЙДЕН — PASS WITH NOTES.
+  Открытых блокеров нет. Следующий шаг — планирование и старт Sprint 9 «Перевод в продуктив»
+  (9.1 Mac mini Docker prod :18080 + LAN + backup; 9.2 canary :18081 + автоматизация).
+  Взять в Sprint 9 из приёмки: живые p50/p95 «сигнал→ордер» под нагрузкой, повтор S8.7
+  «реальная сделка → 3 канала» в торговые часы, S9-backlog косметики (6 пунктов),
+  разовый drain paper-сессий при выкатке (deployment_guide §7).
+
+ИСТОРИЯ: Sprint 8 — 🏁 ЗАКРЫТ (2026-05-13). M4 Production-ready достигнут.
 
   Sprint 8 закрыт за 2 рабочих дня (12-13.05) в формате 4-волнового спринта:
     W0 ARCH-design (1 день) → W1 (4 потока) → W2 (4 потока + QA) → W3 (4 потока) → 8.R.

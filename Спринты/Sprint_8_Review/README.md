@@ -1,5 +1,19 @@
 # Финальное ревью после Sprint 8
 
+> ## ✅ ЗАКРЫТО 2026-07-26 — вердикт **PASS WITH NOTES**
+>
+> Приёмка выполнена на консолидированной ветке `s8r/bug-31-unified-codegen` (P0 + P1 + auth-hardening + BE-TRAD-06), на изолированном стенде (worktree `s8r-acceptance`, копия рабочей БД, backend :8100 / frontend :5173). UI-секции S8.1–S8.12 пройдены через Playwright со скриншотами-evidence.
+>
+> **Технический гейт (после фиксов цикла):** backend pytest **2186 passed, 1 xfailed, 0 failed** · frontend vitest **765 passed** · `tsc --noEmit` **0** · `eslint --max-warnings 0` **0** · bandit **0 medium+**.
+>
+> **Исправлено прямо в цикле приёмки (TDD):** `BUG-32` (HIGH — AI-помощник не работал: SSE-клиент не слал `X-CSRF-Token` → 403), `FIND-06` (MEDIUM — Alembic игнорировал `DATABASE_URL`, миграции уходили не в ту БД; грабля деплоя S9), `FIND-01` (LOW — капитал не переносился из бэктеста в модалку запуска торговли).
+>
+> **Открытых багов severity ≥ medium нет.** Остаток — 6 косметических замечаний (кандидаты в S9-backlog) и 2 пункта, требующие живых условий: resize фигуры на графике глазами и живые p50/p95 «сигнал→ордер» под нагрузкой.
+>
+> Артефакты: [acceptance_checklist.md](acceptance_checklist.md) (вердикт внизу) · [s8r_acceptance_run_2026-07-26.md](s8r_acceptance_run_2026-07-26.md) (лог прогона) · [acceptance_execution_plan.md](acceptance_execution_plan.md) (план) · [screenshots/](screenshots/) (evidence).
+>
+> **Следующий шаг:** старт **Sprint 9 «Перевод в продуктив»**.
+
 > **Milestone M4: Production-ready (по коду)**
 > Охватывает: Sprint 7 (Should-фичи + Полировка) + Sprint 8 (Стабилизация)
 >
