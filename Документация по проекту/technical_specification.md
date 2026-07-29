@@ -3,15 +3,16 @@
 # ТЕХНИЧЕСКОЕ ЗАДАНИЕ (ТЗ)
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия:** 1.7
-**Дата:** 2026-07-27
+**Версия:** 1.8
+**Дата:** 2026-07-28
 **Основание:** Функциональные требования v2.9 от 2026-07-27
-**Статус:** ✅ M4 Production-ready. Gate Sprint_8_Review пройден (PASS WITH NOTES), остаток приёмки (8 замечаний) закрыт. Актуализировано по итогам код-ревью P0–P1, финальной приёмки и цикла доведения.
+**Статус:** ✅ M4 Production-ready. Gate Sprint_8_Review пройден (PASS WITH NOTES), остаток приёмки (8 замечаний) и весь backlog доведения закрыты. Актуализировано по итогам код-ревью P0–P1, финальной приёмки и closeout-цикла S8R.
 
 ### История версий
 
 | Версия | Дата | Спринт | Ключевые изменения |
 |--------|------|--------|-------------------|
+| 1.8 | 2026-07-28 | Sprint_8_Review — closeout | §9 — контракт окружения backend-job в CI (`DEBUG=false` + не-дефолтные фиктивные `SECRET_KEY`/`ENCRYPTION_KEY`, чтобы гейт `check_production_secrets` продолжал работать); запрет `waitForLoadState('networkidle')` в E2E-спеках при живом WebSocket; требования к стенду `auth-hardening.spec.ts` (`PW_API_URL`/`PW_WS_URL`/`PW_ORIGIN`, `PW_ORIGIN` == `CORS_ORIGINS`, `LOGIN_RATE_LIMIT_PER_MINUTE` ≥ 10). Регресс-сверка схемы БД с `Base.metadata` на чистой установке (закрыт S8R-ALEMBIC-FRESH-DB-DRIFT: не хватало таблицы `user_ai_settings` и 8 колонок, login отдавал 500). Baseline: 2223 pytest / 832 vitest, E2E 163 passed одним прогоном, Stack Gotchas 46 → 47. |
 | 1.6 | 2026-07-27 | Code Review P0–P1 + S8R | §7 — auth Model A (3 HttpOnly-cookie, CSRF double-submit, WS cookie-auth на upgrade, single-flight refresh на `navigator.locks`) + правило «клиент мимо axios обязан слать `X-CSRF-Token`»; §3/§5 — `PaperPortfolioAccountant` как единая точка мутации денег paper-портфеля и инвариант `Δequity == trade.pnl`; §8 — Alembic обязан уважать `DATABASE_URL`, разовый drain paper-сессий при выкатке; §6 — контракт слоя разметки графика (`requestUpdate` в `attached()`, единая выборка фигуры под курсором); §9 — актуальные baseline-цифры тестов |
 | 1.5 | 2026-05-13 | S8 W3 | Добавлен §8.4 «Deployment Architecture (Mac mini + Docker)»; §7 расширен под admin role + security headers + ASGI mount auth; §9 — coverage gate 80% + bandit/safety CI gates; §4 — performance baseline числа из W2 |
 | 1.4 | 2026-04-26 | S7 R | Phase 1 feature-complete |
@@ -2587,6 +2588,24 @@ End users → Cloudflare edge (TLS termination, DDoS protection)
 - **Frontend:** Vitest + React Testing Library + MSW (Mock Service Worker)
 - **E2E:** Playwright
 - **CI:** GitHub Actions → lint (ruff + eslint) → type check (mypy + tsc) → unit tests → integration tests → E2E (при наличии)
+
+**Окружение backend-job в CI (S8R closeout, 2026-07-28).** `app/config.py` содержит валидатор `check_production_secrets`: при `DEBUG=False` значения `SECRET_KEY`/`ENCRYPTION_KEY`, начинающиеся с `dev-`, **жёстко** роняют приложение на импорте. В CI нет `.env`, поэтому job `backend` обязан задавать секреты сам — иначе `pytest` падает не на тестах, а на `import app.main` из `tests/conftest.py`.
+
+Контракт:
+
+| Переменная | Значение в CI | Почему так |
+|---|---|---|
+| `DEBUG` | `false` | Тесты идут в том же режиме, что и production-сборка: `CryptoService` в strict-режиме, auth-cookie с `Secure`. `DEBUG=true` заглушил бы гейт секретов целиком |
+| `SECRET_KEY` | не-дефолтное фиктивное значение | Гейт остаётся живым: возврат на `dev-*` снова уронит job |
+| `ENCRYPTION_KEY` | не-дефолтное фиктивное значение, **≥ 32 байт** | Требование `CryptoService` (AES-256-GCM через HKDF), проверяется в strict-режиме |
+
+Значения — публичные тестовые константы прямо в `ci.yml`. Реальные секреты в CI не заводятся, `.env` не коммитится.
+
+**E2E и `networkidle` (S8R closeout).** В спеках **запрещён** `page.waitForLoadState('networkidle')`: терминал держит постоянный WebSocket, сеть не «затихает», и длинный прогон встаёт дольше собственного `timeout` теста без единого `failed`. Ждать нужно конкретное условие — `expect(locator).toBeVisible()` или `waitForResponse`. Подробности — `Develop/stack_gotchas/gotcha-46-e2e-networkidle-and-vite-cache.md`.
+
+**Схема БД против моделей (S8R closeout).** Alembic-миграции обязаны полностью покрывать `Base.metadata`: проверка `tests/unit/test_migration.py::test_fresh_db_schema_matches_models` применяет миграции к пустой БД и сверяет **и таблицы, и колонки**. Сверка только по списку таблиц дефект не ловит — расходятся и колонки внутри существующих. Любая новая колонка/таблица в моделях без миграции ломает **чистую установку** (существующие стенды при этом работают, и дефект остаётся невидимым до развёртывания). Миграции, догоняющие drift, писать **идемпотентными** (добавлять объект только если его нет), иначе `upgrade head` упадёт на рабочих БД.
+
+**`auth-hardening.spec.ts`** работает против ЖИВОГО backend (cookie-flow не мокается) и требует отдельного стенда: адреса задаются через `PW_API_URL` / `PW_WS_URL` / `PW_ORIGIN`, значение `PW_ORIGIN` обязано совпадать с `CORS_ORIGINS` backend'а, а `LOGIN_RATE_LIMIT_PER_MINUTE` на стенде должен быть не ниже 10 (спека логинится в 6 тестах из 7, дефолт — 5).
 
 ### 9.5 Роль QA-инженера в процессе тестирования
 
