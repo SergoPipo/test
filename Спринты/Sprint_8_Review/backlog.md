@@ -176,7 +176,10 @@ timeout = clamp(⌈период / чанк(таймфрейм)⌉ × BACKTEST_DA
 
 | Что | Как | Результат |
 |---|---|---|
-| PR #10 `s8r/backlog-fixes-2026-07-27` → `s8r/bug-31-unified-codegen` | merge commit (решение заказчика) | ✅ смёржен, `cc04ef5`. Конфликтов не было: дерево `bug-31` после мержа **побайтово равно** дереву `backlog-fixes` |
+| PR #10 `s8r/backlog-fixes-2026-07-27` → `s8r/bug-31-unified-codegen` | merge commit | ✅ `cc04ef5`. Конфликтов не было: дерево `bug-31` после мержа **побайтово равно** дереву `backlog-fixes` |
+| PR #11 `s8r/sandbox-account-reopen` → `s8r/bug-31-unified-codegen` | merge commit | ✅ `3a57caf`. CI: backend 2246 passed / 1 xfailed, frontend 835/121, security-scan pass |
+| PR #12 `s8r/bug-31-unified-codegen` → `develop` | merge commit | ✅ `4c3678c`, **208 коммитов**. Конфликт в `s5-paper-trading.spec.ts` разрешён (см. ниже). CI зелёный, backend-job реально прогнал тесты — **2246 passed**, сверено с локальным прогоном |
+| `docs/backlog-006-strategy-builder` → `main` (репо документации) | merge commit `--no-ff` | ✅ `a4a7873`. **`main` разморожен**: стоял на `48f53f2` (2026-04-25, Sprint 7), теперь содержит всю документацию S8 и Sprint_8_Review. Конфликтов не было — `main` был прямым предком |
 
 **Сверка веток по remote-рефам вскрыла расхождение с исходной постановкой:**
 
