@@ -84,19 +84,27 @@
   Раздел «⬜ ОТКРЫТО» в Sprint_8_Review/backlog.md ПУСТ — закрыты и
   S8R-SANDBOX-ACCOUNT-STALE-REOPEN, и флейк test_order_passes_when_no_violations.
 
-  СМЁРЖЕНО:
+  ВСЕ ВЕТКИ СВЕДЕНЫ (2026-07-30):
     - PR #9  (s8r/acceptance-fixes-2026-07-26 → s8r/bug-31) — ранее.
     - PR #10 (s8r/backlog-fixes-2026-07-27  → s8r/bug-31) — merge commit cc04ef5.
+    - PR #11 (s8r/sandbox-account-reopen    → s8r/bug-31) — 3a57caf, CI 2246 passed.
+    - PR #12 (s8r/bug-31-unified-codegen    → develop)    — 4c3678c, CI 2246 passed.
+      208 коммитов; develop стоял на 21c3326 от 2026-05-18. Конфликт в
+      frontend/e2e/s5-paper-trading.spec.ts разрешён (версия S8R + комментарий
+      из PR #6). s8r/bug-31 сверх develop: 0 коммитов.
+    - Репо документации: main РАЗМОРОЖЕН — merge --no-ff a4a7873
+      (был 48f53f2 от 2026-04-25, Sprint 7). Актуальные доки теперь и в main.
     - p1/wave2-backend, p1/wave3-frontend, p1/auth-hardening, s8r/acceptance-fixes
-      сводить НЕ требуется: сверка показала, что все они уже прямые предки S8R-ветки.
+      сводить НЕ потребовалось: сверка показала, что все они уже прямые предки
+      S8R-ветки.
 
-  ОЖИДАЕТ РЕШЕНИЯ / ДЕЙСТВИЯ ЗАКАЗЧИКА:
-    - Коммит + PR ветки s8r/sandbox-account-reopen (sandbox-фикс, флейк CB, gotcha-49).
-      Изменения готовы и проверены, но НЕ закоммичены — ждут команды.
-    - Мерж s8r/bug-31-unified-codegen → develop. Согласован; конфликт в
-      frontend/e2e/s5-paper-trading.spec.ts разобран, разрешение показано.
-    - Мерж docs/backlog-006-strategy-builder → main через merge-commit (--no-ff).
-    - /code-review по продуктовому коду closeout (запускает заказчик).
+  ОЖИДАЕТ ДЕЙСТВИЯ ЗАКАЗЧИКА:
+    - /code-review по продуктовому коду closeout (запускает заказчик):
+      app/trading/ws_sessions.py, миграция d1e2f3a4b5c6, пин anyio==4.13.0.
+      Плюс новый код sandbox-фикса: app/broker/sandbox_recovery.py и точки
+      подключения в app/broker/service.py и app/trading/engine.py.
+    - Уборка worktree-каталогов оркестратора: s8r-sandbox, s8r-develop-merge
+      (обе ветки смёржены, содержимое в develop).
     - Старт Sprint 9 — НЕ стартовать (решение заказчика).
 
   ОСТАЁТСЯ ПРОВЕРИТЬ В ПРОДЕ (не задачи цикла, уже в backlog):
