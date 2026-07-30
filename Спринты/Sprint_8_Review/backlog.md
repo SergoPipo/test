@@ -215,6 +215,36 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 
 ---
 
+## Код-ревью sandbox-переоткрытия — 2026-07-30 (5 независимых ревьюеров)
+
+Ревью PR #11 по методике `/code-review`: пять параллельных агентов — соответствие CLAUDE.md, баги в диффе, git-история и прошлые сознательные решения, замечания прошлых PR и логов P1-ревью, директивы в комментариях кода. Каждая находка проверена по коду вручную.
+
+### ✅ Исправлено (PR #13) — три подтверждённых дефекта
+
+| # | Дефект | Почему это баг |
+|---|---|---|
+| **A** | Реконсиляция не переводила сделку в `status='closed'` | Выставлялись только `closed_at`/`exit_price`/`pnl`. Но `RiskMonitor.check_sl_tp` (`status.in_(["filled","pending"])`) и `CircuitBreakerEngine._force_close_open_positions` (`status == "filled"`) выбирают открытые позиции **по статусу, игнорируя `closed_at`** — сделка возвращалась к ним, проходила guard в `close_position` и получала выдуманный P&L по цене несуществующей у брокера позиции. Фикс не давал ровно того, ради чего вводился. Штатный путь (`RiskMonitor._apply_close`) всегда ставит `closed` |
+| **B** | Ручное переоткрытие маскировало сбой T-Invest под «счёт актуален» | `refresh_sandbox_account_id` возвращал `None` и когда счёт жив, и когда `get_accounts()` упал; различались проверкой `account.account_id is None`, практически никогда не истинной для существующей записи. Пользователь видел зелёное «Счёт актуален» после реального сетевого сбоя, а следующая операция снова падала `NOT_FOUND`. Введён явный `SandboxRecoveryOutcome` (`NOT_SANDBOX`/`UNAVAILABLE`/`UNCHANGED`/`REOPENED`), `UNAVAILABLE` → 502 |
+| **C** | Реконсиляция закрывала позиции только сессии-инициатора | `broker_account_id` — обычный FK без `UniqueConstraint`; несколько сессий штатно торгуют через один sandbox-счёт, а подмена `account_id` глобальна для записи `BrokerAccount`. Позиции соседних сессий оставались «открытыми» навсегда. Обрабатываются все сессии счёта; текущая сделка исключается по `in_flight_trade_id` |
+
+Попутно: `get_accounts()` обёрнут в `asyncio.wait_for(15 с)` — рекомендация прошлого ревью (`Code_Review_Full_2026-07` §11); вызов идёт из торгового хот-пути, своего таймаута у адаптера нет.
+
+**Почему дефект A прошёл первичную проверку:** тест проверял `closed_at is not None` и `pnl == 0.00`, но не `status`. Урок — при «закрытии» сущности проверять весь набор полей, которым оперируют потребители, а не только те, что выставляет сам фикс.
+
+**Гейты после фиксов:** pytest **2249 passed / 1 xfailed / 0 failed** (+3), vitest 835 / 121, tsc 0, ruff 0, mypy Success, bandit 0.
+
+### ⬜ Вынесено в backlog (реальны, но не блокеры)
+
+| Карточка | Severity | Суть |
+|---|---|---|
+| `S8R-SANDBOX-ACCOUNT-ID-COLLISION` | low | Один токен T-Invest может давать несколько `BrokerAccount`-записей. Если протухли обе, эвристика «первый active» присвоит обеим один и тот же `account_id` → две записи укажут на один реальный счёт. Sandbox-only, требует ≥2 sandbox-счетов |
+| `S8R-RECONCILE-DAILYSTAT-EVENT` | low | Реконсиляция закрывает сделки прямой записью полей, без `_update_daily_stat` и без `event_bus.publish`. `DailyStat.trades_closed` занизится, фронт узнает о закрытии только при перезагрузке. `realized_pnl` не искажается — P&L нулевой |
+| `S8R-DEPLOYMENT-GUIDE-MIGRATION-SYNC` | low | `Develop/CLAUDE.md` требует: «при изменении … alembic-миграций — синхронно обновить `deployment_guide.md` секции 3.3 или 7». Миграция `d1e2f3a4b5c6` чинила именно сценарий из гайда, но гайд не обновлён |
+| `S8R-BROKER-FACTORY-BYPASS` | low | `reopen_sandbox_account` — третье место в `broker/service.py` с прямым `TInvestAdapter(sandbox=True)` в обход `BrokerFactory` (рядом с `get_sandbox_balance` и `top_up_sandbox_to`). Повтор уже заведённого `BE-BROK-13` |
+| `S8R-WS-CLEANUP-TIMEOUT-SILENT` | low | В `ws_sessions.py` истечение `asyncio.wait(pending, timeout=5)` не логируется — недоотменённые задачи уйдут без диагностики |
+
+---
+
 ## Флейк `test_order_passes_when_no_violations` — ✅ FIXED 2026-07-29
 
 - **Причина (воспроизведена детерминированно).** `OrderManager.process_signal` зовёт `MarketDataService.ensure_lot_size_strict`, а тот при отсутствии свежего кэша инструмента идёт **в сеть**: T-Invest → MOEX ISS (`app/market_data/service.py`, `_resolve_lot_size`). В тестовой БД инструментов нет, поэтому каждый такой тест делал реальный сетевой запрос. Когда ISS подтормаживал, строгий резолв бросал `LotSizeUnavailableError`, Circuit Breaker блокировал сигнал (fail-closed по FIX-1), `process_signal` возвращал `None` → падал `assert result is not None`.
