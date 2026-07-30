@@ -3,7 +3,7 @@
 > Полный перечень всех 11 сервисов и их методов.
 > Источник: [developer.tbank.ru/invest/api](https://developer.tbank.ru/invest/api)
 >
-> Дата фиксации: 2026-03-26
+> Дата фиксации: 2026-03-26 | Раздел «Приложение: enum-значения» обновлён 2026-05-15 (W8i)
 
 ---
 
@@ -319,3 +319,76 @@ Real-time события исполнения торговых поручени�
 |-------|----------|
 | GetSignals | Получение торговых сигналов |
 | GetStrategies | Получение стратегий |
+
+---
+
+## Приложение: enum-значения protobuf (актуально 2026-05-15, после W8i)
+
+Источник цитат: [investAPI/src/docs/contracts/](https://github.com/RussianInvestments/investAPI/tree/main/src/docs/contracts) — официальные `.proto`-файлы.
+
+Внутренний маппинг в `app/broker/tinvest/mapper.py` сверен с этими enum'ами; регрессионный тест в `tests/unit/test_broker/test_mapper.py::TestProtoEnumAlignmentW8i` ловит будущий дрейф.
+
+### OrderExecutionReportStatus (orders.proto)
+
+⚠ **Критично**: значения сдвинуты относительно интуиции. Из-за неверного маппинга в коде Sprint 1–8 (W8i фикс) sandbox-сделки никогда не получали `entry_price` — T-Invest возвращал `FILL=1`, наш код интерпретировал как `"new"`.
+
+| int | proto | Наш `ORDER_STATUS_MAP` | simple-status (OrderResponse) |
+|-----|-------|------------------------|-------------------------------|
+| 0 | UNSPECIFIED | `"unspecified"` | `"placed"` (default) |
+| **1** | **FILL** *(Исполнена)* | **`"filled"`** | `"filled"` |
+| **2** | **REJECTED** | **`"rejected"`** | `"rejected"` |
+| **3** | **CANCELLED** | **`"cancelled"`** | `"rejected"` (по семантике «не исполнен») |
+| **4** | **NEW** *(в book'е)* | **`"new"`** | `"placed"` |
+| **5** | **PARTIALLYFILL** | **`"partially_filled"`** | `"partially_filled"` |
+
+### OrderType (orders.proto)
+
+| int | proto | Использование |
+|-----|-------|---------------|
+| 1 | ORDER_TYPE_LIMIT | `LiveTrade.order_type = "market"` всегда (S8 W7 — мы используем только market). Limit передаётся SDK-enum напрямую (без mapping). |
+| 2 | ORDER_TYPE_MARKET | то же |
+| 3 | ORDER_TYPE_BESTPRICE | не используется |
+
+### OrderDirection (orders.proto)
+
+| int | proto | Наш `direction` |
+|-----|-------|-----------------|
+| 1 | ORDER_DIRECTION_BUY | `"buy"` |
+| 2 | ORDER_DIRECTION_SELL | `"sell"` |
+
+### AccountStatus (users.proto)
+
+| int | proto | Наш `ACCOUNT_STATUS_MAP` |
+|-----|-------|--------------------------|
+| 0 | UNSPECIFIED | `"unspecified"` |
+| 1 | NEW | `"new"` |
+| 2 | OPEN | **`"active"`** (внутренний перевод S5) |
+| 3 | CLOSED | `"closed"` |
+| 4 | ALL | `"all"` (мета-значение для фильтров запросов) |
+
+### AccountType (users.proto)
+
+| int | proto | Наш `ACCOUNT_TYPE_MAP` |
+|-----|-------|------------------------|
+| 0 | UNSPECIFIED | `"unspecified"` |
+| 1 | TINKOFF | **`"broker"`** (внутренний перевод) |
+| 2 | TINKOFF_IIS | `"iis"` |
+| 3 | INVEST_BOX | `"invest_box"` |
+| 4 | INVEST_FUND | `"invest_fund"` |
+| 5 | DEBIT | `"debit"` (добавлено W8i) |
+| 6 | SAVING | `"saving"` (добавлено W8i) |
+
+### SecurityTradingStatus (common.proto)
+
+17 значений (0–16). Полный mapping в `TRADING_STATUS_MAP`. Используется для `InstrumentInfo.trading_status` в адаптере.
+
+Ключевые:
+- `0`: `unspecified`
+- `5`: `normal_trading` — нормальная торговая фаза (можно отправлять market)
+- `13`: `session_open` — старт сессии
+- `12`: `session_close` — конец сессии
+- `1`: `not_available_for_trading` — приостановка / выходной
+
+### OperationType / OperationState (operations.proto)
+
+Маппинг — **по имени enum** (не по int), поскольку значения могут отличаться между версиями SDK. См. `OPERATION_TYPE_NAME_MAP` и `OPERATION_STATE_NAME_MAP` в `app/broker/tinvest/mapper.py`. Используется в `OperationsService.GetOperations` для импорта истории операций (S5R.3, налоговый экспорт).

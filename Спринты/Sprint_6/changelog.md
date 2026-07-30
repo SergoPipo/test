@@ -692,12 +692,12 @@
 
 | Компонент | Статус | Скриншот |
 |-----------|--------|----------|
-| NotificationDrawer | ✅ OK | `s6r-notification-drawer.png` |
-| NotificationSettingsPage | ✅ OK | `s6r-notification-settings.png` |
-| Trading cards | ✅ OK | `s6r-trading-page.png` |
-| Лента уведомлений | ⚠️ WARNING | `s6r-notifications-page.png` |
-| AI-провайдеры | ✅ OK (после фиксов #1, #2) | `s6r-ai-settings.png` |
-| Chart trade markers | ✅ OK | `s6r-chart-markers.png` |
+| NotificationDrawer | ✅ OK | `../Sprint_6_Review/screenshots/s6r-notification-drawer.png` |
+| NotificationSettingsPage | ✅ OK | `../Sprint_6_Review/screenshots/s6r-notification-settings.png` |
+| Trading cards | ✅ OK | `../Sprint_6_Review/screenshots/s6r-trading-page.png` |
+| Лента уведомлений | ⚠️ WARNING | `../Sprint_6_Review/screenshots/s6r-notifications-page.png` |
+| AI-провайдеры | ✅ OK (после фиксов #1, #2) | `../Sprint_6_Review/screenshots/s6r-ai-settings.png` |
+| Chart trade markers | ✅ OK | `../Sprint_6_Review/screenshots/s6r-chart-markers.png` |
 
 **1 WARNING обнаружен визуально** — в Ленте уведомлений шаблон `{strategy_name}: {ticker}` не подставляется для уведомлений `session_stopped` от graceful shutdown. Добавлено в backlog #16, перенесено в Sprint 7.
 
@@ -707,7 +707,7 @@
 - `Develop/frontend/e2e/s4-review-full.spec.ts`, `s4-review.spec.ts`, `s5-paper-trading.spec.ts`, `s5r-backtest-launch-trading.spec.ts`, `s6-notifications.spec.ts`, `strategy.spec.ts`, `auth.spec.ts` (7 файлов — fixes тестов)
 - `Спринты/Sprint_6_Review/backlog.md` (добавлены #13-17)
 - `Спринты/Sprint_6_Review/code_review.md` (разделы «Визуальная верификация», «E2E регрессия», обновлён «Перенесено в S7»)
-- `s6r-*.png` (6 screenshot-артефактов в корне test-репо)
+- `Спринты/Sprint_6_Review/screenshots/s6r-*.png` (6 screenshot-артефактов; перенесены из корня в рамках уборки 2026-04-26)
 
 **Тесты:** 119 passed / 0 failed / 3 skipped; tsc 0 errors.
 **Результат:** ✅ Sprint 6 Review — UI-проверки завершены полностью.

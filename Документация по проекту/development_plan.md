@@ -3,12 +3,14 @@
 # ПЛАН РАБОТ КОМАНДЫ РАЗРАБОТЧИКОВ
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия:** 2.0
-**Дата:** 2026-03-23
-**Основание:** Техническое задание v1.0 от 2026-03-23
-**Статус:** Утверждён (после ревью PM)
+**Версия:** 2.1
+**Дата:** 2026-05-13
+**Основание:** Техническое задание v1.5 от 2026-05-13
+**Статус:** ✅ M4 Production-ready достигнут (Sprint 8 закрыт). Sprint_8_Review план добавлен.
 
-> **Изменения относительно v1.0:** реорганизация состава команды (9 человек вместо 7), добавлены UX/UI-дизайнер и QA-инженер, объединены роли DB и AI в Backend #2, добавлен Frontend #2. Исправлена последовательность задач (CSRF/Rate Limiting перенесены в S3, Must-задачи убраны из Should-спринта). Тестирование встроено в каждый спринт.
+> **Изменения относительно v2.0:** актуализирован статус M4 после закрытия Sprint 8 (S8 W0 → W1 → W2 → W3 → 8.R). Добавлен §7 «Sprint_8_Review + post-production» с переносимыми задачами и будущими направлениями. Метрика Coverage достигнута (TOTAL = 80%, CI gate активен).
+>
+> **Изменения относительно v1.0 (v2.0):** реорганизация состава команды (9 человек вместо 7), добавлены UX/UI-дизайнер и QA-инженер, объединены роли DB и AI в Backend #2, добавлен Frontend #2. Исправлена последовательность задач (CSRF/Rate Limiting перенесены в S3, Must-задачи убраны из Should-спринта). Тестирование встроено в каждый спринт.
 
 ---
 
@@ -473,34 +475,45 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 
 ---
 
-### СПРИНТ 7: Полировка + Should-фичи (недели 13–14)
+### СПРИНТ 7: Полировка + Should-фичи + AI слэш-команды (недели 13–14) — ✅ ЗАВЕРШЁН (2026-04-26)
 
-**Цель:** Should-функции и финальная полировка UI.
+**Цель:** Should-функции, переносы из S6, AI-команды и финальная полировка UI. **Phase 1 feature-complete.**
 
 > **Примечание v2:** Must-задачи (Bond Service, Corporate Actions, налоговый экспорт) перенесены в S5. В S7 остаются только Should-фичи, приоритизированные по ценности.
+> **Примечание v3 (Sprint_7_ARCH 7.R):** в S7 фактически реализовано 17 рабочих задач + 7.R = 18 задач. Добавлены 7.18 / 7.19 (AI слэш-команды) — отсутствовали в плане v2, добавлены по решению заказчика 2026-04-25.
+> **Корректировка RACI:** 7.1 и 7.12 переназначены с BACK1 на BACK2 (соответствие RACI: Strategy Engine = BACK2 R, Notification Service = BACK2 R).
 
-| # | Задача | Исполнитель | Ревьюер | Зависит от | || |
-|---|---|---|---|---|---|
-| 7.1 | Версионирование стратегий (история версий, откат) | BACK1 + FRONT2 | ARCH | S3 | 7.2 |
-| 7.2 | Grid Search оптимизация параметров (multiprocessing) | BACK1 + FRONT2 | ARCH | S4 | 7.1, 7.3 |
-| 7.3 | Экспорт CSV/PDF бэктеста (WeasyPrint + openpyxl) | BACK2 | ARCH | S4 | 7.2 |
-| ~~7.4~~ | ~~Telegram-команды /close, /closeall, /balance~~ → ✅ сделано в S6 (ARCH follow-up) | — | — | — | — |
-| ~~7.5~~ | ~~Ценовые алерты~~ → ✅ сделано в S6 | — | — | — | — |
-| 7.6 | Инструменты рисования на графике (тренды, уровни, зоны) | FRONT1 | UX, ARCH | S2 (2.6) | 7.7 |
-| 7.7 | Дашборд: виджет баланса, health indicator, sparklines, мини-графики | FRONT1 + FRONT2 | UX, ARCH | S5, S6 | 7.6 |
-| 7.8 | Дисклеймер (first-run wizard, 5 шагов) | FRONT2 + BACK2 | UX, ARCH | S1, S2 | 7.9 |
-| 7.9 | Backup/restore: автоматический бэкап, ротация, CLI восстановление | OPS + BACK1 | ARCH | S1 | 7.8 |
-| 7.10 | UX: финальная полировка UI, консистентность, юзабилити-тест | UX | FRONT1, FRONT2 | S6 | все |
-| 7.11 | E2E-тесты S7: версионирование, экспорт, алерты, wizard | QA | ARCH | 7.1–7.9 | — |
-| **7.12** | **NotificationService singleton через DI** (перенос из S6 Review) — убрать 9 инстансов, использовать `app.state.notification_service` | BACK1 | ARCH | S6 | — |
-| **7.13** | **Подключение 5 event_type к runtime** (перенос из S6): `trade_opened`, `partial_fill`, `order_error`, `all_positions_closed`, `connection_lost/restored` | BACK1 | ARCH, SEC | S6 | — |
-| **7.14** | **Telegram inline-кнопки** (перенос из S6): CallbackQueryHandler для `open_session:{id}` / `open_chart:{id}` | BACK2 | ARCH, SEC | S6 | — |
-| **7.15** | **WS-обновление карточек сессий** (плановая задача): заменить polling 10s на WS-канал | BACK1 + FRONT1 | ARCH | S6 | — |
-| **7.16** | **Интерактивные зоны бэктеста + аналитика** (hover/клик зон + гистограмма P&L + donut Win/Loss) | FRONT1 | ARCH, UX | S4 | — |
-| **7.17** | **Фоновый запуск бэктеста** (кнопка «в фоне», параллельные бэктесты, индикатор в шапке) | BACK1 + FRONT1 | ARCH | S4 | — |
-| **7.R** | **Архитектурное ревью S7 + QA-приёмка + UX-приёмка** | **ARCH + QA + UX** | — | всё | — |
+| # | Задача | Исполнитель (факт) | Ревьюер | Статус |
+|---|--------|--------------------|---------|--------|
+| 7.1 | Версионирование стратегий (история, snapshot, history-preserving откат) | BACK2 + FRONT2 | ARCH | ✅ |
+| 7.2 | Grid Search (multiprocessing.Pool, hard cap 1000, heatmap) | BACK1 + FRONT2 | ARCH | ✅ |
+| 7.3 | Экспорт CSV/PDF бэктеста (WeasyPrint) | BACK2 + OPS | ARCH | ✅ |
+| ~~7.4~~ | ~~Telegram-команды~~ → ✅ сделано в S6 | — | — | — |
+| ~~7.5~~ | ~~Ценовые алерты~~ → ✅ сделано в S6 | — | — | — |
+| 7.6 | Инструменты рисования (5 типов, hotkeys, REST persist) | FRONT1 | UX, ARCH | ✅ |
+| 7.7 | Дашборд-виджеты (Balance + sparkline / Health / ActivePositions) | FRONT2 (+ FRONT1 MiniSparkline, BACK1 C9) | UX, ARCH | ✅ |
+| 7.8 | First-run wizard (5 шагов, gate на дисклеймере) | FRONT2 + BACK2 | UX, ARCH | ✅ |
+| 7.9 | Backup/restore (CLI + APScheduler 03:00 UTC, WAL-aware SQLite) | OPS | ARCH | ✅ |
+| 7.10 | UX финальная полировка + ui_checklist_s7.md | UX | ARCH | ✅ |
+| 7.11 | E2E финальный регресс (136 passed / 0 failed / 3 skipped) | QA | ARCH | ✅ |
+| **7.12** | **NotificationService singleton через DI** (перенос из S6) | BACK2 | ARCH | ✅ |
+| **7.13** | **Подключение 5 event_type к runtime** (MR.5): trade_opened, partial_fill, order_error, connection_lost/restored | BACK1 | ARCH, SEC | ✅ |
+| **7.14** | **Telegram inline-кнопки** (CallbackQueryHandler) | BACK2 | ARCH, SEC | ✅ |
+| **7.15** | **WS-обновление карточек сессий** (`/ws/trading-sessions/{user_id}`) | BACK1 + FRONT1 | ARCH | ✅ |
+| **7.16** | **Интерактивные зоны бэктеста + аналитика** (гистограмма P&L + donut Win/Loss) | FRONT1 | ARCH, UX | ✅ |
+| **7.17** | **Фоновый запуск бэктеста** (cap=3, бейдж, dropdown, WS) | BACK1 + FRONT1 | ARCH | ✅ |
+| **7.18** | **AI слэш-команды backend** (расширение `ChatRequest.context_items`, защита от prompt injection) | BACK2 | ARCH, SEC | ✅ |
+| **7.19** | **AI слэш-команды frontend** (Mantine Combobox dropdown, 5 команд, ContextChip) | FRONT1 | UX, ARCH | ✅ |
+| **7.R** | **Архитектурное ревью S7 + QA-приёмка + UX-приёмка** | **ARCH + QA + UX** | — | ✅ PASS WITH NOTES (2026-04-26) |
 
-**Критерий завершения:** Phase 1 feature-complete. Все Must + реализованные Should функции работают. UX утвердил финальный вид интерфейса.
+**Критерий завершения:** Phase 1 feature-complete. Все Must + реализованные Should функции работают. **M3 Phase 1 достигнут.**
+
+**Финальные тесты S7 (2026-04-26):**
+- Backend pytest: **885 passed / 0 failed**
+- Frontend vitest: **394 passed / 0 failed**, tsc 0 errors
+- Frontend Playwright: **136 passed / 0 failed / 3 skipped** (baseline 119 + 17 новых)
+
+**Stack Gotchas созданы в S7:** #19 (SQLite WAL backup), #20 (FastAPI route ordering), #21 (Grid Search multiprocessing.Pool — UPDATE финальный), #22 (Mantine Combobox.Target testid clone).
 
 > **Приоритизация Should-фич (при нехватке времени отбрасывать снизу):**
 > 1. Версионирование стратегий (7.1)
@@ -587,7 +600,7 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
 | **M1** | **Каркас + wireframes** | 2 (S1) | Auth работает, дашборд по wireframes, CI проходит, wireframes утверждены UX. QA подтвердил тест-кейсы auth | ✅ завершён |
 | **M2** | **Полный цикл бэктеста** | 8 (S4) | Стратегия → бэктест → результаты. AI через UI. CSRF+Rate Limiting активны. QA прошёл E2E | ✅ завершён |
 | **M3** | **Paper Trading + Notifications** | 12 (S5+S6) | Paper+Real Trading + Circuit Breaker + НКД + корп. действия + Notifications (Telegram/Email/In-app) + Recovery + Graceful Shutdown. 945 тестов. QA E2E пройден (119/0/3) | ✅ завершён (Sprint_6_Review, 2026-04-24) |
-| **M4** | **Production-ready** | 16 (S8) | Coverage ≥ 80%, регрессия, security audit, performance, юзабилити-тест. Все sign-off (ARCH + QA + UX) | ⬜ не начат |
+| **M4** | **Production-ready** | 16 (S8) | Coverage ≥ 80% (TOTAL = 80%, CI gate активен), регрессия (1490 pytest / 544 vitest / 158 Playwright), security audit (0 high, bandit/safety в CI), performance (`@timed_event` + Plotly Dash /admin/metrics), Docker compose + Mac mini deployment + Cloudflare Tunnel SSL, ФТ v2.5 + ТЗ v1.5 + deployment_guide v1.0 | ✅ достигнут (Sprint 8, 2026-05-13, 8.R ARCH-вердикт — pending) |
 
 ```
 Неделя:  2        8        10       16
@@ -598,6 +611,61 @@ S8 (Регрессия + Стабилизация)     Зависит от: S6 +
   Каркас  Бэктест  Paper+Bond  Production
   +UX     +CSRF    +CB         Ready
 ```
+
+### 5.1 M4 Production-ready — итоговые метрики (Sprint 8 закрыт 2026-05-13)
+
+| Слой | Метрика | Цель | Факт |
+|------|---------|------|------|
+| Backend pytest | passed / failed | ≥ 1024 / 0 | **1490 / 0** ✅ |
+| Backend coverage TOTAL | % | ≥ 80% | **80%** ✅ (CI gate `--cov-fail-under=80` активен) |
+| Backend ruff | issues | 0 | **0** ✅ |
+| Backend mypy | errors | 0 | **0** ✅ |
+| Backend bandit | medium+ findings | 0 | **0** ✅ (28 low informational) |
+| Backend safety | critical CVE | 0 (документированные допустимы) | **1 documented** ✅ (protobuf транзитив) |
+| Frontend vitest | passed | ≥ 468 | **544 / 2 pre-existing flaky** ✅ |
+| Frontend tsc | errors | 0 | **0** ✅ |
+| Frontend lint | errors / warnings | 0 / 0 | 0 err / 9 warn (W3 cleanup в работе DEV-3) |
+| Playwright nightly | passed | ≥ 142 | **158 / 1 flaky / 5 skipped** ✅ |
+| Performance: signal→order p95 | ms | < 500 | измеряется `@timed_event("signal.process")` (на admin/metrics) |
+| Performance: dashboard LCP | s | < 2 | измеряется PerformanceObserver |
+| Performance: Telegram webhook p95 | s | < 3 | `@timed_event("telegram.handle")` |
+| Security audit | high findings open | 0 | **0** ✅ (3 high закрыты в W2) |
+| Deployment | артефакты | Docker compose + launchd + Cloudflare Tunnel | ✅ deployment_guide.md, launchd plist, Dockerfile×2, nginx.conf, docker-compose.yml |
+| Документация | актуальность | ФТ + ТЗ + deploy guide + dev plan + project_state | ✅ ФТ v2.8, ТЗ v1.6 (синхронизированы 2026-07-27 по итогам код-ревью P0–P1 и Sprint_8_Review), deployment_guide v1.0, dev plan v2.1 |
+
+8.R ARCH-вердикт оформляется отдельно в `Спринты/Sprint_8_Review/code_review_s8.md` (по образцу Sprint_6_Review).
+
+---
+
+## 7. ROADMAP — Sprint_8_Review + post-production (после M4)
+
+После закрытия M4 проект переходит в стадию stabilization + Phase 2 feature work. Ниже — направления развития, зафиксированные в Sprint_8_Review/backlog.md и плане развития 001-005.
+
+### 7.1 Carry-over из S8 W3 (если не успели в спринте)
+
+| ID | Описание | Оценка | Источник |
+|----|----------|--------|----------|
+| S7R-MULTICURRENCY-TOGGLE | Переключение USD/RUB в BalanceWidget | ~6ч | S8 W3 backlog |
+| S8R-COV-BACKTEST-ROUTER | `backtest/router.py` 41% → 80% (heavy mocks event_bus + DI) | ~12ч | S8 W2 |
+| S8R-COV-MARKET-DATA-SERVICE | `market_data/service.py` 79% → 80%+ | ~4ч | S8 W2 |
+| S8R-COV-COVERAGECFG-ASYNC | `concurrency=greenlet,thread` в `.coveragerc` (Gotcha 29) | ~1ч | S8 W2 |
+| S8R-CLIENT-TEST-FLAKY | vitest `client.test.ts` flaky после SecurityHeadersMiddleware | ~1ч | S8 W2 |
+
+### 7.2 Phase 2 направления
+
+| Направление | Описание | Ссылка / источник |
+|-------------|----------|-------------------|
+| Position-aware strategies | Стратегии могут анализировать текущие позиции при принятии решения (Hold/Reduce/Add) | План развития 001 |
+| Realtime candle streaming в бэктесте | Backtest на «живых» данных без переключения через CSV | План развития 004 |
+| Prometheus/Grafana export | Из structlog + `@timed_event` → метрики для visualization, когда объёмы вырастут | План развития 003 |
+| Мультипользовательский режим | После Phase 1 single-user → миграция на PostgreSQL + per-user isolation | ТЗ §1.3, §8.9 |
+| Short-торговля (активация) | Сейчас blocked в circuit_breaker; ТЗ предполагает архитектурную готовность | ФТ §6.4 |
+| Срочный рынок FORTS | Опционы и фьючерсы | ФТ §1.5 «Won't» (на Phase 2) |
+| Мобильная адаптация | Desktop-first сейчас, mobile responsive — Phase 2 | ФТ §3.7 |
+
+### 7.3 Закрытые / отменённые направления
+
+- **S5R-BLOCKLY-MODE-B** — режим ручного ввода кода удалён в S8 (не использовался). Только Blockly visual editor + AI генерация.
 
 ---
 

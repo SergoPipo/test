@@ -3,11 +3,61 @@
 > **Это главная точка входа для любой новой сессии Claude.**
 > Прочитай этот файл первым, чтобы понять, где мы находимся.
 >
-> Последнее обновление: 2026-04-25 (Sprint 7 — планирование завершено, готов к старту W0)
+> Последнее обновление: 2026-07-29 (**финальное сведение: PR #10 смёржен, закрыты последние две карточки backlog — sandbox-счёт и флейк CB**. Раздел «⬜ ОТКРЫТО» пуст. Гейты: pytest 2246, vitest 835, E2E 162/3/0. Новая ловушка — gotcha-49.)
+>
+> **2026-07-29 — S8R финальное сведение (пятая волна).**
+> **Мержи.** **PR #10 смёржен** merge-commit'ом в `s8r/bug-31-unified-codegen` (`cc04ef5`); дерево `bug-31` после мержа побайтово равно дереву `backlog-fixes`. Сверка по remote-рефам вскрыла, что **`p1/wave2-backend` уже полностью содержится** в S8R-ветке (прямой предок), как и `p1/wave3-frontend`, `p1/auth-hardening`, `s8r/acceptance-fixes-2026-07-26` — сводить их не требовалось; локальный ref `s8r/bug-31` был протухшим (behind 92), из-за чего счётчики коммитов в постановке цикла расходились с фактом. Единственный конфликт при сведении в `develop` — `frontend/e2e/s5-paper-trading.spec.ts`: обе стороны **независимо сделали один и тот же** фикс flaky-теста (та же `currentStatus`, та же `sessionPayload()`), S8R дополнительно снял 6 `networkidle`; разрешение — версия S8R + развёрнутый комментарий из PR #6.
+> **`S8R-SANDBOX-ACCOUNT-STALE-REOPEN` (medium) закрыт** по решению заказчика (вариант «автодетект + кнопка в UI»; в живой сессии — обновить счёт и продолжить торговать). Новый модуль `app/broker/sandbox_recovery.py` (вынесен отдельно: потребители — и `broker/service.py`, и `trading/engine.py`, обратный импорт замкнул бы цикл); три точки подключения строго под `is_sandbox`; ручной endpoint `POST /broker-accounts/{id}/reopen-sandbox` + кнопка на `/settings?tab=broker`. **Ключевая добавка к выбранному варианту:** при подмене счёта сессия реконсилирует позиции — старый счёт удалён брокером вместе с позициями, и без этого SL/TP закрывали бы несуществующие позиции, а CB мерил бы просадку по мёртвым данным. +23 теста.
+> **Флейк `test_order_passes_when_no_violations` (low) закрыт — причина воспроизведена детерминированно.** `process_signal` → `ensure_lot_size_strict` → при пустом кэше инструментов **реальный сетевой запрос** в T-Invest/MOEX ISS; при подтормаживании ISS строгий резолв бросает `LotSizeUnavailableError`, CB блокирует сигнал fail-closed, `process_signal` возвращает `None`. RED: `MOEX_ISS_BASE_URL=http://127.0.0.1:9 pytest … → 1 failed`, в обычных условиях — passed. Тот же класс, что закрытый `test_max_positions_limit`. GREEN: `autouse`-фикстура патчит lot_size (приём уже применён в соседнем `test_engine.py`) — 4 passed в условиях сбоя, 65 passed по директории, файл ускорился с ~3 с до 0.23 с.
+> **E2E — 162 passed / 3 skipped / 0 failed** из 165 (паритет с baseline 163/3: разница — один `auth-hardening`-тест, проходящий на моках). Два ложных вывода стоили двух лишних прогонов: (а) «набор завис» — виснет **выход** Playwright уже после последнего пройденного теста (0% CPU, браузеров нет, сводки нет) → **[gotcha-49](../Develop/stack_gotchas/gotcha-49-playwright-hangs-after-last-test.md)**, Stack Gotchas 48 → **49**; (б) «регресс в `s7-export`» — 2 падения появлялись только когда параллельно шёл backend-pytest, чистый прогон дал 0. Урок: не гонять тяжёлое параллельно с E2E.
+> Гейты пятой волны: pytest **2246 passed / 1 xfailed / 0 failed**, vitest **835 / 121 файл**, tsc 0, eslint 0, ruff 0, mypy Success (171 файл), bandit 0 issues.
+>
+> **2026-07-28/29 — closeout S8R: PR #10 полностью зелёный, backend job в CI снова работает** — тесты не выполнялись ~3 недели; E2E-набор пошёл одним прогоном. Первый реальный прогон CI вскрыл и закрыл три дефекта, включая гонку в WS-хендлере, вешавшую весь набор. Плюс закрыт `S8R-ALEMBIC-FRESH-DB-DRIFT` — чистая установка отдавала 500 на входе. ТЗ → v1.8.
+>
+> **2026-07-28 — S8R closeout (четвёртая волна).** Закрыт остаток раздела «⬜ ОТКРЫТО» из `Sprint_8_Review/backlog.md`.
+> **CI (high).** Гипотеза подтверждена по логу до правки: `pytest` падал на **импорте** `tests/conftest.py` → `app.main` → `settings = Settings()`, а не на тестах. В `.github/workflows/ci.yml` job `backend` получил `env` с не-дефолтными фиктивными `SECRET_KEY`/`ENCRYPTION_KEY` при `DEBUG=false` — **выбран вариант, сохраняющий production-гейт секретов** (`DEBUG=true` отвергнут: глушит гейт и уводит тесты с прод-путей — strict-режим `CryptoService`, `Secure`-cookie). ⚠️ Первоначальная оценка «паритет 2222 passed» была получена прогоном, где перебивались только ключи, а `DEBUG` молча брался из `.env` (=true) — то есть `DEBUG=False` не проверялся. Честная проверка (`DEBUG=false` + без `.env`) вскрыла 5 падений; после их разбора — **2223 passed / 1 xfailed / 0 failed**, см. запись про первый прогон CI ниже.
+> **E2E (medium).** `waitForLoadState('networkidle')` убран из всех спек — 20 файлов, 34 вхождения; где следом идёт `expect(...).toBeVisible()`/`click()` — просто удалён, где шла кастомная логика — заменён на ожидание конкретного маркера. **Набор впервые прошёл одним прогоном: 163 passed / 3 skipped, 9.6 мин, без зависаний** (было: только пофайлово, 158 passed / 4 failed).
+> **4 падавших теста `s5-account.spec.ts` (low) — дефект теста, не продукта.** Фикс `S8R-ACCEPTANCE-FIX-BUG-4` добавил в `AccountPage` загрузку `GET /tax/reports` при монтировании, мок не завели → 401 → `accountStore.error` подменял страницу алертом. Добавлен `mockTaxReports()`: **4 failed → 4 passed**.
+> **`auth-hardening.spec.ts` (low).** Спека параметризована (`PW_ORIGIN`), прогнана на выделенном стенде `:8120`/`:5193` без остановки стенда заказчика — **7 passed / 0 failed за 5.0 с**. Попутно: дефолтный `LOGIN_RATE_LIMIT_PER_MINUTE=5` меньше числа логинов в спеке (нужен ≥ 10), а без `wizard_completed_at` у тест-пользователя модалка мастера съедает все клики — [gotcha-47](../Develop/stack_gotchas/gotcha-47-modal-blocks-clicks-retry-until-global-timeout.md), Stack Gotchas 46 → **47**.
+> **`.env.example`** дополнен четырьмя `BACKTEST_DATA_TIMEOUT_*` с русскими комментариями.
+> **`S8R-ALEMBIC-FRESH-DB-DRIFT` (high) — найден и закрыт в тот же день.** На **чистой** БД после `alembic upgrade head` отсутствовали таблица `user_ai_settings` и 8 колонок (`strategies.description`, `instruments.logo_name`, 6 в `ai_provider_configs`) → `POST /auth/login` отдавал 500, то есть развёртывание по `deployment_guide.md` давало неработающий вход. Существующие стенды не затронуты (их БД «доросли» раньше) — поэтому дефект и не всплывал. Класс — [gotcha-13](../Develop/stack_gotchas/gotcha-13-forward-model-drift.md). По отдельной команде заказчика объём цикла расширен и дефект закрыт TDD: RED — новый `test_fresh_db_schema_matches_models` (сверяет всю `Base.metadata` с фактической схемой чистой БД; прежний `test_all_tables_exist` смотрел только список таблиц), GREEN — идемпотентная миграция `d1e2f3a4b5c6`. Проверено сквозняком: на чистой БД `setup` **201**, `login` **200**; на копии рабочей БД миграция проходит без дублей.
+> **Первый за три недели реальный прогон backend-job в CI вскрыл три дефекта, невидимых локально.** (а) `test_auth_cookie_secure` — 3 теста держались на `DEBUG=true` из `.env` разработчика: при `DEBUG=False` cookie уходят с `Secure`, httpx их по http не переотправляет → 403. (б) `test_backup_cli` — 2 теста: подпроцесс стартует со стерильным окружением и держался на наличии `.env`. (в) **зависание всего прогона** — job горел до 6-часового лимита runner'а, не назвав ни одного теста. Диагностику дали добавленные в `ci.yml` `timeout-minutes: 40`, `PYTHONUNBUFFERED=1` и `faulthandler_timeout=120`: сторож указал на `test_ws_sessions.py::test_auth_via_cookie`. Диагноз занял три итерации — первые две (`cancel()` без `await` в `ws_sessions.py`; уехавшая версия `anyio` 4.13→4.14.2) зависание не снимали, обе правки оставлены как полезные сами по себе. **Настоящая причина — кросс-loop доступ к aiosqlite:** async-фикстуры идут в loop pytest-asyncio, `TestClient` — в своём loop портала, а `:memory:` + `StaticPool` давали им одно соединение, чей `Future` привязан к loop создателя. Фикс — файловая БД в `tmp_path` + `NullPool`. Stack Gotchas 47 → **48** ([gotcha-48](../Develop/stack_gotchas/gotcha-48-cancelled-tasks-not-awaited-hang-testclient.md)). **PR #10 полностью зелёный: backend 2223 passed / 1 xfailed / 0 failed за 5 мин 45 с, frontend и security-scan pass.** Уроки: сломанный гейт не просто не ловит новые дефекты — он копит старые; а при «локально зелено, в CI красно» первым вопросом должен быть «что отличается на раннере?», а не «что не так в коде?».
+> Гейты closeout: pytest **2223 / 1 xfailed / 0 failed** — и локально (в конфигурации CI-шага: `DEBUG=false`, без `.env`, с coverage), и **в самом CI**, vitest **832 / 120 файлов**, tsc 0, eslint 0, ruff 0, mypy 0, bandit 0 medium+. ТЗ §9 дополнено контрактом окружения CI, запретом `networkidle` в спеках и требованиями к стенду `auth-hardening` (ТЗ **v1.7 → v1.8**). ФТ не менялись — пользовательское поведение не затронуто.
+>
+> **2026-07-27 — Дозакрытие S8.8 и актуализация документации.** Заказчик проверил глазами единственный оставшийся пункт чеклиста (S8.8 «Изменение формы») и **завернул** его: «при попытке переместить точку линии она исчезает с графика». Разбор (systematic-debugging + Playwright с временной инструментацией) дал **два дефекта**: **BUG-33** (HIGH — `series.attachPrimitive()` не запрашивает перерисовку, `renderer.draw()` не вызывался ни разу после загрузки: фигура была и в store, и в БД, но холст пустой; появлялась только после движения мыши/pan/нового бара — то же делало фигуры «пропавшими» после F5 и re-attach) и **BUG-34** (MEDIUM — drag стартовал только для **уже выделенной** фигуры, иначе захват проваливался в lightweight-charts и вместо перемещения точки начиналось панорамирование: фигура уезжала вместе со свечами). Фиксы test-first: `param.requestUpdate()` в `attached()`; выбор фигуры под курсором вынесен в общую `pickTopHit()` (click/hover/меню/drag), `onPointerDown` выделяет фигуру и пере-опрашивает hit-тест ради нужного handle. **Гейт: vitest 772 passed (111 файлов), tsc 0, eslint 0.** Верифицировано на стенде: линия видна сразу после F5 без движения мыши, конец линии и угол прямоугольника тянутся с первого захвата, панорамирование по пустому месту не сломано. Пункт S8.8 переведён `[-]` → `[x]` — **непокрытых пунктов чеклиста не осталось**. Ловушка занесена в `Develop/stack_gotchas/gotcha-36-attachprimitive-no-redraw.md`. **PR #9** (`s8r/acceptance-fixes-2026-07-26` → `s8r/bug-31-unified-codegen`) собирает все пять фиксов приёмки: BUG-32, BUG-33, BUG-34, FIND-06, FIND-01 — **ожидает мержа**. **Документация синхронизирована** (правило «на каждом ревью обновлять ФТ и ТЗ»): ФТ **v2.5 → v2.8** (Model A auth, денежный учёт paper, перенос капитала из бэктеста, поведение инструментов рисования, торговые часы для закрытия, ограничения AI-провайдеров), ТЗ **v1.5 → v1.6** (cookie-контракт Model A + правило `X-CSRF-Token` для не-axios клиентов, `PaperPortfolioAccountant` и инвариант `Δequity == trade.pnl`, контракт слоя разметки графика, Alembic и `DATABASE_URL`, drain paper-сессий при выкатке, baseline тестов); ссылки на версии поправлены в `deployment_guide.md` и `development_plan.md`.
+>
+> **2026-07-26 — Gate Sprint_8_Review: ✅ PASS WITH NOTES.** Финальный прогон приёмки выполнен на изолированном стенде (worktree `s8r-acceptance` от `s8r/bug-31-unified-codegen`, копия рабочей БД `acceptance.db`, backend :8100 / frontend :5173, T-Invest-стримы придержаны). UI-секции **S8.1–S8.12 + S8.17 пройдены через Playwright** со скриншотами-evidence (`Sprint_8_Review/screenshots/`, 39 файлов): админ-меню и отказ non-admin, Dash-метрики, error-boundary (сбой сымитирован перехватом сети — соседние блоки живы, «Повторить» лечит), статус-бейджи + переходы + фильтр «Пауза», 4 виджета дашборда, Telegram-мастер (+ **реальная доставка**: `telegram_notification_sent`, `email_notification_sent`), 17 типов уведомлений, рисование на графике (клик–клик, drag, persist после F5, удаление, внутридневные ТФ), AI-описание → блоки на **живом** `deepseek-v4-pro`, панель фоновых бэктестов (лимит 3 + автосворачивание), вкладки результата бэктеста (зоны, `TradeDetailsPanel`, запуск торговли). Ф2b: WS-рукопожатие `connected → auth_ok → subscribed` (cookie-auth Model A) и арифметика BE-TRAD-06 на UI (позиция −273,50 ₽ = (269,14−296,49)×10, −9,22% поз. / −0,27% кап.). **Исправлено test-first прямо в цикле приёмки:** **BUG-32** (HIGH — AI-помощник был полностью нерабочим: SSE-клиент `aiStreamClient.ts` ходил голым `fetch` без `X-CSRF-Token` → 403 «CSRF token отсутствует»; тот же класс, что BUG-21, но другой клиент), **FIND-06** (MEDIUM — `alembic/env.py` игнорировал `DATABASE_URL` и катил миграции в БД из `alembic.ini`; всплыло как 500 `ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint` при сохранении настроек уведомлений — прямая грабля деплоя Sprint 9), **FIND-01** (LOW — «Запустить торговлю из бэктеста» не переносила капитал). **Гейт после фиксов: backend 2186 passed / 1 xfailed / 0 failed, frontend vitest 765 passed, tsc 0, eslint 0, bandit 0 medium+.** Открытых багов severity ≥ medium нет. Остаток (S9-backlog, косметика): пустой SPA-роут `/admin/metrics`, сырое «Request failed with status code 503» при залповом запуске 4 фоновых бэктестов (+ осиротевшие `queued`-строки), молчаливое игнорирование ввода AI на несохранённой стратегии, англоязычные предупреждения парсера блоков, Email-тумблер для событий вне `EMAIL_ALLOWED_EVENTS`, автозаполнение менеджером паролей в поле «Bot token». Требует прод-условий: живые p50/p95 «сигнал→ордер» под нагрузкой и визуальный resize фигуры на графике. Детали: `Sprint_8_Review/acceptance_checklist.md` (вердикт внизу) + `Sprint_8_Review/s8r_acceptance_run_2026-07-26.md`.
+>
+> **2026-07-06 — Полное код-ревью всей кодовой базы + исправление всех 7 критических (P0).** Многоагентный аудит (~344 находки): `Спринты/Code_Review_Full_2026-07/` (отчёт, бэклог, верификация, TDD-задачи P0/P1). Все 7 critical (C1–C7: webhook fail-open, IDOR сессий, дефолтные ключи, cookie Secure, утёкший секрет, close_all_positions, реверс-сплит) исправлены test-first (Opus 4.8), `/code-review` по trading пройден, смёржено в `s8r/bug-31-unified-codegen` и запушено (`1107ec3`). Детали: `Code_Review_Full_2026-07/P0_FIXES_LOG.md`. C5-чистка git-истории пропущена по решению заказчика (репозиторий приватный).
+>
+> **2026-07-06 — P1 Волна 1 (backend) исправлена и запушена (`a936e1a`).** 18 High: be-trading (BE-TRAD-03/04/05/07/08/09), be-market-data (BE-MKT-01..05), be-backtest (BE-BTST-01/02/04 + WS-authz AUTHZ-04), be-strategy (BE-STRAT-03/04 + 02 частично). `/code-review` по trading нашёл 9 дефектов в свежих фиксах (2 money-критичных: BE-TRAD-09 не закрывал ×10; фантом-close при figi=None) — все исправлены test-first (`review-followup` FIX-1..9). Гейт: 1329 passed, pyright 0. Детали: `Code_Review_Full_2026-07/P1_WAVE1_LOG.md`. **Осталось:** P1 Волна 2 (auth/broker/notification/ai/runtime/misc) + Волна 3 (frontend); NEEDS-REVIEW BE-TRAD-06 / BE-STRAT-02 / BE-MKT-02 → ARCH.
+>
+> **2026-07-07 — P1 Волна 2 (backend) исправлена и запушена в `p1/wave2-backend` (Develop, HEAD `9cd44aa`; remote `s8r/bug-31` не тронут — Волна 2 на отдельной ветке для ревью/мержа).** 13 High через 6 DEV-агентов в worktree'ах: be-auth-session (BE-AUTH-02/03), be-broker (BE-BROK-01/02), be-notification (BE-NOTIF-02/03 + alembic `c9f1a2b3d4e5`), be-ai (BE-AI-01/02), be-runtime (BE-RT-01/02/03), be-misc (BE-MISC-17/18/19). `/code-review` (xhigh, 10 углов + верификация) нашёл **8 дефектов в свежих фиксах** + до-верификация мультиплексора **ещё 5** — все исправлены test-first (5 review-коммитов): CB fixed_sum обходил лимит ×3 + fail-closed паузил сессию + сеть под lock без таймаута (BE-RT-01); блокирующий DNS в event loop + SSRF-обход редиректом + Ollama-500 (BE-AI-01); неатомарная reuse-detection refresh → 500/обход (BE-AUTH-03); потеря уведомлений при shutdown + shield-сирота (BE-NOTIF-02); мультиплексор — двойной SUBSCRIBE/reconnect без backoff/отравленная пара/interval-less broadcast/воскрешение mux (BE-BROK-01, K1-K5). Гейт: **2129 passed, 0 failed, pyright 0 новых**. Детали: `Code_Review_Full_2026-07/P1_WAVE2_LOG.md`. **Осталось:** Волна 3 (frontend); backlog: P1W2-SSRF-PINNING, P1W2-AI-LOCAL-PROVIDER-UPGRADE, P1W2-SANDBOX-EPHEMERAL-PROC, P1W2-BE-MISC-19-TAX-CATEGORIES, P1W2-MULTIPLEXER-STOPPED-CANDLE-RACE (low).
+>
+> **2026-07-07 — Решения по продолжению P1 (заказчик).** (1) **Ветвление:** копить `p1/wave*` отдельно (`p1/wave2-backend` есть, дальше `p1/wave3-frontend`, `p1/auth-hardening`), remote `s8r/bug-31` не трогать; свести всё в `s8r/bug-31` одним PR/мержем с финальным ревью ПОСЛЕ всех волн. Локальный `s8r/bug-31` возвращён к remote (a936e1a); живой чекаут Develop — на `p1/wave2-backend`. (2) **Auth-hardening вынесен** из Волны 3 в отдельную координированную backend+frontend мини-волну: CFG-FE-01 (токены→HttpOnly cookie) + P1W2-REFRESH-GRACE (grace-окно + single-flight + cross-tab) — `Code_Review_Full_2026-07/P1_AUTH_HARDENING_HANDOFF.md`. Волна 3 (frontend) — без CFG-FE-01: `P1_WAVE3_HANDOFF.md`. (3) Открытая мелочь: `backend/.env.example` не содержит `AI_ALLOW_PRIVATE_PROVIDER_URLS=false` — заблокировано permission-правилом `.env*` (правится вручную; флаг задокументирован в `config.py`).
+>
+> **2026-07-07 — P1 Волна 3 (frontend) исправлена в ветке `p1/wave3-frontend` (Develop, база `9cd44aa`; remote `s8r/bug-31` не тронут; коммиты/push ожидают подтверждения).** ~23 High через 6 DEV-агентов Opus test-first в worktree'ах: fe-security (WS-кластер CFG-FE-02/FE-NET-01/FE-STOR-12 → auth-handshake первым сообщением вместо токена в query-string + FE-STOR-13), fe-network (FE-NET-03 Decimal-нормализатор + FE-NET-04 reconnect backoff), fe-charts (FE-CHART-01 vline sequential + FE-CHART-02 рефактор CandlestickChart 907→702 + FE-CHART-03 mskTime), fe-backtest-ui (FE-BTST-13/14/15/16), fe-core-refactor (FE-PAGE-01 рефактор StrategyEditPage 1101→783 + FE-PAGE-02 + FE-CORE-01/02/06/07/08), fe-ui-misc (FE-STRAT-01 allow-list блоков фронт+бэк + FE-TRAD-01/02 + FE-UI-01). Мерж 6 веток — clean, без конфликтов. `/code-review` (xhigh, 5 углов Opus — перезапуск после исчерпания лимита Fable 5) нашёл **6 дефектов в свежих фиксах** — исправлены test-first (`0e039be`): WS-auth контракт (4001→4401 + onclose-guard + e2e-мок auth_ok — устранён reconnect-шторм на протухшем токене), visibleRafLoop (ResizeObserver-пробуждение), StrategyBacktestsTable (formatDate вместо new Date, BUG-3/4), backtestStore race-guard, ws.py binary-frame/timeout. Гейт: **vitest 745 / 0 failed, tsc 0, backend backtest+trading+strategy 860 / 0 failed** (полный backend 2152 на живом `.env`). Детали: `Code_Review_Full_2026-07/P1_WAVE3_LOG.md`. **CFG-FE-01/FE-NET-02/FE-PAGE-03 НЕ делались** (дубли → auth-мини-волна). **Осталось:** Playwright-скриншоты (нужен инстанс на коде волны 3 — ожидает решения); push обеих веток (по подтверждению); auth-hardening мини-волна; backlog: P1W3-WS-AUTH-CONSOLIDATE, P1W3-DRAWINGS-MSK-CONSOLIDATE, P1W3-BACKTESTAPI-DECIMAL-CONVENTION, P1W3-MULTIPLEX-WS-REFRESH.
+>
+> **2026-07-08…09 — Auth-hardening мини-волна (backend+frontend, координированно) реализована в ветке `p1/auth-hardening` (Develop, worktree; база `0e039be`; remote `s8r/bug-31` не тронут; НЕ запушено).** Model A — оба JWT переведены из `localStorage` в **HttpOnly+Secure cookie** (CFG-FE-01) + устранён разлогин двух вкладок через **единый cross-tab single-flight refresh** на `navigator.locks` (P1W2-REFRESH-GRACE; grace-окно сознательно НЕ вводилось — по итогам независимого ревью дизайна). Метод: brainstorm → независимое ревью дизайна с верификацией по коду → spec (`P1_AUTH_HARDENING_DESIGN.md`) → план (`P1_AUTH_HARDENING_PLAN.md`) → 18 тасков subagent-driven (implementer+reviewer Opus, test-first). **Backend (8):** `get_access_token` cookie∨Bearer; `login/setup/refresh` ставят 3 cookie (access path=/, refresh path=/api/v1/auth/refresh, csrf TTL=refresh), тело без токенов (`AuthMetaResponse`); refresh из cookie + CSRF double-submit (убран из exempt); logout стирает 3 cookie; WS cookie-auth на upgrade ×3 (`common/ws_auth.py`) + `auth_ok` первым кадром + Origin-check. **Frontend (7):** `api/session.ts` single-flight; client/aiStream на cookie; authStore без токенов + logout→backend + `partialize{user}`; LoginPage/SetupPage bodyless; bootstrap `/auth/me` под loading-гейтом; WS-хуки без токена. **Гейт: backend 2170 passed/0 failed, pyright 0 новых; frontend tsc 0 + vitest 761/0.** `/code-review` backend **MINOR-ONLY**, frontend **MINOR-ONLY** (3 фикса), финальное whole-branch ревью **READY-TO-MERGE** (cross-cutting контракт согласован). Детали: `Code_Review_Full_2026-07/P1_AUTH_HARDENING_LOG.md`. **Побочно закрыт `P1W3-WS-AUTH-CONSOLIDATE`.** **Осталось:** push (по подтверждению, ветки обоих репо); финальное сведение всех `p1/wave*`+`p1/auth-hardening` в `s8r/bug-31`. Backlog: P1-AUTH-NET-LOSS-RELOGIN, P1W3-MULTIPLEX-WS-REFRESH (1006-reconnect), WS-revoked-token, refresh rate-limit per-IP.
+>
+> **2026-07-09 — Playwright E2E волны auth-hardening ✅ (реальный браузер, cookie-flow).** Отдельный инстанс: backend+frontend из worktree, изолированная тест-БД `data/e2e_auth.db` (схема из моделей, `DEBUG=true`→Secure=false, тест-юзер через `/setup` — пароль sergopipo не понадобился). План `e2e_auth_hardening_plan.md` → фикс фикстур под Model A → новые сценарии → **реальный прогон**. **`e2e/auth-hardening.spec.ts` — 7/7 passed:** login→3 HttpOnly-cookie→работа→logout (cookie исчезли); тихий refresh при удалённом access (без разлогина); **две вкладки через ротацию — ни одну не выкидывает** (P1W2-REFRESH-GRACE); reload через cookie-бутстрап `/auth/me`; WS `/ws`+`/ws/trading-sessions` cookie-auth на upgrade + `auth_ok` (+ негатив: без cookie нет auth_ok). Контракт cookie (имена/flags/path/TTL) верифицирован вживую = DESIGN §3. **Регрессия mock-suite (CI=1): 161 passed, 3 skipped, 1 flaky** (`s5-account` — проходит изолированно). Всплывшие 8 падений — пре-существующий дрейф фикстур (git: файлы не менялись волной), не регресс Model A, починены в E2E-скоупе: FirstRunWizard-модалка (гейт читает `/auth/me`), `/user-favorites` backend-миграция (S8R BUG-20), `mockS7Apis` гейт `/users/me`→`/auth/me` (S8 W8t). Файлы: `e2e/auth-hardening.spec.ts` (new), `e2e/fixtures/api_mocks.ts`, `e2e/s5-favorites.spec.ts`, `e2e/s7-front2.spec.ts`, `e2e/s7r-chart-drawings-fix.spec.ts`, `scripts/playwright_login.sh`. **Волна auth-hardening полностью готова; осталось только push + сведение в `s8r/bug-31` (по подтверждению).**
+>
+> **2026-07-22 — BE-TRAD-06 (денежный учёт paper-портфеля, Model A) ЗАКРЫТ — последняя открытая P1.** PR #7 (`p1/auth-hardening` → `s8r/bug-31-unified-codegen`) **смёржен** (merge-commit `94721e8`, fast-forward) по решению заказчика; ветка `p1/be-trad-06` создана от обновлённого `s8r` (worktree, живой чекаут не тронут). Метод: superpowers **subagent-driven-development** по готовому плану (7 задач, TDD Red→Green, implementer+reviewer на каждую + финальное whole-branch ревью Opus). **Model A:** `balance`=свободный кэш, `blocked_amount`=капитал открытых позиций по входу, `equity=balance+blocked`; единая точка мутации `PaperPortfolioAccountant`; три точки учёта починены (buy-fill списывает+reject при нехватке; ручное/all-close и SL/TP-close кредитуют ×lot_size); инертный T+1 нейтрализован (`unblock_settled_funds`→no-op, `available=balance`); CB/AI не менялись. Инвариант `Δequity==trade.pnl` (после review-fix quantize — копейка-в-копейку и для облигаций). **Гейт: `test_circuit_breaker+test_trading` = 327 passed, 0 failed; ruff/py_compile чисто; 0 новых pyright; CB-drawdown на paper реально срабатывает** (`test_cb_drawdown_triggers_on_paper`). Финальное ревью: **0 Critical**, все actionable-Minor закрыты (`50f3335`). Коммиты `035f817..50f3335`. **Deploy-нюанс (не код-баг):** paper-позиции на границе деплоя → разовый drain открытых paper-сессий перед апдейтом (`deployment_guide.md` §7). Детали: `Code_Review_Full_2026-07/BE_TRAD_06_LOG.md`. **Открытых P1 не осталось.**
 
 ---
 
-## Текущий спринт: **Sprint 7 — ПЛАНИРОВАНИЕ ЗАВЕРШЕНО** ✅ (готов к старту W0, ждём команду заказчика)
+## Текущая фаза: **Sprint_8_Review закрыт содержательно — раздел «⬜ ОТКРЫТО» пуст, PR #9 и #10 смёржены. Остались только организационные мержи веток и сдача. Sprint 9 не стартовать.**
+
+> ⚠️ 2026-07-09: секция ниже актуализирована — W7 давно сделан (был устаревший статус «стартует 2026-05-14»).
+
+- **Sprint 8 (код, основной scope)** — 🏁 закрыт окончательно 2026-05-13 (W3+8.R+W4+W5+W5-hotfix). M4 Production-ready тэг по факту относится только к paper-trading.
+- **Sprint 8 W7 (BUG-1, sandbox/real trading)** — ✅ **сделан** (коммит `fbd616b` + доработки `s8-w8a…w8h`, Вариант C++ синхронный fill). 33 юнит-теста зелёные. **Живо переподтверждён 2026-07-09** (свежий реальный sandbox buy→sell на текущем коде: filled + `broker_order_id`, per-share цена через GetOrderState). ⚠️ При этом выявлено: T-Invest пересоздал sandbox-аккаунт — старый `account_id` в БД протух, обновлён на живой `f925da17…` (иначе новая sandbox-сессия падала «Account not found»). См. backlog `S8R-SANDBOX-ACCOUNT-STALE-REOPEN`.
+- **Sprint_8_Review — доведение, вторая волна** — ✅ **ЗАКРЫТА 2026-07-27.** По команде заказчика закрыты все 6 находок «попутно» (ruff F401 в alembic — из-за него CI job `lint` был красным и PR #9 висел UNSTABLE; серверная нормализация email в `PUT`; диагностика в `detail` PDF-экспорта; сырой `e.message` в Grid Search; REST-реконсиляция «висящих» фоновых бэктестов; разбор плавающего `test_max_positions_limit` — оказалось, юнит-тест ходил в MOEX ISS за размером лота). Плюс адаптивный таймаут выборки данных по запросу заказчика (`clamp(чанки × 15 с, 60 с, 1800 с)` вместо фиксированных 180 с). Гейт: pytest **2222/0 failed**, vitest **831/120 файлов**, tsc 0, eslint 0, ruff 0, mypy 0, bandit 0 medium+. E2E: **158 passed / 4 failed / 3 skipped** (4 падения предсуществующие — подтверждено прогоном той же спеки на базовой ветке; `auth-hardening.spec.ts` требует штатных портов 8000/5173 и не прогонялся). Stack Gotchas 45 → **46**. Коммит `a5698a7`.
+- **Sprint_8_Review — остаток приёмки (8 замечаний)** — ✅ **ЗАКРЫТ 2026-07-27.** Все 8 карточек вердикта PASS WITH NOTES исправлены в текущем цикле (решение заказчика от 2026-06-11: багфиксы — в цикле приёмки, не в S9). Ветка кода `s8r/backlog-fixes-2026-07-27` от `s8r/acceptance-fixes-2026-07-26` (PR #9 на момент работ не смёржен). 4 параллельных DEV-агента в изолированных worktree, TDD по каждой карточке. Гейт: backend **2213 passed / 1 xfailed / 0 failed** (baseline 2186, +27 новых тестов), vitest **828 passed / 119 файлов** (baseline 772/111, +56), tsc 0, eslint 0, mypy 0, bandit 0 medium+. Evidence — 10 скриншотов `Sprint_8_Review/screenshots/s9-*.png`, проверка на изолированном стенде :8110/:5183 на копии БД приёмки. Stack Gotchas: 36 → **45** (9 новых). Детали по каждой карточке — `Sprint_8_Review/backlog.md`.
+- **Sprint_8_Review** — ✅ **ЗАКРЫТ 2026-07-26, вердикт PASS WITH NOTES.** Все шаги чеклиста закрыты (102 `[x]`, 2 `[-]` — resize фигуры глазами и живые p95 «сигнал→ордер», оба требуют прод-условий). В цикле приёмки исправлены BUG-32 (HIGH), FIND-06 (MEDIUM), FIND-01 (LOW). Гейт: backend 2186 / frontend 765 / tsc 0 / eslint 0 / bandit 0 medium+. Артефакты: `Sprint_8_Review/acceptance_checklist.md`, `s8r_acceptance_run_2026-07-26.md`, `screenshots/`.
+- **P1 код-ревью (P0+P1)** — ✅ волны 1/2/3 + auth-hardening + E2E + **BE-TRAD-06** готовы. PR #7 (`p1/auth-hardening` → `s8r/bug-31-unified-codegen`) **смёржен** (`94721e8`). **BE-TRAD-06 закрыт** (2026-07-22, ветка `p1/be-trad-06`, коммиты `035f817..50f3335`, гейт 327 passed / 0 failed, финальное ревью 0 Critical) — см. `Code_Review_Full_2026-07/BE_TRAD_06_LOG.md`. **Открытых P1-находок не осталось.** **Сведение в `s8r/bug-31-unified-codegen` ЗАВЕРШЕНО** (PR #7 `94721e8` + PR #8 `eba6427`; wave2/wave3 уже содержались) — s8r содержит все P0/P1 + BE-TRAD-06. Осталось только: деплой-нюанс BE-TRAD-06 (разовый drain paper-сессий при выкатке, `deployment_guide.md` §7).
+- **Sprint 9 "Перевод в продуктив"** — ⬜ запланирован, стартует после Gate Sprint_8_Review. Содержание: фаза 9.1 = Mac mini Docker prod (18080) + LAN + backup; фаза 9.2 = canary (18081) + автоматизация.
+- **Sprint 9 "Перевод в продуктив"** — ⬜ запланирован, стартует после Gate Sprint_8_Review (PASS / PASS WITH NOTES, который зависит от W7). Содержание: фаза 9.1 = Mac mini Docker prod (18080) + LAN + backup; фаза 9.2 = canary (18081) + автоматизация. Спека-черновик: `docs/superpowers/specs/2026-05-13-s8-w6-design.md`.
 
 ## Прогресс по спринтам
 
@@ -22,54 +72,100 @@
 | **Sprint_5_Review_2** | **Chart hardening — 5 треков патч-цикла** | **✅ закрыт (ARCH: ПРИНЯТ)** | **Трек 4:** 401 fix (cleanup+guard+gotcha-16). **Трек 5:** TF-aware upsertLiveCandle. **Трек 3:** sequential-index mode intraday. **Трек 1:** prefetch свечей при логине (warm cache). **Трек 2:** верификация агрегации 1m→D/1h/4h (12 тестов, багов нет). ARCH-ревью: 15 проверок, 14 OK, 1 minor. Тесты: 238 frontend + 623 backend = 861 total, 0 failures. | Sprint_5_Review_2/arch_review_s5r2.md |
 | **S6** | **Уведомления + Security** | **✅ завершён** | Telegram, Email, In-app, Recovery, Graceful Shutdown, SDK upgrade (beta117), Stream Multiplex, E2E infra, Security tests. 685 backend + 250 frontend + 10 E2E S6 = **945 тестов**. Доп. работы сессий 22-24.04: карточки сессий (Decimal, unrealized P&L), CB fixes (commit, trading hours, downtime), маркеры сделок на графике, правила плагинов в CLAUDE.md, Playwright автологин. | Sprint_6/arch_review_s6.md |
 | **Sprint_6_Review** | **Промежуточное ревью M3: code review + UI-проверки + документация** | **✅ завершён (PASS, 2026-04-24)** | **Code review (8 разделов, 6 fixes).** **E2E регрессия:** 107→119 passed (0 failed). **3 code fixes** обнаружены только при E2E/визуальной верификации: AISettingsPage (`providers??[]` + `toLocaleString` guard), marketDataStore (`candles=[]` default). **Визуальная верификация S6:** 6 скриншотов, 5/6 OK. **EVENT_MAP фикс:** 8 publish-сайтов (runtime.py + engine.py) — 5 event_type теперь корректно подставляют `{strategy_name}`/`{ticker}`/`{direction}`/`{volume}`/`{pnl}`. **Документация:** ФТ/ТЗ/development_plan актуализированы за S5+S6. Итого: **11 FIXED + 1 FP + 3 перенесены в S7** (NS singleton, 5 event_type, inline-кнопки Telegram). **Milestone M3 достигнут.** | Sprint_6_Review/code_review.md, backlog.md |
-| **S7** | **Should-фичи + переносы + AI-команды** | 🔄 **планирование завершено** | 17 задач + 7.R готовы к запуску W0. Spec: `Sprint_7/sprint_design.md`. План: `Sprint_7/sprint_implementation_plan.md`. Промпты: 9 файлов (ARCH design, ARCH review, UX, QA, DEV-1..5). UX-плейсхолдеры: 6 файлов в `ux/`. | Sprint_7/sprint_design.md |
-| S8 | Стабилизация | ⬜ не начат | Coverage 80%, security audit | Sprint_8/sprint_report.md |
+| **S7** | **Should-фичи + переносы + AI-команды + post-S7 closeout** | **🏁 закрыт окончательно (2026-05-12)** | **17 задач + 7.R + ~30 post-S7 closeout волн.** Формально завершён 2026-04-26 (ARCH 7.R PASS WITH NOTES, M3 Phase 1 feature-complete). 27.04 → 12.05 — 16 рабочих дней post-S7 closeout: multiplexer singleton hotfix, paper SL/TP мониторинг, telegram positions/balance/close polish, P&L dual % формат, Grid Search + applySync полировка, chart drawings backlog (context menu, position-edit, trade markers exact-price), OHLCV timeframe filter, close_position exit/PnL fix, S7R-EQUITY-PER-TRADE + EQUITY-BY-INDEX (BusinessDay-индексы), S7R-BACKTEST-EXPORT-RU (русские заголовки + auto-landscape + DejaVu), S7R-NIGHTLY-CI-MOCKS (Playwright без backend на CI), ruff F821/F841 + mypy non-None narrowing. **Финальные тесты: 750 backend unit / 468 frontend vitest / 142 Playwright nightly, CI на develop ✅.** **DEFERRED-S8:** 25+ карточек (3 medium-high, ~10 medium, ~10 low) — не блокеры. | Sprint_7/arch_review_s7.md + Sprint_7/changelog.md (запись «🏁 SPRINT 7 FINAL CLOSEOUT 2026-05-12») |
+| **S8** | **Стабилизация (M4 Production-ready)** | **🏁 закрыт + W4 ✅ + W5 ✅ (2026-05-13, ARCH 8.R: PASS WITH NOTES)** | **W0+W1+W2+W3+8.R+W4+W5 за 2 дня (12-13.05).** Coverage 71% → **≥84.83% TOTAL** (gate `--cov-fail-under=80` в CI). Per-module: market_data/service 50→**83%**, strategy/service 51→**97%**, backtest/router 25→**87%**, dispatchers 0→100%, trading/service 51→88%, adapter 24→95%, backtest/engine 55→96%. Security: 3 high + auth rate tighten (60 → 5/min) закрыты, bandit/safety в CI. Admin role + Plotly Dash `/admin/metrics`. Event sync: EVENT_MAP=17 ↔ EVENT_TYPE_LABELS=17. Dashboard widgets: 4 виджета (Sparkline, Health WS, Balance с RUB/USD toggle, ActivePositions, responsive cols). Drawing editing + intraday coords + legacy backfill. Production-ready инфра: Docker compose + Dockerfile + nginx + launchd + Cloudflare Tunnel + deployment_guide.md v1.0. Документация: ФТ v2.5 (17 EVENT_TYPE_LABELS), ТЗ v1.5 + §8.10 Deployment Architecture, dev_plan v2.1, perf_baseline_w5. Stack Gotchas: 23 → **32**. Performance: `@timed_event` overhead 14 мкс, hot-path synthetic 1.4-2.5 мс (все цели ТЗ с запасом). **Финальные тесты после W5: 1547 backend / 0 failed @ ≥80% coverage, 578 vitest / 0 failed, 160 Playwright / 1 flaky / 3 skipped, 0 lint warnings (--max-warnings 0), 0 xfailed (event_delivery race починен).** ARCH 8.R: 0 блокеров. W4 закрыл 12/18 carry-over + 1 partial; W5 закрыл оставшиеся 7/7. Все 25 W3+W4 carry-over закрыты внутри S8. Sprint_8_Review — без накопления переносов, только финальная приёмка решений. | Sprint_8/arch_review_s8.md, Sprint_8/changelog.md, Sprint_8/sprint_state.md, Sprint_8_Review/backlog.md, Sprint_8/perf_baseline_w5.md |
 
 **Легенда:** ⬜ не начат · 🔄 в процессе · ✅ завершён · ⚠️ завершён с замечаниями
 
 ## Что делать дальше
 
 ```
-ТЕКУЩЕЕ ДЕЙСТВИЕ: Sprint 7 — ПЛАНИРОВАНИЕ ЗАВЕРШЕНО ✅ (2026-04-25)
+ТЕКУЩЕЕ ДЕЙСТВИЕ (2026-07-29): Sprint_8_Review закрыт содержательно.
+  Раздел «⬜ ОТКРЫТО» в Sprint_8_Review/backlog.md ПУСТ — закрыты и
+  S8R-SANDBOX-ACCOUNT-STALE-REOPEN, и флейк test_order_passes_when_no_violations.
 
-  Все файлы спринта подготовлены:
-    - sprint_design.md (spec, утверждён 2026-04-25)
-    - sprint_implementation_plan.md (21 задача, выполнена inline)
-    - 9 промптов агентов:
-      * prompt_ARCH_design.md (W0)
-      * prompt_ARCH_review.md (W3, задача 7.R)
-      * prompt_UX.md (W0 + W3)
-      * prompt_QA.md (W0 + W1 + W3, задача 7.11)
-      * prompt_DEV-1..5.md (BACK1, BACK2, FRONT1, FRONT2, OPS)
-    - execution_order.md (W0/W1/midsprint/W2/W3 + Cross-DEV contracts C1–C8)
-    - preflight_checklist.md (окружение, инфра E2E, two-repo branching)
-    - e2e_test_plan_s7.md (каркас для QA на W0)
-    - 6 UX-плейсхолдеров в ux/ (заполнит UX в W0)
-    - reports/ (директория для отчётов)
-  
-  Состав S7: 17 задач + 7.R
-    - Блок A (7 Should-фич): 7.1, 7.2, 7.3, 7.6, 7.7, 7.8, 7.9
-    - Блок B (6 переносов из S6): 7.12, 7.13, 7.14, 7.15, 7.16, 7.17
-    - Блок C (AI-команды, новый): 7.18, 7.19
-    - 7.10 UX полировка, 7.11 E2E, 7.R ARCH ревью
+  СМЁРЖЕНО:
+    - PR #9  (s8r/acceptance-fixes-2026-07-26 → s8r/bug-31) — ранее.
+    - PR #10 (s8r/backlog-fixes-2026-07-27  → s8r/bug-31) — merge commit cc04ef5.
+    - p1/wave2-backend, p1/wave3-frontend, p1/auth-hardening, s8r/acceptance-fixes
+      сводить НЕ требуется: сверка показала, что все они уже прямые предки S8R-ветки.
 
-  Подход: параллельные треки + W0 pre-sprint design
-  Calendar: ~14 рабочих дней (W0=2, W1=4, midsprint=1, W2=5, W3=2)
-  Гибкое продление: «делаем всё, время гибкое» (заказчик 2026-04-25)
+  ОЖИДАЕТ РЕШЕНИЯ / ДЕЙСТВИЯ ЗАКАЗЧИКА:
+    - Коммит + PR ветки s8r/sandbox-account-reopen (sandbox-фикс, флейк CB, gotcha-49).
+      Изменения готовы и проверены, но НЕ закоммичены — ждут команды.
+    - Мерж s8r/bug-31-unified-codegen → develop. Согласован; конфликт в
+      frontend/e2e/s5-paper-trading.spec.ts разобран, разрешение показано.
+    - Мерж docs/backlog-006-strategy-builder → main через merge-commit (--no-ff).
+    - /code-review по продуктовому коду closeout (запускает заказчик).
+    - Старт Sprint 9 — НЕ стартовать (решение заказчика).
 
-  Указатели:
-    - docs/superpowers/specs/2026-04-25-sprint-7-design.md
-    - docs/superpowers/plans/2026-04-25-sprint-7-implementation.md
+  ОСТАЁТСЯ ПРОВЕРИТЬ В ПРОДЕ (не задачи цикла, уже в backlog):
+    - живые p50/p95 «сигнал→ордер», «Telegram-команда», «загрузка дашборда»
+      под нагрузкой — Dash сейчас на mock-данных;
+    - повтор S8.7 «реальная сделка → уведомление в 3 канала» в торговые часы;
+    - развёртывание с нуля по deployment_guide.md — миграция d1e2f3a4b5c6 чинила
+      ровно этот сценарий, но живой прогон установки на чистой машине не делался;
+    - разовый drain paper-сессий при выкатке (deployment_guide §7).
 
-СЛЕДУЮЩЕЕ ДЕЙСТВИЕ:
-  1. Заказчик команда «start W0»
-  2. Запустить ARCH (prompt_ARCH_design.md), UX (prompt_UX.md), QA (prompt_QA.md)
-     в W0 параллельно
-  3. После W0 завершён → старт W1 (DEV-1, DEV-2, DEV-3 параллельно)
-  4. Midsprint check после W1 → старт W2
-  5. W3 → 7.R PASS → S7 закрыт → S8 feature freeze
+ИСТОРИЯ: Sprint 8 — 🏁 ЗАКРЫТ (2026-05-13). M4 Production-ready достигнут.
 
-ВЕТКА ПЛАНИРОВАНИЯ: docs/sprint-7-plan (от main, имя подтверждено заказчиком)
+  Sprint 8 закрыт за 2 рабочих дня (12-13.05) в формате 4-волнового спринта:
+    W0 ARCH-design (1 день) → W1 (4 потока) → W2 (4 потока + QA) → W3 (4 потока) → 8.R.
+
+  ARCH 8.R вердикт: PASS WITH NOTES.
+    - 0 блокеров production rollout.
+    - 18 carry-over карточек для W4 (6 medium + 11 low + 2 informational).
+    - Все non-blockers.
+
+  M4 Production-ready критерии — выполнение:
+    1. Coverage ≥ 80% по каждому модулю          ✅ 84.83% TOTAL + CI gate
+    2. Security audit                              ✅ 3 high закрыты + bandit/safety в CI
+    3. Performance testing                         ⚠️ инфра готова (@timed_event), p95 → W4 (S8R-W4-PERF-BASELINE-MEASUREMENTS)
+    4. E2E регрессия + 6 missing spec'ов          ✅ 158 passed + 5 skipped → W4 (S8R-W4-E2E-ANALYTICS-UNSKIP)
+    5. Закрытие S8 backlog                         ✅ medium-high 100%, medium 90%+
+    6. UX финальный юзабилити-тест                 ✅ 6 сценариев + 12 скриншотов
+    7. Документация                                ✅ deployment_guide v1.0 + FT v2.5 + TS v1.5
+    8. 8.R финальное ARCH-ревью + sign-off         ✅ PASS WITH NOTES
+
+  Финальные тестовые метрики:
+    - Backend pytest: 1490 passed / 0 failed @ 84.83% coverage
+    - Frontend vitest: 558 passed / 2 pre-existing flaky
+    - Playwright nightly: 158 passed / 5 skipped / 1 flaky
+    - Frontend lint: 0 errors / 0 warnings (--max-warnings 0)
+    - Frontend tsc + Backend ruff + mypy: 0 issues
+    - Bandit: 0 medium+ / Safety: 1 documented CVE
+
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: Коммит / push / тег
+
+  1. Заказчик подтверждает финальные коммиты в обе ветки:
+     - test-репо (docs/sprint-8): документация W3 + 4 W3 reports + ARCH report
+       + sprint_state + changelog + project_state + ui_checklist + screenshots + ФТ/ТЗ/dev_plan.
+     - Develop-репо (s8/sprint-8): W3 код (lint cleanup + status enum drift + paused filter
+       + bg autocollapse + health WS + Histogram tooltip + dashboardFilters refactor) +
+       OPS (Docker compose + Dockerfile + nginx + launchd + CI gate + Node 24) +
+       6 stack_gotchas (+ gotcha-32 W3) + INDEX + .coveragerc + CLAUDE.md polish + INSTALL.md.
+  2. Push'ы на origin (после подтверждения).
+  3. Опционально: создать тег `v1.0-m4-production-ready` (по команде заказчика).
+
+ВЕТКИ НА КОНЦЕ S8:
+  - Корневой Test: docs/sprint-8 (HEAD после W3 финализации).
+  - Develop/: s8/sprint-8 (HEAD после W3 финализации).
+
+W4 ✅ ЗАВЕРШЕНО (2026-05-13): 12/18 carry-over + 1 partial.
+W5 ✅ ЗАВЕРШЕНО (2026-05-13): оставшиеся 7/7 закрыты внутри текущего спринта:
+  - S8R-W5-DOCKER-COMPOSE-VALIDATE — BLOCKED (нет docker CLI; смок при первом деплое).
+  - S8R-W5-PLAYWRIGHT-NIGHTLY-RERUN — 160 passed / 1 flaky / 3 skipped.
+  - S8R-W5-TEST-EVENT-DELIVERY-FIX-FIXTURES — passthrough fixture, 21 passed.
+  - S8R-W5-COV-MARKET-DATA-SERVICE — 78% → 83%.
+  - S8R-W5-COV-STRATEGY-SERVICE — 68% → 97%.
+  - S8R-W5-PERF-BASELINE-MEASUREMENTS — pytest-benchmark + 4 теста.
+  - S8R-W5-MULTICURRENCY-TOGGLE — Mantine SegmentedControl RUB/USD.
+
+СЛЕДУЮЩЕЕ ДЕЙСТВИЕ: W5 push + тег update
+  1. Push W5 в обе ветки (docs/sprint-8 + s8/sprint-8).
+  2. Тег v1.0-m4-production-ready — либо переместить на W5-коммит (force-push),
+     либо создать v1.1-m4-production-ready (по решению заказчика).
+  3. Sprint_8_Review — финальная приёмка решений, без переносов.
 ```
 
 ## Ключевые решения (кросс-спринтовые)
@@ -151,7 +247,8 @@ _Все 4 перенесённые задачи из S4/S5 закрыты в Spr
 | Sprint_4_Review | S3 + S4 | M2: Бэктест | ✅ завершён | Sprint_4_Review/backlog.md |
 | **Sprint_5_Review** | S5 (внеплановое) | — (стабилизация M3) | **✅ завершён (PASS WITH NOTES)** | **Sprint_5_Review/arch_review_s5r.md** |
 | **Sprint_6_Review** | S5 + S6 | **M3: Торговля + Notifications** | **✅ завершён (PASS, 2026-04-24)** | **Sprint_6_Review/code_review.md** |
-| Sprint_8_Review | S7 + S8 | M4: Production | ⬜ не начат | Sprint_8_Review/backlog.md |
+| **Sprint_7_ARCH (7.R)** | **S7** | **M3 Phase 1 feature-complete** | **✅ завершён (PASS WITH NOTES, 2026-04-26)** | **Sprint_7/arch_review_s7.md** |
+| **Sprint_8_Review** | S7 + S8 | **M4: Production** | **✅ завершён (PASS WITH NOTES, 2026-07-26; пять волн доведения, backlog закрыт полностью 2026-07-29)** | **Sprint_8_Review/backlog.md** + `acceptance_checklist.md` |
 
 ## Milestones
 
@@ -160,7 +257,8 @@ _Все 4 перенесённые задачи из S4/S5 закрыты в Spr
 | M1: Каркас | S1 | ✅ | Auth, дашборд, CI, 68 тестов |
 | M2: Бэктест | S4 | ✅ | Стратегия → бэктест → результаты. Ревью: 21/28 задач исправлено, 7 отложено |
 | M3: Paper Trading + Notifications | S5 + S6 + Sprint_6_Review | ✅ (2026-04-24) | Paper+Real Trading + Circuit Breaker + Bond НКД + Tax FIFO + Notifications (Telegram/Email/In-app) + Recovery + Graceful Shutdown. 945 тестов + 119 E2E. ARCH: PASS |
-| M4: Production-ready | S8 | ⬜ | Coverage 80%, security, performance |
+| **M3 Phase 1 feature-complete** | **S7** | **✅ (2026-04-26)** | **Версионирование стратегий, Grid Search, экспорт CSV/PDF, drawing tools, дашборд-виджеты, first-run wizard, backup/restore, AI слэш-команды, аналитика бэктеста, фоновые бэктесты, WS-сессии, 5 новых event_type, Telegram callbacks. 1279 unit-тестов (885 backend + 394 frontend) + 136 E2E. ARCH 7.R: PASS WITH NOTES.** |
+| **M4: Production-ready** | **S8** | **✅ (2026-05-13)** | **Coverage 84.83% + CI gate, 3 high security fixes (HEADERS/TG-XSS/Email-XSS) + bandit/safety, performance instrumentation `@timed_event`, admin role + Plotly Dash, Docker compose + launchd + Cloudflare Tunnel, deployment_guide v1.0, 1490 backend + 558 vitest + 158 Playwright. ARCH 8.R: PASS WITH NOTES, 0 блокеров.** |
 
 ---
 

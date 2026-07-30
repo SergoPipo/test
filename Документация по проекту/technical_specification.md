@@ -3,10 +3,65 @@
 # ТЕХНИЧЕСКОЕ ЗАДАНИЕ (ТЗ)
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия:** 1.1  
-**Дата:** 2026-04-07  
-**Основание:** Функциональные требования v2.1 от 2026-04-07  
-**Статус:** Актуализирован по результатам Sprint 4 Review
+**Версия:** 1.8
+**Дата:** 2026-07-28
+**Основание:** Функциональные требования v2.9 от 2026-07-27
+**Статус:** ✅ M4 Production-ready. Gate Sprint_8_Review пройден (PASS WITH NOTES), остаток приёмки (8 замечаний) и весь backlog доведения закрыты. Актуализировано по итогам код-ревью P0–P1, финальной приёмки и closeout-цикла S8R.
+
+### История версий
+
+| Версия | Дата | Спринт | Ключевые изменения |
+|--------|------|--------|-------------------|
+| 1.8 | 2026-07-28 | Sprint_8_Review — closeout | §9 — контракт окружения backend-job в CI (`DEBUG=false` + не-дефолтные фиктивные `SECRET_KEY`/`ENCRYPTION_KEY`, чтобы гейт `check_production_secrets` продолжал работать); запрет `waitForLoadState('networkidle')` в E2E-спеках при живом WebSocket; требования к стенду `auth-hardening.spec.ts` (`PW_API_URL`/`PW_WS_URL`/`PW_ORIGIN`, `PW_ORIGIN` == `CORS_ORIGINS`, `LOGIN_RATE_LIMIT_PER_MINUTE` ≥ 10). Регресс-сверка схемы БД с `Base.metadata` на чистой установке (закрыт S8R-ALEMBIC-FRESH-DB-DRIFT: не хватало таблицы `user_ai_settings` и 8 колонок, login отдавал 500). Baseline: 2223 pytest / 832 vitest, E2E 163 passed одним прогоном, Stack Gotchas 46 → 47. |
+| 1.6 | 2026-07-27 | Code Review P0–P1 + S8R | §7 — auth Model A (3 HttpOnly-cookie, CSRF double-submit, WS cookie-auth на upgrade, single-flight refresh на `navigator.locks`) + правило «клиент мимо axios обязан слать `X-CSRF-Token`»; §3/§5 — `PaperPortfolioAccountant` как единая точка мутации денег paper-портфеля и инвариант `Δequity == trade.pnl`; §8 — Alembic обязан уважать `DATABASE_URL`, разовый drain paper-сессий при выкатке; §6 — контракт слоя разметки графика (`requestUpdate` в `attached()`, единая выборка фигуры под курсором); §9 — актуальные baseline-цифры тестов |
+| 1.5 | 2026-05-13 | S8 W3 | Добавлен §8.4 «Deployment Architecture (Mac mini + Docker)»; §7 расширен под admin role + security headers + ASGI mount auth; §9 — coverage gate 80% + bandit/safety CI gates; §4 — performance baseline числа из W2 |
+| 1.4 | 2026-04-26 | S7 R | Phase 1 feature-complete |
+| 1.3 | 2026-04-15 | S6 R | Notifications S6, paper SL/TP |
+| ... | | | (см. git log) |
+
+### S8 Production-ready дополнения (v1.5)
+
+| Секция ТЗ | Дополнение | Источник |
+|-----------|-----------|----------|
+| §1 Стек | Python 3.11 (закреплено в CI), Node 24 LTS (миграция S7R-CI-NODE24-MIGRATION в S8 W3), Docker Compose v2, nginx-alpine, Cloudflare Tunnel | S8 W3 |
+| §2.1 Архитектура | Admin role + admin panel (Plotly Dash под `/api/v1/admin/metrics` через `AdminAuthASGIMiddleware`) | S8 W2 |
+| §4 API | `/api/v1/health` extended: `cb_state`, `tinvest_connected`, `scheduler_running`, `scheduler_jobs[]`; `/api/v1/market-data/sparkline?ticker=X&hours=N`; `/api/v1/account/balance/history?since_first_activity=true`; `POST /api/v1/notifications/telegram/test`; admin namespace `/api/v1/admin/*` под `require_admin` | S8 W1+W2 |
+| §4 Performance metrics (реальные, baseline W2) | signal→order p95: измеряется `@timed_event(name="trading.signal_to_order")` (цель < 500мс — мониторинг через `/admin/metrics`); dashboard LCP (PerformanceObserver) < 2с; Telegram webhook handle p95 (`@timed_event(name="telegram.handle")`) < 3с | S8 W2 §4.3 |
+| §7 Security | SecurityHeadersMiddleware: CSP / HSTS / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy. XSS-protection (html.escape) в Telegram + Email диспетчерах. bandit + safety security-scan job в CI (medium+ блокирует PR). 0 high findings (см. `Спринты/Sprint_8/security_audit_s8.md`) | S8 W1+W2 |
+| §8 Deployment | **Новый §8.4:** Docker compose (backend uvicorn + frontend nginx + sqlite volume) на Mac mini + launchd auto-start + Cloudflare Tunnel SSL. Гайд установки: [deployment_guide.md](deployment_guide.md) | S8 W3 |
+| §9 Тестирование | Coverage gate `--cov-fail-under=80` активен в CI. Baseline 2026-05-13: 1490 backend pytest passed, 544 frontend vitest, 158 Playwright nightly. Bandit 0 medium+, safety 1 documented CVE | S8 W1+W2+W3 |
+| §5 Backend модули | `app/admin/` (router + dash_mount + metrics_dash), `app/common/observability.py` (`@timed_event`), `app/middleware/security_headers.py` (CSP/HSTS), `EVENT_MAP` 17 ключей в `notification/event_bus.py` | S8 W1+W2 |
+| §6 Frontend модули | `components/dashboard/{Health,Sparkline,Balance,ActivePositions}Widget.tsx`, `components/common/ErrorBoundary.tsx`, `components/admin/AdminLayout.tsx` + `ProtectedAdminRoute`, `api/types.ts::PaginatedResponse<T>` + `unwrapPaginated()` | S8 W1+W2 |
+
+### Дополнения по итогам код-ревью P0–P1 и Sprint_8_Review (v1.6)
+
+| Секция ТЗ | Дополнение | Источник |
+|-----------|-----------|----------|
+| **§7 Auth (Model A)** | Оба JWT — в cookie, не в `localStorage`. Три cookie: `access_token` (`path=/`), `refresh_token` (`path=/api/v1/auth/refresh`), `csrf_token` (TTL = refresh), все HttpOnly+Secure кроме csrf (double-submit). `login/setup/refresh` возвращают тело **без токенов** (`AuthMetaResponse`), `logout` стирает все три. Refresh читается из cookie и защищён CSRF double-submit (убран из exempt-списка). Бутстрап клиента — `GET /auth/me` под loading-гейтом. Cross-tab single-flight refresh на `navigator.locks` (grace-окно сознательно не вводилось). | P1 auth-hardening |
+| **§7 CSRF: правило для не-axios клиентов** | Interceptor двойной отправки CSRF живёт в axios-инстансе (`api/client.ts`). **Любой клиент, который ходит мимо него** (SSE через `fetch`, `EventSource`, ручные `fetch`), обязан сам подставлять `X-CSRF-Token` из cookie — иначе `CSRFMiddleware` видит «cookie есть, заголовка нет» и отбивает запрос 403. Единый источник токена — экспортируемый `getCSRFToken()`; дублировать регулярку разбора cookie запрещено. Каждый такой клиент покрывается тестом на заголовок. | S8R BUG-32 (класс BUG-21) |
+| **§7 WebSocket** | Авторизация по cookie **на upgrade** (`common/ws_auth.py`, применяется к трём точкам), первым кадром сервер шлёт `auth_ok`, проверка `Origin`. Токен в query-string не используется. Протухший токен → close 4401 + guard в `onclose` (без reconnect-шторма). | P1 W3 + auth-hardening |
+| **§3/§5 Денежный учёт paper** | Единая точка мутации — `PaperPortfolioAccountant`. Семантика полей: `balance` = свободный кэш, `blocked_amount` = капитал открытых позиций по цене входа, `equity = balance + blocked_amount`. Buy-fill списывает и **отклоняет** при нехватке; ручное/all-close и SL/TP-close кредитуют с учётом `lot_size`. Инертный T+1 нейтрализован для paper (`unblock_settled_funds` → no-op, `available = balance`). Инвариант, закреплённый тестом: `Δequity == trade.pnl` (с `quantize` — точно и для облигаций). Следствие: CB-drawdown работает на paper. | BE-TRAD-06 |
+| **§6 Слой разметки графика** | `series.attachPrimitive()` не запрашивает перерисовку — примитив обязан звать `param.requestUpdate()` в `attached()`, иначе фигура не рисуется до постороннего redraw. Выбор фигуры под курсором — одна функция `primitives/pick.ts::pickTopHit` (перебор от верхнего слоя к нижнему) для **всех** обработчиков: click, hover, контекстное меню, drag; иначе захват фигуры проваливается в панорамирование графика. Анкоры (`p1`/`p2`, `corner-*`) отдаются hit-тестом только у выделенной фигуры → после выделения hit-тест пере-опрашивается. Подробности: `Develop/stack_gotchas/gotcha-36-attachprimitive-no-redraw.md`. | S8R BUG-33 / BUG-34 |
+| **§8 Deployment: миграции** | `alembic/env.py` обязан уважать `DATABASE_URL` из окружения. Приоритет URL: программный override (`config.set_main_option`, тесты) > `DATABASE_URL` > значение из `alembic.ini`; async-драйверы (`+aiosqlite`/`+asyncpg`) срезаются, т.к. Alembic ходит синхронно. Без этого миграции молча уходят в БД из ini — при отдельном пути к данным (Docker/прод) обновится не тот файл. | S8R FIND-06 |
+| **§8 Deployment: выкатка** | Разовый **drain открытых paper-сессий** перед обновлением на релиз с BE-TRAD-06: позиции, открытые старой схемой учёта, на границе деплоя дают расхождение `blocked_amount`. Процедура — `deployment_guide.md` §7. | BE-TRAD-06 |
+| **§9 Тестирование (baseline 2026-07-27)** | backend pytest **2186 passed / 1 xfailed / 0 failed**; frontend vitest **772 passed** (111 файлов); `tsc --noEmit` 0; `eslint --max-warnings 0` 0; bandit 0 medium+; Playwright: `auth-hardening.spec.ts` **7/7** (реальный cookie-flow), mock-suite **161 passed / 3 skipped**. | S8R + P1 |
+
+### Дополнения по итогам цикла доведения S8R — остаток приёмки (v1.7)
+
+| Секция ТЗ | Дополнение | Источник |
+|-----------|-----------|----------|
+| **§4 API: настройки уведомлений** | `GET /api/v1/notifications/settings` отдаёт **канонический** список всех `event_type` из `EVENT_MAP` (сохранённые строки поверх дефолтов), а не только строки из БД: для нового пользователя это 18 объектов, а не `[]`. Каждый элемент несёт производное поле **`email_supported: bool`** — единый источник `EMAIL_ALLOWED_EVENTS` (`app/notification/email.py`). Фронт список email-поддерживаемых типов **не дублирует**, а гасит по нему Email-тумблер. `PUT /settings/{event_type}` возвращает тот же объект; `email_supported` всегда производное, входное значение игнорируется. ⚠️ `PUT` пока **не отклоняет** `email_enabled=true` для неподдерживаемого типа — защита только на UI (осознанно: 422 сломал бы wizard-flow). | S9-EMAIL-TOGGLE-MISMATCH |
+| **§4/§5 Бэктест: постановка job'а** | Строка `Backtest` создаётся до постановки job (UI нужен `backtest_id` в ответе 202), но **любой** отказ `job_manager.submit()` (per-user cap, лок БД, `CancelledError` при обрыве клиента) обязан её удалить — записей `status='queued'` без соответствующего job'а не остаётся ни при каком исходе. INSERT в `backtest_jobs` ретраится на «database is locked». Контракт отказов: занятость БД → **503** + `Retry-After: 3` + `{"detail": "<русский текст>"}`; превышение лимита → **422** + `{"detail": "Превышен лимит фоновых бэктестов (макс. 3)"}`. | S9-BG-BACKTEST-503-UX |
+| **§5 Бэктест: таймаут данных** | Выборка свечей ограничена таймаутом, **соразмерным объёму работы**: `resolve_data_timeout(timeframe, date_from, date_to)` = `clamp(⌈период / чанк(tf)⌉ × PER_CHUNK, MIN, MAX)`, где чанк — сколько календарных дней провайдер отдаёт за один запрос (~7 дней для 1m, ~1 год для 1h и старше). Настройки: `BACKTEST_DATA_TIMEOUT_PER_CHUNK_SEC` (15 с), `BACKTEST_DATA_TIMEOUT_MIN_SEC` (60 с), `BACKTEST_DATA_TIMEOUT_MAX_SEC` (1800 с); `BACKTEST_DATA_TIMEOUT_SEC > 0` — жёсткий override для диагностики, `0` (по умолчанию) — авторасчёт. Фиксированные 180 с одинаково душили и 3 месяца часовок (лишнее ожидание мёртвого источника), и 10 лет минуток (обрыв живой загрузки). Исчерпание → `BacktestDataTimeoutError` с русским текстом → job `status='error'`, запись `backtests` → `status='failed'` + `error_message` с той же причиной. Запись терминального статуса обязана иметь fallback на свежей сессии из фабрики: отмена по `asyncio.wait_for` отравляет текущую `AsyncSession` (`gotcha-38`). | S9-BACKTEST-DATA-TIMEOUT + доведение |
+| **§4 Настройки уведомлений: серверная нормализация** | `PUT /notifications/settings/{event_type}` приводит `email_enabled` к `false` для типов вне `EMAIL_ALLOWED_EVENTS` и отвечает **200** с нормализованным значением. 422 сознательно не используется: жёсткий отказ ломает wizard-flow, который отправляет настройки для всех типов разом. UI-гейт по `email_supported` остаётся, серверная нормализация закрывает обход мимо интерфейса. | S9-EMAIL-TOGGLE-MISMATCH (доведение) |
+| **§6 Фоновые бэктесты: реконсиляция после перезагрузки** | Состояние фоновых job'ов персистится в localStorage, а WS-канал сервер закрывает через 30 с после терминального события — job, завершившийся при закрытой вкладке, после F5 «висел» в `running` без результата и причины. На mount выполняется разовая сверка незавершённых job'ов с `GET /backtest/jobs/{id}`; терминальный статус и причина подтягиваются в store, недоступная сеть состояние не меняет. **Контракт ответа задаёт `_job_to_dict` (`backtest/router.py`): идентификатор бэктеста приходит ВЛОЖЕННЫМ — `result.backtest_id`, плоского `result_id` в ответе нет.** Все потребители (оба WS-обработчика и REST-реконсиляция) обязаны читать его одинаково: расхождение даёт `status='done'` без `result_id`, и бейдж не покажет кнопку «Открыть результат». Тип клиента `getJob()` обязан соответствовать этой схеме (`progress`, `error_message`, `result`). | S8R доведение + код-ревью |
+| **§9 Тесты не ходят в сеть** | Юнит-тесты `app/trading` обязаны подменять `MarketDataService.ensure_lot_size_strict`. По контракту FIX-1 он идёт в T-Invest → MOEX ISS и **бросает** `LotSizeUnavailableError`, когда лот не определить авторитетно, из-за чего `process_signal` пропускает сигнал. Без подмены `test_max_positions_limit` зависел от доступности ISS: пропуск одного из трёх наполняющих сигналов оставлял 2 открытые позиции, и четвёртый сигнал проходил по лимиту. Ветка «лот недоступен → сигнал пропущен» покрыта явным тестом. | S8R доведение |
+| **§4 Контракт ошибок для фронта** | Любая ошибка запроса показывается пользователю текстом из `detail` ответа сервера. Сырой текст axios (`Request failed with status code N`, `Network Error`, `timeout of Nms exceeded`) выводить запрещено. Единая точка разбора — `frontend/src/utils/apiError.ts::getApiErrorMessage(err, fallback)`: понимает `{detail: str}`, `{detail: [{msg}]}` (422), `{detail: {message}}`, `{message}`; HTML-тело прокси и blob отсекает; при непарсибельном ответе отдаёт fallback вызывающей стороны. Причина падения фонового job'а: `error_message` (REST) / `message` (WS-кадр). | S9-BG-BACKTEST-503-UX |
+| **§6 Тема и доступность** | Тема вынесена в `frontend/src/theme.ts`. `--mantine-color-dimmed` переопределяется **только** для dark-схемы через `cssVariablesResolver` (`light: {}` не трогается): контраст приглушённого текста к фону поднят с **4.04 : 1** (ниже порога WCAG AA) до **7.83 : 1** (AAA). Хардкод цветов в компонентах запрещён — правка на уровне токена. Подробности: `gotcha-42`. | S9-DARK-DIMMED-CONTRAST |
+| **§6 SPA-роутинг** | Каждый вложенный `<Routes>` обязан иметь собственный `<Route path="*">`: внешний splat-роут (`admin/*`) уже перехватил путь, и глобальный catch-all не срабатывает — вместо 404 рендерится пустой `main`. `/admin/metrics` внутри SPA — страница-заглушка со ссылкой на Dash (дашборд смонтирован в backend через `app.mount` и живёт на другом origin), остальные `/admin/*` → 404. Подробности: `gotcha-43`. | S9-ADMIN-METRICS-SPA-404 |
+| **§7 Поля секретов в UI** | Поле ввода стороннего секрета (Telegram bot token и аналогичные) обязано нести `autoComplete="new-password"` + `data-lpignore="true"`. `autocomplete="off"` для `type=password` браузерами игнорируется намеренно, а Mantine `PasswordInput` ставит именно `off` — без явного переопределения Chrome подставляет в поле секрета сохранённый пароль пользователя. Проверяется тестом на **отрендеренный DOM**, не на пропсы. Подробности: `gotcha-41`. | S9-BOT-TOKEN-AUTOFILL |
+| **§5 Локализация парсера** | Все пользовательские предупреждения `block_parser.py` (13 мест `warnings.append`) — на русском; внутренние ключи секций отображаются через `SECTION_LABELS_RU`/`_section_label()`. Технические строки логов и текст самих исключений (`{e}`) не локализуются. | S9-BLOCK-PARSER-I18N |
+| **§9 Тестирование (после доведения, 2026-07-27)** | backend pytest **2213 passed / 1 xfailed / 0 failed** (+27 к baseline); frontend vitest **828 passed** (119 файлов, +56); `tsc --noEmit` 0; `eslint --max-warnings 0` 0; mypy 0; bandit 0 medium+. Stack Gotchas: 36 → **45**. ⚠️ Известная нестабильность: `test_trading/test_order_manager.py::test_max_positions_limit` упал 1 раз из 3 полных прогонов (изолированно и в остальных прогонах зелёный; `app/trading/` в цикле не менялся) — требует отдельного разбора. | S8R доведение |
 
 ---
 
@@ -2432,6 +2487,57 @@ SQLite-специфичные решения, требующие замены п
 **Инструмент миграции:** Alembic (уже в стеке) с отдельным `env.py` для PostgreSQL.
 **Скрипт:** `python -m app.cli migrate-to-postgres --source sqlite:///data/terminal.db --target postgresql://...`
 
+### 8.10 Deployment Architecture (Mac mini production-ready, S8 W3) — ✅ реализовано
+
+Утверждено заказчиком 2026-05-12 (arch_design_s8 §7.2, batch 3 пункт 10). Полный гайд установки: [deployment_guide.md](deployment_guide.md).
+
+**Topology:**
+
+```
+End users → Cloudflare edge (TLS termination, DDoS protection)
+              ↓ outbound tunnel (cloudflared)
+          Mac mini (macOS 14+, Apple Silicon)
+              ↓ launchd auto-start at boot
+          Docker Compose v2
+              ├── moex-frontend (nginx:alpine)  :80
+              │     ├── SPA static (React 19 + Vite build)
+              │     └── reverse proxy /api/, /ws/ → backend:8000
+              └── moex-backend (python:3.11-slim)  :8000
+                    ├── FastAPI + Uvicorn
+                    ├── SQLAlchemy + alembic (миграции на старте)
+                    ├── APScheduler (backup_job, MOEX-calendar, T+1 unblock)
+                    ├── tinkoff-investments gRPC (patched SDK)
+                    └── volumes: sqlite-data, sqlite-backups
+```
+
+**Компоненты:**
+
+| Компонент | Образ / технология | Назначение |
+|-----------|--------------------|------------|
+| `moex-backend` | python:3.11-slim, multi-stage (ta-lib build deps → runtime) | FastAPI + uvicorn |
+| `moex-frontend` | node:24-alpine (builder) → nginx:alpine (runtime) | SPA static + reverse proxy |
+| `sqlite-data` (named volume) | bind to /app/data/app.sqlite | Production БД (WAL-mode) |
+| `sqlite-backups` (named volume) | bind to /app/backups/ | APScheduler backup_job snapshots |
+| launchd plist `com.moex.terminal` | macOS auto-start | `docker compose up -d` при загрузке |
+| Cloudflare Tunnel `cloudflared` | TLS termination + публичный домен | Без открытых портов на роутере |
+
+**Безопасность:**
+- `.env.production` не коммитится (`.gitignore` правило `.env.*`). Содержит `SECRET_KEY`, `MASTER_KEY`, `TINVEST_TOKEN`.
+- nginx внутри контейнера слушает только :80; TLS — на Cloudflare edge.
+- `AdminAuthASGIMiddleware` защищает `/api/v1/admin/metrics` (Plotly Dash) — JWT + is_admin check (см. Gotcha 31).
+- SecurityHeadersMiddleware (CSP/HSTS/XFO/XCTO/Referrer/Permissions) применяется на всех HTTP-ответах.
+
+**Обновление:** `git pull && docker compose build && docker compose down && docker compose up -d`. Миграции применяются в entrypoint backend контейнера (`alembic upgrade head` перед uvicorn).
+
+**Backup:** `backup_job` в APScheduler (daily 03:00 МСК, см. `app/scheduler/service.py`) → `/app/backups/*.sqlite`. Опционально cron на хосте копирует на внешний диск (см. deployment_guide.md §6.2).
+
+**Monitoring:** `GET /api/v1/health` extended (статус CB, T-Invest, scheduler, jobs). Plotly Dash `/api/v1/admin/metrics` показывает performance графики (только admin).
+
+**Файлы:**
+- `Develop/docker-compose.yml`, `Develop/Dockerfile.backend`, `Develop/frontend/Dockerfile`, `Develop/nginx.conf`, `Develop/.dockerignore`.
+- `Документация по проекту/launchd/com.moex.terminal.plist`.
+- `Документация по проекту/deployment_guide.md` — 9 разделов (платформа, предусловия, установка, launchd, Cloudflare Tunnel, backup/restore, обновление, мониторинг, troubleshooting).
+
 ---
 
 ## 9. СТРАТЕГИЯ ТЕСТИРОВАНИЯ
@@ -2482,6 +2588,24 @@ SQLite-специфичные решения, требующие замены п
 - **Frontend:** Vitest + React Testing Library + MSW (Mock Service Worker)
 - **E2E:** Playwright
 - **CI:** GitHub Actions → lint (ruff + eslint) → type check (mypy + tsc) → unit tests → integration tests → E2E (при наличии)
+
+**Окружение backend-job в CI (S8R closeout, 2026-07-28).** `app/config.py` содержит валидатор `check_production_secrets`: при `DEBUG=False` значения `SECRET_KEY`/`ENCRYPTION_KEY`, начинающиеся с `dev-`, **жёстко** роняют приложение на импорте. В CI нет `.env`, поэтому job `backend` обязан задавать секреты сам — иначе `pytest` падает не на тестах, а на `import app.main` из `tests/conftest.py`.
+
+Контракт:
+
+| Переменная | Значение в CI | Почему так |
+|---|---|---|
+| `DEBUG` | `false` | Тесты идут в том же режиме, что и production-сборка: `CryptoService` в strict-режиме, auth-cookie с `Secure`. `DEBUG=true` заглушил бы гейт секретов целиком |
+| `SECRET_KEY` | не-дефолтное фиктивное значение | Гейт остаётся живым: возврат на `dev-*` снова уронит job |
+| `ENCRYPTION_KEY` | не-дефолтное фиктивное значение, **≥ 32 байт** | Требование `CryptoService` (AES-256-GCM через HKDF), проверяется в strict-режиме |
+
+Значения — публичные тестовые константы прямо в `ci.yml`. Реальные секреты в CI не заводятся, `.env` не коммитится.
+
+**E2E и `networkidle` (S8R closeout).** В спеках **запрещён** `page.waitForLoadState('networkidle')`: терминал держит постоянный WebSocket, сеть не «затихает», и длинный прогон встаёт дольше собственного `timeout` теста без единого `failed`. Ждать нужно конкретное условие — `expect(locator).toBeVisible()` или `waitForResponse`. Подробности — `Develop/stack_gotchas/gotcha-46-e2e-networkidle-and-vite-cache.md`.
+
+**Схема БД против моделей (S8R closeout).** Alembic-миграции обязаны полностью покрывать `Base.metadata`: проверка `tests/unit/test_migration.py::test_fresh_db_schema_matches_models` применяет миграции к пустой БД и сверяет **и таблицы, и колонки**. Сверка только по списку таблиц дефект не ловит — расходятся и колонки внутри существующих. Любая новая колонка/таблица в моделях без миграции ломает **чистую установку** (существующие стенды при этом работают, и дефект остаётся невидимым до развёртывания). Миграции, догоняющие drift, писать **идемпотентными** (добавлять объект только если его нет), иначе `upgrade head` упадёт на рабочих БД.
+
+**`auth-hardening.spec.ts`** работает против ЖИВОГО backend (cookie-flow не мокается) и требует отдельного стенда: адреса задаются через `PW_API_URL` / `PW_WS_URL` / `PW_ORIGIN`, значение `PW_ORIGIN` обязано совпадать с `CORS_ORIGINS` backend'а, а `LOGIN_RATE_LIMIT_PER_MINUTE` на стенде должен быть не ниже 10 (спека логинится в 6 тестах из 7, дефолт — 5).
 
 ### 9.5 Роль QA-инженера в процессе тестирования
 
@@ -2738,6 +2862,186 @@ QA-инженер встроен в процесс разработки с пе�
 
 ---
 
+## 11. SPRINT 7 — РЕАЛИЗАЦИЯ SHOULD-ФИЧ (Phase 1 feature-complete) — ✅ S7 (2026-04-26)
+
+> Раздел добавлен в v1.4 по итогам Sprint_7_ARCH (7.R). Описывает технические артефакты Sprint 7 (17 задач). Файлы расположены в `Develop/backend/app/` и `Develop/frontend/src/`.
+
+### 11.1 Модель `strategy_versions` — расширение
+
+```sql
+-- Alembic миграция c1d4e5f6a7b8_add_strategy_versions_meta
+ALTER TABLE strategy_versions ADD COLUMN created_by INTEGER NULL REFERENCES users(id);
+ALTER TABLE strategy_versions ADD COLUMN comment TEXT NULL;
+CREATE INDEX idx_sv_history ON strategy_versions (strategy_id, version_number DESC);
+```
+
+Backfill: `created_by = strategies.user_id` (subquery в данных-миграции). `comment` остаётся NULL для старых записей.
+
+### 11.2 Endpoints версионирования (контракт C4)
+
+| Метод | URL | Описание |
+|-------|-----|----------|
+| GET | `/api/v1/strategy/{id}/versions/list` | Компактный список (без `blocks_json`) |
+| GET | `/api/v1/strategy/{id}/versions/by-id/{version_id}` | Полная версия по id |
+| POST | `/api/v1/strategy/{id}/versions/snapshot` | Создание именованной версии (`{comment}`) |
+| POST | `/api/v1/strategy/{id}/versions/{version_id}/restore` | History-preserving restore |
+| GET | `/api/v1/strategy/{id}/versions/{version_number}` | Legacy: версия по version_number |
+
+⚠️ Порядок маршрутов критичен (gotcha-20): статические сегменты (`list`, `snapshot`, `by-id`, `restore`) объявлены **выше** `/{version_number}`, иначе FastAPI пытается распарсить `list` как int → 422.
+
+### 11.3 Модель `backtest_jobs`
+
+```sql
+CREATE TABLE backtest_jobs (
+  id TEXT PRIMARY KEY,                    -- uuid hex
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  strategy_id INTEGER NOT NULL REFERENCES strategies(id),
+  strategy_version_id INTEGER NULL REFERENCES strategy_versions(id),
+  job_type TEXT NOT NULL,                 -- 'single' | 'grid'
+  status TEXT NOT NULL,                   -- 'queued' | 'running' | 'done' | 'error' | 'cancelled'
+  progress INTEGER NOT NULL DEFAULT 0,
+  params_json TEXT NOT NULL,
+  result_json TEXT NULL,
+  error_message TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+  updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+  finished_at DATETIME NULL
+);
+CREATE INDEX idx_bj_user_active ON backtest_jobs (user_id, status);
+```
+
+### 11.4 BacktestJobManager (singleton)
+
+`app/backtest/jobs.py`. Хранит `dict[job_id, asyncio.Task]` в памяти + persist в `backtest_jobs`. API: `submit(user_id, runner, job_type, params)` / `get(job_id)` / `list_user(user_id, status?)` / `cancel(job_id)` / `shutdown()`. Per-user cap=3, защищён `asyncio.Lock`. Создаётся в `lifespan` (`app/main.py:91`), сохраняется в `app.state.backtest_job_manager`. Cleanup на shutdown через `asyncio.shield` для финального `_update_status`.
+
+### 11.5 GridSearchEngine (multiprocessing.Pool)
+
+`app/backtest/grid.py`. ТЗ §5.3.4 соблюдён: `multiprocessing.Pool` (spawn-context, workers = `os.cpu_count() - 1`). Worker `_run_single_backtest(payload: dict) -> dict` — module-level pickle-friendly функция; импортирует `backtrader`/`pandas` сам, восстанавливает DataFrame из `list[dict]` свечей. OHLCV грузится один раз в main-процессе (`router.py::_prepare_grid_workload`) и передаётся как pickle-friendly base_payload. Pool управляется внутри `loop.run_in_executor(None, _drive_pool_sync)` — event loop не блокируется.
+
+Hard cap: ≤5 параметров, ≤1000 комбинаций (raise 422 ДО Pool.spawn). Overfitting flag: если `(sharpe[0] - sharpe[4]) / sharpe[0] > 0.5` → `overfitting_warning: true`. См. также gotcha-21 (UPDATE-секция).
+
+### 11.6 WS endpoints
+
+#### `/ws/trading-sessions/{user_id}` (контракт C1)
+
+`app/trading/ws_sessions.py`. Auth первым сообщением (`{action:"auth", token:"<jwt>"}`, JWT не в URL — gotcha-16). После auth_ok backend:
+1. Шлёт `{event:"snapshot", sessions: [...]}`.
+2. Подписывается на `trades:{session_id}` для каждой активной сессии + `system:{user_id}` (для новых сессий).
+3. Форвардит deltas: `position_update`, `trade_filled`, `pnl_update`, `session_state`.
+
+Cleanup: try/finally — отписка от всех каналов при WebSocketDisconnect.
+
+#### `/ws/backtest/{job_id}` (контракт C2)
+
+`app/backtest/ws_backtest.py`. Тот же auth-pattern. Сообщения: `queued` / `started` / `progress` / `done` / `error` / `cancelled`. Активен пока `job.status in ('queued','running')` + 30 сек grace после терминального события (гарантия доставки финального события).
+
+### 11.7 BackupService
+
+`app/backup/service.py`. WAL-aware SQLite copy: `BEGIN IMMEDIATE` → `PRAGMA wal_checkpoint(FULL)` → `copy2(.db)` + копирование `*.db-wal` / `*.db-shm` (gotcha-19). Postgres ветка: `pg_dump --no-owner --format=custom`. Ротация: keep_last (default 7). Restore: validate → atomic rename → `alembic upgrade head`. APScheduler-job `backup_db_daily` в `app/scheduler/service.py:362` (cron из `BACKUP_CRON`, default 03:00 UTC). CLI: `python -m app.cli.backup {create,list,restore,rotate}` (argparse, без typer).
+
+### 11.8 ChatRequest.context_items (контракт C3)
+
+`app/ai/chat_schemas.py`:
+
+```python
+class ChatContextType(StrEnum):
+    chart = "chart"
+    backtest = "backtest"
+    strategy = "strategy"
+    session = "session"
+    portfolio = "portfolio"
+
+class ChatContextItem(BaseModel):
+    type: ChatContextType
+    id: int | str | None = None  # str для tickers (chart), int для остальных, None для portfolio
+
+class ChatRequest(BaseModel):
+    strategy_id: int | None = None
+    message: str = Field(min_length=1, max_length=4000)
+    history: list[ChatMessage] = []
+    context: dict | None = None  # legacy (блок-режим стратегии)
+    context_items: list[ChatContextItem] = Field(default_factory=list, max_length=5)  # NEW
+```
+
+### 11.9 slash_context резолверы
+
+`app/ai/slash_context.py`. 5 резолверов (chart/backtest/strategy/session/portfolio), каждый делает SELECT с ownership-check (`AND user_id = current_user.id`, иначе 404 без leak'ов). Sanitization: удаление control-chars (`[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]`), экранирование подделок маркеров `[CONTEXT`/`[USER`, обрезка до 2 КБ. Финальный prompt оборачивается в `[CONTEXT type=... id=...]\n...\n[/CONTEXT]\n` + `[USER]\n...\n[/USER]` (защита от prompt injection).
+
+### 11.10 Модель `chart_drawings` (mini-CRUD)
+
+Модель `ChartDrawing` уже существовала в `app/common/models.py` (initial-миграция `3d3e4e3036a6_initial_schema.py:144`). В S7 добавлен модуль `app/chart_drawings/` с 5 endpoints под префиксом `/api/v1/charts/`:
+
+| Метод | URL |
+|-------|-----|
+| GET | `/api/v1/charts/{ticker}/{tf}/drawings` |
+| POST | `/api/v1/charts/{ticker}/{tf}/drawings` |
+| PATCH | `/api/v1/charts/drawings/{id}` |
+| DELETE | `/api/v1/charts/drawings/{id}` |
+| DELETE | `/api/v1/charts/{ticker}/{tf}/drawings` (clear all) |
+
+Frontend `chartDrawingsApi.ts` совпадает 1:1. Все endpoints проверяют ownership.
+
+### 11.11 users.wizard_completed_at + endpoint (контракт C6)
+
+```sql
+-- Alembic миграция d2e3f4a5b6c7_add_users_wizard_completed_at
+ALTER TABLE users ADD COLUMN wizard_completed_at DATETIME NULL;
+```
+
+Endpoint `POST /api/v1/users/me/wizard/complete` (модуль `app/users/`, после fix-волны 2026-04-26 — переехал из `/auth/me/...`). `GET /api/v1/users/me` отдаёт `UserResponse` с полем `wizard_completed_at: datetime | null`.
+
+### 11.12 Account balance/history (контракт C9)
+
+Модуль `app/account/` (`schemas.py`, `service.py`, `router.py`). Endpoint `GET /api/v1/account/balance/history?days=N` → `[{ts, total_value, currency:'RUB'}]`. Источник — агрегация on-the-fly: `TradingSession.initial_capital` + cumulative `DailyStat.realized_pnl` + текущий `PaperPortfolio.balance` для today. Без snapshot-таблицы (overhead не оправдан для 30-точечного sparkline).
+
+### 11.13 NotificationService DI singleton (контракт C7)
+
+`app/notification/dependencies.py`: `get_notification_service` Depends-helper. Singleton сохраняется в `app.state.notification_service` (lifespan, `app/main.py:75`). Все потребители — через `Depends(get_notification_service)` или `request.app.state.notification_service`. **Грep-инвариант:** `grep -rn "NotificationService()" app/` = 0 вне `main.py` (на 2026-04-26 подтверждено). Listener `listen_broker_status` подключён в lifespan (`app/main.py:81`); `stop_broker_listener` в reverse shutdown.
+
+### 11.14 EVENT_MAP — 5 новых записей (MR.5)
+
+`app/notification/service.py:76-104`:
+
+| EventBus key | event_type | Severity | Шаблон |
+|--------------|-----------|----------|--------|
+| `trade.opened` | trade_opened | info | "Позиция открыта" |
+| `order.partial_fill` | partial_fill | info | "Частичное исполнение" |
+| `order.error` | order_error | warning | "Ошибка выставления ордера" |
+| `connection.lost` | connection_lost | warning | "Соединение с T-Invest потеряно" |
+| `connection.restored` | connection_restored | info | "Соединение с T-Invest восстановлено" |
+
+Production publish-сайты:
+- `trade.opened`: `app/trading/engine.py:846` (paper) + `:1201` (real)
+- `order.partial_fill`: `app/trading/engine.py:1171`
+- `order.error`: `app/trading/engine.py:885` (helper `_publish_order_error` + try/except в `process_signal:812`)
+- `connection.lost`: `app/broker/tinvest/multiplexer.py:244` (под флагом `_connection_event_published`)
+- `connection.restored`: `app/broker/tinvest/multiplexer.py:221` (после первого успешного response)
+
+### 11.15 Telegram CallbackQueryHandler (контракт C8)
+
+`app/notification/telegram_webhook.py`. Регистрация через `_app.add_handler(CallbackQueryHandler(self._handle_callback))` в `__init__`. Поддержка callback'ов:
+- `confirm_closeall` / `cancel_closeall` (S6) — оставлены.
+- `open_session:{session_id}` — ownership-check через JOIN `Strategy.user_id`. Deep link `{settings.FRONTEND_URL}/trading?session={id}`.
+- `open_chart:{TICKER}` — sanitize ticker `[A-Z0-9_]{1,20}`. Deep link `{settings.FRONTEND_URL}/chart/{TICKER}`.
+
+`TelegramNotifier.send` принимает `ticker` явно — `_build_keyboard(ticker)` строит `open_chart:{TICKER}`, а не `open_chart:{trade_id}`.
+
+### 11.16 Cross-DEV контракты Sprint 7
+
+| # | Поставщик | Потребитель | Контракт |
+|---|-----------|-------------|----------|
+| C1 | BACK1 (`ws_sessions.py`) | FRONT1 (`useTradingSessionsWS`) | WS `/ws/trading-sessions/{user_id}` (auth-first JWT, snapshot+delta) |
+| C2 | BACK1 (`ws_backtest.py`) | FRONT1 (`useBacktestJobWS`) | WS `/ws/backtest/{job_id}` (auth-first, queued/started/progress/done/error/cancelled) |
+| C3 | BACK2 (`chat_schemas.py`) | FRONT1 (`aiApi.ts`) | `ChatRequest.context_items: list[ChatContextItem]` (legacy `context: dict` сохранён) |
+| C4 | BACK2 (`strategy/router.py`) | FRONT2 (`VersionsHistoryDrawer`) | 4 endpoint'а версионирования + alembic `c1d4e5f6a7b8` |
+| C5 | BACK1 (`backtest/router.py:1140`) | FRONT2 (`GridSearchModal`) | `POST /api/v1/backtest/grid` → `{job_id, total, status}` (через WS C2) |
+| C6 | BACK2 (`users/router.py`) | FRONT2 (`FirstRunWizardGate`) | `POST /api/v1/users/me/wizard/complete`; `GET /users/me` → `wizard_completed_at` |
+| C7 | BACK2 (`notification/dependencies.py`) | BACK1, OPS | `request.app.state.notification_service` или `Depends(get_notification_service)` |
+| C8 | BACK2 (`telegram_webhook.py`) | (deep link) | CallbackData scheme `open_session:{id}`, `open_chart:{TICKER}` |
+| C9 | BACK1 (`account/router.py`) | FRONT2 (`BalanceWidget`) | `GET /api/v1/account/balance/history?days=N` |
+
+---
+
 ## История изменений
 
 | Версия | Дата | Автор | Описание |
@@ -2745,4 +3049,8 @@ QA-инженер встроен в процесс разработки с пе�
 | 1.0 | 2026-03-23 | ARCH | Первая версия на основе ФТ v2.0 |
 | 1.1 | 2026-04-07 | Sprint_4_Review | §5.10: AI providers — добавлены DeepSeek, Gemini, Mistral, Groq, Qwen, OpenRouter. §6.3: Strategy Editor — 2 вкладки, два режима (Blockly + AI), SharedDescriptionPanel, toolbar. §6.5: Backtest Results — 4 вкладки с полным описанием |
 | 1.2 | 2026-04-17 | Sprint_6_ARCH | §5.7: NotificationService — полная реализация (service, telegram, email, dispatchers, REST API 8 endpoints, WS bridge). §8.6: Graceful Shutdown — реальная последовательность с pending orders 30s и multi-channel notification + recovery |
-| 1.3 | 2026-04-24 | Sprint_6_Review | §10 (фазы разработки): S5 помечен ✅ (548 tests + 23 E2E) с S5R/S5R-2 closeout; S6 помечен ✅ (945 tests, 18 Stack Gotchas) с явной разбивкой DEV-1..7; S7 актуализирован — Should-команды Telegram и price alerts отмечены как сделанные в S6, добавлены переносы (inline-кнопки, NS singleton, 5 event_type, WS карточки сессий). |
+| 1.3 | 2026-04-24 | Sprint_6_Review | Доработки реализации S5/S5R/S6 синхронизированы с ФТ v2.3 (карточки сессий, Bond, Tax FIFO, маркеры сделок, sequential mode, Stream Multiplex, Recovery, Graceful Shutdown). |
+| 1.4 | 2026-04-26 | Sprint_7_ARCH (7.R) | **Phase 1 feature-complete.** Добавлен §11 «Sprint 7 — реализация Should-фич» с разделами: 11.1 модель `strategy_versions` (расширенная: `created_by`, `comment`, индекс `idx_sv_history`); 11.2 endpoints версионирования + history-preserving restore; 11.3 модель `backtest_jobs` (фоновые бэктесты); 11.4 `BacktestJobManager` (singleton, asyncio.Lock, per-user cap=3); 11.5 `GridSearchEngine` (multiprocessing.Pool spawn-context, hard cap 1000, overfitting flag); 11.6 WS endpoints `/ws/trading-sessions/{user_id}` и `/ws/backtest/{job_id}` (auth-first JWT, snapshot+delta); 11.7 `BackupService` (WAL-aware SQLite + Postgres-ветка, APScheduler `backup_db_daily`, CLI argparse); 11.8 расширение `ChatRequest.context_items: list[ChatContextItem]` (legacy `context: dict` сохранён); 11.9 `app/ai/slash_context.py` — резолверы 5 типов + sanitization + ownership 404; 11.10 модель `chart_drawings` (initial-миграция S0, REST mini-CRUD под `/api/v1/charts/{ticker}/{tf}/drawings`); 11.11 `users.wizard_completed_at` + endpoint `POST /api/v1/users/me/wizard/complete`; 11.12 `app/account/` модуль (endpoint `GET /account/balance/history?days=N` — агрегация on-the-fly без snapshot-таблицы); 11.13 NotificationService DI (`get_notification_service` Depends + `app.state.notification_service` singleton, `grep "NotificationService()" app/` = 0 вне `main.py`); 11.14 EVENT_MAP — добавлены 5 типов (trade.opened, order.partial_fill, order.error, connection.lost, connection.restored); 11.15 Telegram CallbackQueryHandler (`open_session`, `open_chart` deep links + ownership-check); 11.16 Cross-DEV контракты C1–C9 формализованы. |
+| 1.3 | 2026-04-24 | Sprint_6_Review | §10 (фазы разработки): S5 помечен ✅ (548 tests + 23 E2E) с S5R/S5R-2 closeout; S6 помечен ✅ (945 tests, 18 Stack Gotchas) с явной разбивкой DEV-1..7; S7 актуализирован — Should-команды Telegram и price alerts отмечены как сделанные в S6, добавлены переносы (inline-кнопки, NS singleton, 5 event_type, WS карточки сессий). || 1.5 | 2026-05-13 | Sprint_8 W3 | §8.4 «Deployment Architecture (Mac mini + Docker)»; §7 — admin role, security headers, ASGI mount auth; §9 — coverage gate 80%, bandit/safety в CI; §4 — performance baseline W2. |
+| 1.6 | 2026-07-27 | Code Review P0–P1 + Sprint_8_Review | §7 — auth Model A (3 cookie, CSRF double-submit, WS cookie-auth на upgrade, cross-tab single-flight refresh) и правило «клиент мимо axios сам ставит `X-CSRF-Token`»; §3/§5 — `PaperPortfolioAccountant`, семантика `balance`/`blocked_amount`/`equity`, инвариант `Δequity == trade.pnl`, CB-drawdown на paper; §6 — контракт слоя разметки графика (`requestUpdate` в `attached()`, единая выборка `pickTopHit`); §8 — Alembic уважает `DATABASE_URL`, drain paper-сессий при выкатке; §9 — baseline 2026-07-27 (2186 pytest / 772 vitest / 7-7 auth E2E). Синхронизировано с ФТ v2.8. |
+| 1.7 | 2026-07-27 | Sprint_8_Review — доведение (8 замечаний приёмки) | §4 — `GET /notifications/settings` отдаёт канонические 18 типов + производное `email_supported` (единый источник `EMAIL_ALLOWED_EVENTS`, фронт не дублирует); контракт отказов постановки бэктеста (503 + `Retry-After` / 422, тело `{"detail": <русский текст>}`) и запрет показывать сырой текст axios — единая точка разбора `utils/apiError.ts`. §5 — новый `BACKTEST_DATA_TIMEOUT_SEC` (180 с) + перевод job в `error`/`backtests` в `failed` с fallback на свежей сессии; инвариант «нет `queued`-строк без job'а»; локализация 13 предупреждений `block_parser.py`. §6 — тема вынесена в `theme.ts`, контраст dimmed в dark 4.04→7.83 : 1 (AAA), обязательный catch-all во вложенных `<Routes>`, заглушка `/admin/metrics`. §7 — обязательные `autoComplete="new-password"` + `data-lpignore` для полей секретов. §9 — 2213 pytest / 828 vitest, Stack Gotchas 36 → 45. Синхронизировано с ФТ v2.9. |

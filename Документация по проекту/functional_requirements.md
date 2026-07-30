@@ -1,11 +1,86 @@
 # Функциональные требования
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия документа:** 2.2
-**Дата:** 2026-04-17
-**Статус:** Актуализирован по результатам Sprint 6 ARCH Review
+**Версия документа:** 2.9
+**Дата:** 2026-07-27
+**Статус:** ✅ M4 Production-ready. Gate Sprint_8_Review пройден (PASS WITH NOTES, 2026-07-26; дозакрытие S8.8 и остатка приёмки — 2026-07-27). Feature freeze. Изменения только bugfix / docs.
 
-> **Примечание:** Данный документ описывает функциональные требования — *что* должна делать система. Технические детали реализации (стек, архитектура, API-контракты, структура БД) будут раскрыты в отдельном техническом задании на основе этого документа. Там, где функциональные требования затрагивают технические аспекты, они вынесены в блоки «Примечание для ТЗ».
+> **Примечание:** Данный документ описывает функциональные требования — *что* должна делать система. Технические детали реализации (стек, архитектура, API-контракты, структура БД) раскрыты в [technical_specification.md](technical_specification.md) v1.7. Там, где функциональные требования затрагивают технические аспекты, они вынесены в блоки «Примечание для ТЗ».
+
+### История версий
+
+| Версия | Дата | Спринт | Ключевые изменения |
+|--------|------|--------|-------------------|
+| 2.9 | 2026-07-27 | S8R — доведение (8 замечаний приёмки) | **Понятные ошибки и отсутствие «зависаний».** Любая ошибка запуска бэктеста показывается человеческим текстом от сервера — техническое «Request failed with status code N» пользователю больше не выводится. Залповый запуск нескольких фоновых бэктестов не оставляет «мёртвых» записей в списке: отклонённый запуск строку не создаёт, а превышение лимита объясняется текстом «Превышен лимит фоновых бэктестов (макс. 3)». Бэктест на данных, которых нет в кэше, при недоступном источнике больше не висит бесконечно — через заданный таймаут он завершается статусом «Ошибка» с причиной («Не удалось получить свечи…»). **AI-чат** на несохранённой стратегии заблокирован с подсказкой «Сначала сохраните стратегию» вместо молчаливого проглатывания текста. **Уведомления:** тумблер Email недоступен для тех типов событий, по которым письма не отправляются (раньше настройка сохранялась, а письмо не приходило); мастер первого запуска больше не включает Email для неподдерживаемых типов. **Мастер первого запуска:** поле «Bot token» защищено от автоподстановки сохранённого пароля менеджером паролей Chrome. **Интерфейс:** страница `/admin/metrics` внутри приложения больше не пустая — открывается пояснение со ссылкой на дашборд метрик, прочие несуществующие адреса раздела администрирования дают честную 404; приглушённые подписи в тёмной теме доведены до контраста уровня WCAG AAA (раньше не проходили даже AA); предупреждения разбора текстового описания стратегии переведены на русский. |
+| 2.8 | 2026-07-27 | Code Review P0–P1 + S8R | **Итоги полного код-ревью и финальной приёмки.** Авторизация переведена на **Model A** (оба JWT в HttpOnly-cookie вместо localStorage; работа в нескольких вкладках без разлогина; WS-авторизация по cookie). **Денежный учёт paper-портфеля** приведён к Model A (`equity = свободный кэш + капитал открытых позиций`), Circuit Breaker по просадке теперь реально срабатывает и на paper. Запуск торговли из бэктеста переносит начальный капитал. Инструменты рисования: фигуры видны сразу после открытия графика, точка фигуры перетаскивается без предварительного выделения. Закрытие позиций — только в торговые часы MOEX. |
+| 2.7 | 2026-05-14 | S8 W8a | **Sandbox balance management.** Поле «Начальный баланс sandbox» в AddBrokerForm (default 1 000 000 ₽), при создании sandbox-аккаунта backend автоматически выполняет `sandbox.SandboxPayIn` через TInvestAdapter — без этого новый sandbox-счёт создаётся с нулевым балансом и любой ордер падает с «Not enough balance». В BrokerAccountList — отображение текущего баланса sandbox-счёта + кнопка «Пополнить» (только увеличение, T-Invest API не поддерживает снижение). Endpoints: `GET /api/v1/broker-accounts/{id}/sandbox-balance`, `POST /api/v1/broker-accounts/{id}/sandbox-topup`. |
+| 2.6 | 2026-05-14 | S8 W7 | **Lethal hotfix:** sandbox/real order lifecycle. `OrderManager.process_signal` теперь действительно отправляет market-orders в T-Invest (sandbox через `post_sandbox_order`, real через `post_order`) — до W7 ветка sandbox/real была пуста и trade навсегда оставался pending. Recovery orphan pending trades при старте backend (`SessionRuntime._recover_orphan_pending_trades`). |
+| 2.5 | 2026-05-13 | S8 W3 | M4 Production-ready: admin role + admin panel + Plotly Dash metrics, security headers (CSP/HSTS/XFO/...), event sync (EVENT_MAP 12→17, EVENT_TYPE_LABELS 13→17), dashboard widgets (Health/Sparkline/Balance/ActivePositions), performance instrumentation (@timed_event), `/api/v1/health` extended fields |
+| 2.4 | 2026-04-26 | S7 R | Feature-complete Phase 1 (drawing tools editing, grid search, AI commands, background backtests) |
+| 2.3 | 2026-04-15 | S6 R | Notifications fully integrated, paper trading SL/TP |
+| ... | | | (см. git log по этому файлу) |
+
+### S8 Production-ready additions (v2.5–v2.15)
+
+| Раздел | Дополнение | Спринт |
+|--------|-----------|--------|
+| **Sandbox balance management** | `TInvestAdapter.sandbox_pay_in(account_id, amount, currency)` через `client.sandbox.sandbox_pay_in(MoneyValue)`, `TInvestAdapter.get_sandbox_balance` через `client.sandbox.get_sandbox_portfolio.total_amount_currencies`. `BrokerService.top_up_sandbox_to(account_pk, target_balance)` — get current → `pay_in(target-current)` если target > current; ValidationError если target <= current (T-Invest sandbox API не поддерживает снижение). Auto-topup в `BrokerService.create_account`: если `data.sandbox_initial_balance` задан и токен sandbox — после создания BrokerAccount сразу выставляет указанный баланс. UI: поле в AddBrokerForm (default 1 000 000 ₽), кнопка «Пополнить» в BrokerAccountList с modal-формой (NumberInput, thousand separator, disabled при topUpSaving). Endpoints: `GET .../sandbox-balance`, `POST .../sandbox-topup` (422 для production-аккаунтов). | S8 W8a |
+| **Circuit Breaker scope per event_type** | Явная карта `CB_SCOPE_ALL_SESSIONS` в `app/circuit_breaker/engine.py`: `daily_loss_limit`, `max_drawdown`, **`daily_trade_limit`** — паузят ВСЕ активные сессии user (event считается user-wide); остальные 6 проверок — только свою сессию. До W8b `daily_trade_limit` имел рассогласование (счёт user-wide, наказание per-session) → эффект домино: одна за другой все сессии user паузились серией событий за минуты. После W8b — одно событие, `action_taken='all_sessions_paused'`. | S8 W8b |
+| **Circuit Breaker exit-bypass** | Helper `_is_exit_signal(db, session_id, action)` в `app/trading/runtime.py`. Перед вызовом `cb_engine.check_before_order` в `_handle_candle` проверяется: есть ли у сессии открытая `filled`-позиция в направлении, противоположном текущему сигналу? Если да → это exit, CB пропускается. Это гарантирует, что открытая позиция не повиснет под TP/SL/ручной stop, если CB ранее заблокировал новые entry-сигналы. Pyramid (BUY поверх BUY) — не exit, CB вызывается как обычно. | S8 W8b |
+| **daily_trade_limit фильтр по статусу** | `_check_daily_trade_limit` в `app/circuit_breaker/engine.py` фильтрует `LiveTrade.status.in_(["filled", "closed", "pending"])` — failed-сделки исключены из дневного лимита. Семантика: лимит защищает от избыточной реальной торговой активности, а не от попыток (которые отвергнуты брокером). До W8c failed-сделки засчитывались в лимит, что приводило к блокировке торговли на весь день при единичных сбоях брокера (например, `'Not enough balance'` в sandbox без пополнения). | S8 W8c |
+| **Sandbox market-order post-place polling** | T-Invest sandbox для market-order возвращает `EXECUTION_REPORT_STATUS_NEW` (PLACED), а не синхронный FILL (как production). В `OrderManager._submit_order_to_broker` ветка `placed` после WARNING-лога вызывает `_poll_order_status_until_filled` (5 попыток × 1 сек). При получении `filled/partially_filled` — записывает `entry_price`, `filled_lots`, `volume_rub`, статус filled, публикует `trade.opened`. При `rejected/cancelled` — failed + `broker_rejected_after_poll`. Timeout — оставляет pending для orphan-recovery. | S8 W8d |
+| **W7 recovery typo fix** | В `runtime.py:_recover_orphan_pending_trades` опечатка `adapter.get_order_state(...)` исправлена на `adapter.get_order_status(...)`. До W8d `AsyncMock()` без `spec=` в тестах W7 соглашался с любым именем — баг ловился только в production через `AttributeError` → trade.failed. Новый регрессионный тест использует `AsyncMock(spec=BaseBrokerAdapter)` для будущей защиты. | S8 W8d |
+| **BaseBrokerAdapter: account_id обязателен** | Сигнатуры `cancel_order(order_id)` и `get_order_status(order_id)` в `BaseBrokerAdapter` изменены на `(account_id, order_id)`. Причина: T-Invest gRPC API возвращает `INVALID_ARGUMENT '30021' Missing parameter: account_id` при пустом значении. Комментарий S5 «SDK требует, но игнорирует» был неверен. TInvestAdapter передаёт `account_id` напрямую в `client.sandbox.*` / `client.orders.*`. PaperBrokerAdapter принимает аргумент для совместимости интерфейса (не используется). Все callers (`runtime._recover_orphan_pending_trades`, `engine._poll_order_status_until_filled`) обновлены — извлекают `tinvest_account_id` через `_resolve_broker_adapter`. | S8 W8e |
+| **Datetime UTC serialization** | Helper `app/common/datetime_utils.py::iso_utc(dt)` добавляет `Z`-суффикс к naive UTC datetime при JSON-сериализации. Применён в `TradeResponse` (opened_at, closed_at) и `NotificationResponse` (created_at) через `@field_serializer(when_used="json")`. До W8f frontend парсил datetime без TZ как **local time** → в Москве (UTC+3) свежие уведомления отображались как «2-3 часа назад» (BUG-4), а Safari падал на формат с микросекундами (BUG-3 «Invalid Date»). Frontend `src/utils/dateParsing.ts::parseBackendDate` — safety-net на клиенте (нормализует space→T, добавляет Z если нет TZ) — используется в `TradesTable.formatDate`, `NotificationDrawer/NotificationList.formatRelativeTime`. | S8 W8f |
+| **Trades WS idempotency** | `tradingStore.addTradeFromWS` теперь идемпотентен по `trade.id` — при повторном WS-событии trade обновляется in place вместо prepend. До W8f задвоенное событие `trade.opened`/`trade.filled` (race с recovery, реconnect WS, дублирование `event_bus.publish`) приводило к лишним строкам в TradesTable (BUG-5: 5 строк vs 4 в БД). | S8 W8f |
+| **Manual close для sandbox/real + pre-check торговых часов** | `OrderManager.close_position` теперь отправляет реальный SELL/BUY market-ордер в T-Invest для sandbox/real-сессий (раньше работал только paper, sandbox/real давали drift БД vs брокер). Перед ордером — `is_within_trading_hours()` (10:00-23:50 MSK, helper `app/common/trading_hours.py`); вне часов → `ValidationError` 422 «Закрытие позиций возможно только в торговые часы MOEX». При PLACED-ответе sandbox — W8d-style polling до filled/rejected. Timeout → trade остаётся `filled`, ValidationError с пояснением. exit_price берётся из broker-response (приоритет) или из `OHLCVCache` (fallback). | S8 W8g |
+| **Stale pending TTL cancel + periodic recovery** | `SessionRuntime._recover_orphan_pending_trades` (ветка `state='new'`): если `trade.opened_at` старше `STALE_PENDING_CANCEL_THRESHOLD_SEC=1800` (30 мин) → `adapter.cancel_order(account_id, order_id)` + `status='failed'`. Cancel exception ловится — статус всё равно failed (иначе зависший trade навсегда блокирует `max_concurrent_positions`). Новый фоновый task `_periodic_recovery_loop` (интервал `PERIODIC_RECOVERY_INTERVAL_SEC=60`) запускается в `restore_all`, отменяется в `shutdown` — гарантирует уборку зависших ордеров между рестартами backend (актуально для T-Invest sandbox, где market-order может вечно ждать встречную заявку). | S8 W8h |
+| **🔴 КОРНЕВОЙ БАГ: ORDER_STATUS_MAP сдвиг** | `app/broker/tinvest/mapper.py:ORDER_STATUS_MAP` с Sprint 1 содержал значения, **сдвинутые** относительно официального `.proto`-контракта T-Invest. Конкретно: `int=1` (EXECUTION_REPORT_STATUS_FILL) интерпретировался как `"new"` вместо `"filled"`. Это приводило к тому что **каждая** sandbox-сделка попадала в polling/recovery ветку, никогда не получала `entry_price`. W8d/W8e/W8h — серия фиксов **симптомов**, но не корня. После W8i: ORDER_STATUS_MAP приведён к `.proto` (0..5, удалён мусор 6..9); ACCOUNT_STATUS_MAP и ACCOUNT_TYPE_MAP дополнены пропущенными значениями; добавлены регрессионные тесты с цитатами из `.proto` (`TestProtoEnumAlignmentW8i`); новый раздел «Приложение: enum-значения protobuf» в `tinvest_api_services.md` фиксирует контракт. Диагностический скрипт `scripts/diag_sandbox_orders.py` — для будущих сверок. | S8 W8i |
+| **Trading lifecycle (lethal hotfix)** | `OrderManager.process_signal` для sandbox/real теперь синхронно вызывает `TInvestAdapter.place_order` (market-order) и резолвит `LiveTrade.status` по `execution_report_status` в response: `filled`/`partially_filled` → `filled` + `entry_price` из `executed_order_price`; `rejected` → `failed` + `order.error` event; `placed` (edge) → `pending` + WARNING (recovery подтянет); BrokerError exception → `failed`. До W7 эта ветка отсутствовала — sandbox/real trade оставался pending без `broker_order_id`. | S8 W7 |
+| **Recovery orphan pending** | `SessionRuntime._recover_orphan_pending_trades` запускается в начале `restore_all`. Pending trade старше 5 минут: без `broker_order_id` → `failed`; с `broker_order_id` → `adapter.get_order_state` → `filled`/`failed`/остаётся pending по статусу. Это safety-net для случая, когда backend упал в момент отправки ордера. | S8 W7 |
+| **Архитектурное ограничение** | Все ордера в системе = `market` (algotrading: signal → market-order). Limit-orders и server-side stop-orders T-Invest **не используются** — SL/TP контролируется RiskMonitor через market-close. WS `OrdersStream` подписка не нужна, т.к. fill для market приходит синхронно в response. | S8 W7 |
+| Авторизация | **Роль администратора (admin)** — `users.is_admin` + bootstrap первого зарегистрированного, CLI `grant_admin`, Sidebar `IconShield` для админов, `ProtectedAdminRoute` | S8 W1 |
+| Безопасность | Заголовки CSP / HSTS / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy (SecurityHeadersMiddleware) | S8 W2 |
+| Безопасность | XSS-protection в Telegram + Email диспетчерах: `html.escape` на user-content до HTML parse_mode | S8 W2 |
+| Уведомления | EVENT_MAP расширен до 17 ключей (+ session_recovered, backtest_completed, daily_stats, corporate_action, price_alert); EVENT_TYPE_LABELS 17 ключей (UI ↔ backend синхронизированы) | S8 W2 |
+| Dashboard | 4 виджета: HealthWidget (cb_state/tinvest/scheduler), SparklineWidget (mini-chart по recent ticker), BalanceWidget (баланс + sparkline since first activity), ActivePositionsWidget | S8 W2 |
+| Admin panel | `/api/v1/admin/metrics` — Plotly Dash панель с performance графиками (signal→order, dashboard LCP, Telegram, backtest jobs). Auth через `AdminAuthASGIMiddleware` (JWT + is_admin) | S8 W2 |
+| Performance | `@timed_event` декоратор + 3 hot-path сайта (signal.process, order.place, telegram.handle). Метрики собираются в structlog для admin metrics | S8 W2 |
+| Health endpoint | `/api/v1/health` теперь возвращает `cb_state`, `tinvest_connected`, `scheduler_running`, `scheduler_jobs[]` | S8 W2 |
+| FirstRunWizard | Шаг 4 расширен — «Свой бот» (custom Telegram bot_token + chat_id) + кнопка «Отправить тестовое сообщение» + auto-enable `telegram_enabled=true` для 4 критических event_types | S8 W2 |
+| Аналитика бэктеста | DOM overlay для equity-curve zones (data-testid="equity-curve-zone-{idx}") + row-click → TradeDetailsPanel | S8 W2 |
+| Deployment | Docker compose stack (backend uvicorn + frontend nginx + sqlite volume) + launchd auto-start + Cloudflare Tunnel SSL для Mac mini production | S8 W3 |
+| Тестирование | Coverage gate `--cov-fail-under=80` активен в CI; bandit + safety security scan на каждом PR | S8 W3 |
+
+### Дополнения по итогам код-ревью P0–P1 и Sprint_8_Review (v2.8)
+
+Источники: `Спринты/Code_Review_Full_2026-07/` (P0_FIXES_LOG, P1_WAVE1..3_LOG, P1_AUTH_HARDENING_LOG, BE_TRAD_06_LOG) и `Спринты/Sprint_8_Review/` (acceptance_checklist, s8r_acceptance_run_2026-07-26).
+
+| Раздел | Дополнение | Источник |
+|--------|-----------|----------|
+| **Авторизация (Model A)** | Оба JWT (access + refresh) хранятся в **HttpOnly+Secure cookie**, а не в localStorage — JS-код страницы не имеет доступа к токенам. Пользователь может работать **в нескольких вкладках одновременно**: обновление сессии координируется между вкладками, ни одну не выкидывает. Перезагрузка страницы восстанавливает сессию из cookie. Выход стирает все cookie сессии. WebSocket-подключения авторизуются той же cookie при установке соединения — токен больше не передаётся в адресе. | P1 auth-hardening (2026-07-08…09), E2E 7/7 |
+| **Денежный учёт paper-портфеля** | Баланс paper-счёта разделён на **свободные средства** и **капитал, занятый открытыми позициями**; «Капитал» (equity) = сумма этих величин. Открытие позиции списывает деньги и отклоняется при нехватке средств; любое закрытие (ручное, «закрыть все», по SL/TP) возвращает средства с учётом размера лота. Итог: изменение капитала копейка-в-копейку равно P&L сделки (включая облигации). Следствие для риск-контроля: **Circuit Breaker по просадке теперь срабатывает и на paper-сессиях**. | BE-TRAD-06 (2026-07-22) |
+| **Запуск торговли из бэктеста** | Кнопка «Запустить торговлю» на странице результатов бэктеста переносит в форму запуска не только стратегию/тикер/таймфрейм, но и **начальный капитал бэктеста** (раньше всегда подставлялся дефолт 100 000 ₽). | S8R FIND-01 |
+| **Инструменты рисования на графике** | Сохранённые фигуры отображаются **сразу при открытии графика** (не после первого движения мыши). Точку фигуры (конец линии, угол прямоугольника) можно **потянуть без предварительного выделения** — захват фигуры не превращается в прокрутку графика. Прокрутка по пустому месту графика работает как раньше. | S8R BUG-33 / BUG-34 |
+| **AI-помощник** | Все запросы к AI (описание стратегии, slash-команды) выполняются авторизованно в модели Model A. До фикса приёмки любой запрос отбивался ошибкой защиты от CSRF — помощник был нерабочим. | S8R BUG-32 |
+| **Закрытие позиций** | Ручное закрытие позиции и «закрыть все» доступны **только в торговые часы MOEX** (10:00–23:50 МСК); вне часов система возвращает понятную ошибку вместо расхождения данных с брокером. | S8 W8g |
+| **Безопасность AI-провайдеров** | Адреса AI-провайдеров ограничены: обращения к внутренним/приватным адресам запрещены (в т.ч. через редирект), если явно не разрешены настройкой. Блоки стратегий проверяются по списку разрешённых на фронте **и** на бэкенде. | P1 W2/W3 |
+
+### Дополнения по итогам доведения Sprint_8_Review — остаток приёмки (v2.9)
+
+Источник: `Спринты/Sprint_8_Review/backlog.md`, раздел «Остаток финальной приёмки 2026-07-26 — ЗАКРЫТ 2026-07-27». Все 8 замечаний вердикта PASS WITH NOTES закрыты в цикле приёмки (решение заказчика от 2026-06-11: багфиксы не переносятся в Sprint 9).
+
+| Раздел | Дополнение | Источник |
+|--------|-----------|----------|
+| **Ошибки запуска бэктеста** | Любая ошибка запуска показывается текстом от сервера. Техническое «Ошибка: Request failed with status code 503» пользователю не выводится ни при каком сбое; если сервер текста не прислал — показывается понятная формулировка по смыслу действия. Занятость базы объясняется как «База данных временно занята параллельной операцией. Повторите запуск через несколько секунд», превышение лимита — как «Превышен лимит фоновых бэктестов (макс. 3)». | S9-BG-BACKTEST-503-UX |
+| **Залповый запуск бэктестов** | Одновременный запуск нескольких фоновых бэктестов (клики в один тик) не создаёт «мёртвых» записей в списке: если запуск отклонён, строка бэктеста не появляется вовсе. Раньше строка успевала создаться до отказа и оставалась в списке навсегда со статусом «в очереди». | S9-BG-BACKTEST-503-UX |
+| **Бэктест на недоступных данных** | Бэктест на периоде, которого нет в кэше, при недоступном источнике данных больше не висит бесконечно с нулевым прогрессом. По истечении таймаута выборки свечей задача завершается статусом «Ошибка» с причиной («Не удалось получить свечи SBER (1h): источник данных не ответил за N с. Проверьте подключение T-Invest…»), а сам бэктест помечается как неудавшийся с тем же текстом. | S9-BACKTEST-DATA-TIMEOUT |
+| **AI-чат на несохранённой стратегии** | На странице создания стратегии поле AI-чата **заблокировано** и сопровождается пояснением «Сначала сохраните стратегию — AI-чат привязан к ней и хранит историю переписки». Раньше поле было активным, но введённый текст исчезал молча. Автосохранение черновика сознательно не вводилось: оно меняло бы адрес страницы посреди набора текста и создавало записи в базе без запроса пользователя. | S9-AI-CHAT-UNSAVED-STRATEGY |
+| **Настройки уведомлений: Email** | Тумблер Email **недоступен** для тех типов событий, по которым письма не отправляются (доступен для 5 типов из 18), с подсказкой «Email недоступен для этого события». Раньше настройку можно было включить для любого типа, она сохранялась, а письмо не приходило. Мастер первого запуска также перестал включать Email для неподдерживаемых типов. | S9-EMAIL-TOGGLE-MISMATCH |
+| **Мастер первого запуска: поле токена** | Поле «Bot token» на шаге «Уведомления» защищено от автоподстановки менеджером паролей — Chrome больше не вставляет туда сохранённый пароль пользователя от терминала. | S9-BOT-TOKEN-AUTOFILL |
+| **Раздел администрирования** | Адрес `/admin/metrics` внутри приложения открывает пояснение: дашборд метрик — отдельное приложение, встроенное в серверную часть, со ссылкой для открытия в новой вкладке и перечнем доступных графиков. Раньше страница была пустой. Остальные несуществующие адреса раздела администрирования дают честную «404 — Страница не найдена». | S9-ADMIN-METRICS-SPA-404 |
+| **Читаемость тёмной темы** | Приглушённые подписи под статусами («GREEN (норма)», «RUNNING (4 jobs)» и все прочие) осветлены в тёмной теме: контраст к фону поднят с 4.04 : 1 (ниже минимального требования доступности) до 7.83 : 1 — уровень WCAG AAA. Светлая тема не изменилась. | S9-DARK-DIMMED-CONTRAST |
+| **Язык предупреждений парсера** | Предупреждения при разборе текстового описания стратегии — на русском («В шаблоне не найдено ни одной секции», «В секции «Индикаторы» не распознан ни один индикатор», «Неизвестная секция: …»). Раньше при полностью русском интерфейсе они выводились по-английски. | S9-BLOCK-PARSER-I18N |
 
 ---
 
@@ -965,6 +1040,130 @@ AI-чат (режим A) — выдвижной sidebar справа. Кнопк
 
 ---
 
+## 19. Sprint 7 — Should-фичи и завершение Phase 1 — ✅ реализовано S7 (2026-04-26)
+
+> Данный раздел описывает функциональность, добавленную в Sprint 7 для закрытия Phase 1 (M3 Phase 1 feature-complete). 17 задач + 7.R, см. `Спринты/Sprint_7/`.
+
+### 19.1 Версионирование стратегий [Should] — ✅ S7.7.1
+
+- При каждом сохранении стратегии backend автоматически создаёт новую запись `strategy_versions` (snapshot полного `blocks_json` + `generated_code`).
+- Защита от спама: если последняя версия моложе **5 минут** И блоки/код идентичны — версия не создаётся (idempotency).
+- Пользователь может создать **именованную версию** через кнопку «Сохранить именованную версию» (с полем `comment`).
+- В UI редактора стратегии — кнопка «История» открывает Drawer со списком всех версий (бейдж «текущая», действия Просмотреть / Diff / Восстановить).
+- **History-preserving откат:** «Восстановить» создаёт **новую** версию-копию с пометкой «Откат к v{N}»; старые версии остаются в истории (нельзя случайно потерять текущее состояние).
+- Diff между версиями — line-by-line (без внешних зависимостей).
+- Все endpoints проверяют ownership (стратегия принадлежит пользователю).
+
+### 19.2 Grid Search оптимизация параметров [Should] — ✅ S7.7.2
+
+- Запуск из редактора стратегии: «Grid Search» открывает модалку с динамическим списком параметров (1–5).
+- Real-time счётчик `total = product(len(values))` с цветовой индикацией: ≤200 зелёный, 201–1000 жёлтый, >1000 красный (запуск заблокирован).
+- Hard cap: 1000 комбинаций / ≤5 параметров (защита от 10⁶).
+- Backend выполняет каждую комбинацию через `multiprocessing.Pool` (workers = `os.cpu_count() - 1`), pickle-friendly worker.
+- Результат — матрица `[{params, sharpe, pnl, win_rate, drawdown, trades_count}]`, сортировка по убыванию Sharpe.
+- **Overfitting-предупреждение:** если разброс топ-5 по Sharpe > 50% — флаг в финальном payload.
+- Визуализация в UI: bar (1 параметр) / 2D heatmap (2 параметра) / sortable table (3+ параметра).
+- Результаты доступны через тот же канал, что фоновые бэктесты (см. §19.10).
+
+### 19.3 Экспорт CSV/PDF бэктеста [Should] — ✅ S7.7.3
+
+- На странице результата бэктеста — кнопки «Экспорт CSV» и «Экспорт PDF».
+- Endpoint `GET /api/v1/backtest/{id}/export?format=csv|pdf`.
+- CSV: два блока — `#metric` (метрики) и `#trades` (детальный список сделок), нативный `csv.DictWriter`.
+- PDF: WeasyPrint, фирменный layout (метрики → таблица сделок → futures чарты — опционально).
+- При отсутствии WeasyPrint в окружении endpoint отвечает 503 со ссылкой на инструкцию установки (`Develop/backend/INSTALL.md`).
+
+### 19.4 Инструменты рисования на графике [Should] — ✅ S7.7.6
+
+- На странице `/chart/{ticker}` — вертикальный тулбар (48px слева) с 9 кнопками: курсор / трендовая линия / горизонтальная линия / вертикальная линия / прямоугольник (зона) / метка (label) / список рисунков / удалить выделенное / очистить всё.
+- Hotkeys: `V` (cursor), `T` (trendline), `H` (hline), `R` (rect), `L` (label), `Esc` (отмена), `Delete/Backspace` (удалить выделенное).
+- ARIA: `role="toolbar"`, `aria-label`, `aria-pressed`, Mantine Tooltip с подсказкой клавиш.
+- Persist: REST `/api/v1/charts/{ticker}/{tf}/drawings` (CRUD), fallback на localStorage (квота 100 рисунков на ключ).
+- Изоляция per-user / per-ticker / per-timeframe.
+- **Ограничения S7 (на S8):** drag/перенос/изменение углов выделенной фигуры (UX §4 «editing»); intraday TF (sequential mode) — координаты могут уезжать (gotcha-кандидат).
+
+### 19.5 Дашборд-виджеты [Should] — ✅ S7.7.7
+
+- На странице `/dashboard` — `<SimpleGrid>` (1/2/3 колонки в зависимости от ширины) с тремя виджетами:
+  - **BalanceWidget:** текущий total_value (валюта RUB), %-diff за день (зелёный/красный), sparkline 30 дней (через `GET /api/v1/account/balance/history?days=30`).
+  - **HealthWidget:** 3 строки светофора — Circuit Breaker / T-Invest connection / Scheduler. Источник: `/health` endpoint. Graceful degrade на жёлтый «нет данных» если backend не отдал расширенные поля.
+  - **ActivePositionsWidget:** top-5 активных торговых сессий по abs(P&L), мини-sparkline 24h (placeholder), клик → `/chart/{ticker}`.
+
+### 19.6 First-run wizard (5 шагов) [Should] — ✅ S7.7.8
+
+- При первом входе после регистрации — fullscreen-модалка `<Stepper>` 5 шагов:
+  1. **Старт** — приветствие.
+  2. **Риски** — текст дисклеймера + чекбокс-gate (без галки «Далее» disabled).
+  3. **Брокер** — выбор Paper / Real (только T-Invest в фазе 1).
+  4. **Уведомления** — настройка Telegram (token+chatID) / Email / in-app.
+  5. **Финиш** — `POST /api/v1/users/me/wizard/complete`.
+- Esc / click outside заблокированы (нельзя закрыть пока wizard не пройден).
+- `users.wizard_completed_at` сохраняется в БД; повторно wizard не показывается.
+- Источник правды: `GET /api/v1/users/me` (поле `wizard_completed_at`).
+
+### 19.7 Backup/restore [Should] — ✅ S7.7.9
+
+- **Автоматический backup:** APScheduler-job `backup_db_daily` запускается в 03:00 UTC (настраивается через `settings.BACKUP_CRON`).
+- **Ротация:** хранятся последние N (по умолчанию 7) snapshot'ов; старые удаляются по mtime.
+- **CLI:** `python -m app.cli.backup {create,list,restore,rotate}` — argparse-интерфейс.
+- **SQLite WAL-aware copy:** `BEGIN IMMEDIATE` → `PRAGMA wal_checkpoint(FULL)` → `copy2` + копирование `*.db-wal`/`*.db-shm` (см. gotcha-19).
+- **Postgres-ветка:** `pg_dump --no-owner --format=custom` → `pg_restore --single-transaction` (готова, активируется по схеме URL).
+- После restore автоматически запускается `alembic upgrade head` (схема может быть старее).
+
+### 19.8 AI слэш-команды [Should] — ✅ S7.7.18 / S7.7.19
+
+- В чате AI-ассистента ввод `/` открывает dropdown с 5 командами: `/chart TICKER [TF]`, `/backtest ID`, `/strategy ID`, `/session ID`, `/portfolio`.
+- ↑/↓/Enter/Tab/Esc навигация, фильтрация по префиксу, IME composition guard (не открывается во время русского ввода с диакритикой).
+- Множественный контекст: `/chart SBER /backtest 42` → два отдельных контекстных блока в одном сообщении.
+- В сообщении пользователя команда заменяется на «контекстный chip» с иконкой и навигацией.
+- Backend подгружает данные по id, проверяет ownership (404 на чужой ресурс — без leak'ов о существовании), sanitизирует control-chars, обрезает до 2 КБ на context-item, оборачивает в `[CONTEXT type=... id=...]...[/CONTEXT]` (защита от prompt injection).
+- Защита: rate-limit 10 enriched-запросов/минуту на user.
+
+### 19.9 Аналитика бэктеста (расширенная) [Should] — ✅ S7.7.16
+
+- Новая вкладка «Обзор» на странице результата бэктеста — два графика:
+  - **Гистограмма распределения P&L** (бакеты по 0.5%, цвета red/green/yellow по знаку, пунктирные средние линии «средний убыток» / «средняя прибыль»).
+  - **Donut Win/Loss/BE** (3 сегмента, центр с total trades, легенда справа).
+- На основном ценовом графике — **интерактивные зоны** входа/выхода трейдов: hover → подсветка зоны (alpha 0.18→0.40 + белый контур), click → `TradeDetailsPanel` (entry/exit time, price, reason, pnl, duration). Esc и × закрывают.
+
+### 19.10 Фоновые бэктесты [Should] — ✅ S7.7.17
+
+- В модалке запуска бэктеста — кнопка «Запустить в фоне» (модалка не закрывается).
+- Per-user cap: **3 параллельных** фоновых job (включая Grid Search).
+- **Бейдж в шапке:** `Indicator` с цветом по приоритету (red error > green done > blue running) + число активных.
+- **Dropdown по клику:** список jobs с прогресс-барами, кнопками «Открыть результат» / «Отменить» / «Очистить завершённые».
+- Toast «бэктест запущен в фоне» при запуске.
+- Persist в `localStorage` (`backgroundBacktestsStore`), restore на reload, cleanup на logout.
+
+### 19.11 WS-обновление карточек торговых сессий [Should] — ✅ S7.7.15
+
+- WebSocket endpoint `/ws/trading-sessions/{user_id}`: auth первым сообщением (`{action:"auth", token:"<jwt>"}`, JWT не в URL — gotcha-16).
+- После auth_ok backend отправляет `snapshot` всех активных сессий пользователя; далее delta-events: `position_update`, `trade_filled`, `pnl_update`, `session_state`.
+- Динамическая подписка на новые сессии через канал `system:{user_id}` (`session.added`).
+- Frontend: `setInterval(fetchSessions, 10000)` polling **полностью удалён**, заменён на WS-клиент с exponential backoff reconnect и ping/pong.
+- Badge статуса соединения (online / reconnecting / auth_error) виден на TradingPage.
+
+### 19.12 Пять новых event_type [Should] — ✅ S7.7.13 (MR.5)
+
+- К существующим 8 типам уведомлений (S6) добавлены 5:
+  - `trade_opened` — открытие позиции (publish в paper-mode после instant fill, в real-mode параллельно с `trade.filled`).
+  - `partial_fill` — частичное исполнение ордера (real-mode, при `filled_lots < volume_lots`).
+  - `order_error` — ошибка выставления ордера (helper `_publish_order_error`, ловит exceptions в `process_signal` и `on_order_filled`).
+  - `all_positions_closed` — все позиции закрыты (event уже был, в S7 подключён через `EVENT_MAP`).
+  - `connection_lost` / `connection_restored` — потеря/восстановление T-Invest gRPC-стрима (с анти-спам флагом — один publish на disconnect-цикл).
+- Все 5 типов идут в EVENT_MAP, доставляются через 3 канала (in-app + Telegram + Email) согласно настройкам пользователя.
+- NotificationService подписан на новый канал `broker:status` (фан-аут по активным сессиям через `_session_user_map`).
+
+### 19.13 Telegram inline-кнопки (CallbackQuery) [Should] — ✅ S7.7.14
+
+- В уведомлениях `trade_opened`, `session.started` и др. — добавлены inline-кнопки:
+  - **Открыть сессию** → callback `open_session:{session_id}` → ownership-check (JOIN `Strategy.user_id`) → deep link `{FRONTEND_URL}/trading?session={id}`.
+  - **Открыть график** → callback `open_chart:{TICKER}` → sanitize ticker → deep link `{FRONTEND_URL}/chart/{TICKER}`.
+- Если пользователь не привязан к боту → ответ «Telegram не привязан».
+- Если сессия не принадлежит — «Сессия не найдена» (без leak'ов).
+
+---
+
 ## Приложение A. Шаблон описания торговой стратегии
 
 Используется в Режиме B (раздел 8.2) для ручного или внешнего ввода стратегии.
@@ -1041,6 +1240,7 @@ Inline-кнопки под сообщением об открытой позиц
 | 2.1 | 2026-04-07 | Sprint_4_Review | §3.2: Strategy Editor — 2 вкладки (Содержание + Редактор), Blockly + AI fullscreen режим, SharedDescriptionPanel. §4.5: Backtest Results — 4 вкладки (+ Показатели), цветовая кодировка метрик, маркеры/зоны. §8.3: AI — 9 типов провайдеров, хранение ключей в БД (AES-256-GCM), SSE streaming, лимиты per-провайдер |
 | 2.2 | 2026-04-17 | Sprint_6_ARCH | §9.1: Привязка Telegram — 6-digit token TTL 5min, webhook handler. §9.2: Уведомления — severity→emoji, HTML parse_mode. §9.3: Команды Must реализованы (/start, /positions, /status, /help). §10.1: 3 канала уведомлений (Telegram+Email+In-app), NotificationService. §10.2: In-app — Bell+badge, Drawer, CriticalBanner, /notifications page. §17.7: Recovery для Real-сессий, Graceful Shutdown с pending orders 30s |
 | 2.3 | 2026-04-24 | Sprint_6_Review | §3.1: фильтр по статусам (completed-only для latest_bt). §4.7: Bond Service реализован S5. §5.5: маркеры сделок (3-уровневые), overlay OHLC, sequential mode, фильтрация аукционных свечей. §5.8: Price alerts подключены к `/candles` endpoint. §6 (шапка): статус реализации S5/S5R/S6 (Trading Engine, Paper, CB, Bond НКД, Tax FIFO, Recovery, Graceful Shutdown, Stream Multiplex, карточки сессий, PauseConfirmModal). §9.3: Should-команды Telegram реализованы (/close, /closeall, /balance). §12.4: CB — постоянные/временные блокировки (trading_hours, cooldown), PauseConfirmModal. §17.8: Scheduler Service (APScheduler, 3 cron + T+1 unlock). §18.2: Tax FIFO + 3-НДФЛ экспорт реализованы S5. |
+| 2.4 | 2026-04-26 | Sprint_7_ARCH (7.R) | **Phase 1 feature-complete (M3 Phase 1).** Добавлен раздел §19 «Sprint 7 — Should-фичи и завершение Phase 1»: версионирование стратегий (история, именованные snapshots, history-preserving откат — §19.1); Grid Search оптимизация параметров (1–5 параметров, hard cap 1000 комбинаций, multiprocessing.Pool, heatmap — §19.2); экспорт CSV/PDF бэктеста (WeasyPrint — §19.3); инструменты рисования (5 типов: trendline/hline/vline/rect/label, hotkeys, persist через REST — §19.4); дашборд-виджеты (баланс + sparkline / health / активные позиции — §19.5); first-run wizard (5 шагов, gate на дисклеймере, нельзя пропустить — §19.6); backup/restore (CLI + APScheduler 03:00 UTC, WAL-aware SQLite — §19.7); AI слэш-команды (5 команд: /chart /backtest /strategy /session /portfolio + контекстные блоки в чате — §19.8); аналитика бэктеста (гистограмма P&L, donut Win/Loss, интерактивные зоны — §19.9); фоновые бэктесты (cap=3 на пользователя, бейдж в шапке, dropdown с прогрессом — §19.10); WS-обновление карточек сессий (без polling — §19.11); 5 новых event_type (trade_opened, partial_fill, order_error, all_positions_closed, connection_lost/restored — §19.12); Telegram inline-кнопки (open_session, open_chart deep links — §19.13). |
 
 ---
 

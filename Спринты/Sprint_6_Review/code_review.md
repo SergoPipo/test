@@ -229,16 +229,16 @@
 
 ## Визуальная верификация (Playwright)
 
-Проверены скриншоты ключевых страниц нового функционала S6 (см. корень репо):
+Проверены скриншоты ключевых страниц нового функционала S6 (см. `screenshots/`):
 
 | Компонент | Скриншот | Статус |
 |-----------|----------|--------|
-| NotificationDrawer (bell + drawer) | `s6r-notification-drawer.png` | OK — severity-emoji, relative time, "Прочитать все" работает |
-| NotificationSettingsPage | `s6r-notification-settings.png` | OK — таблица event x channel, Telegram привязан, Email не указан (предупреждение) |
-| Trading cards (P&L, позиция, WR) | `s6r-trading-page.png` | OK — PAPER бейдж, Decimal→Number корректно, долго/коротко, Сделок + WinRate |
-| Лента уведомлений | `s6r-notifications-page.png` | ⚠️ шаблоны `{strategy_name}: {ticker}` не подставлены в session_stopped (S7) |
-| AI-провайдеры | `s6r-ai-settings.png` | OK (после фикса #7, #8) — ∞ лимит работает |
-| Chart + trade markers | `s6r-chart-markers.png` | OK — 3-уровневый маркер Buy, sequential mode, OHLCV overlay |
+| NotificationDrawer (bell + drawer) | `screenshots/s6r-notification-drawer.png` | OK — severity-emoji, relative time, "Прочитать все" работает |
+| NotificationSettingsPage | `screenshots/s6r-notification-settings.png` | OK — таблица event x channel, Telegram привязан, Email не указан (предупреждение) |
+| Trading cards (P&L, позиция, WR) | `screenshots/s6r-trading-page.png` | OK — PAPER бейдж, Decimal→Number корректно, долго/коротко, Сделок + WinRate |
+| Лента уведомлений | `screenshots/s6r-notifications-page.png` | ⚠️ шаблоны `{strategy_name}: {ticker}` не подставлены в session_stopped (S7) |
+| AI-провайдеры | `screenshots/s6r-ai-settings.png` | OK (после фикса #7, #8) — ∞ лимит работает |
+| Chart + trade markers | `screenshots/s6r-chart-markers.png` | OK — 3-уровневый маркер Buy, sequential mode, OHLCV overlay |
 
 ## E2E регрессия
 
