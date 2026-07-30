@@ -102,6 +102,40 @@ curl -fsS http://localhost/                  # HTML с <div id="root">
 curl -fsS http://localhost/api/v1/health     # {"status":"ok", "cb_state":"closed", ...}
 ```
 
+#### Проверка миграций на чистой установке
+
+`command` backend-контейнера выполняет `alembic upgrade head` до старта uvicorn
+(`docker-compose.yml`), поэтому отдельно миграции запускать не нужно. Но на
+**чистой** БД схему обязательно надо сверить — молчаливое расхождение миграций
+с моделями (forward model drift) уже приводило к неработающему входу:
+
+```bash
+docker compose exec backend alembic current   # ожидается: d1e2f3a4b5c6 (head)
+docker compose exec backend alembic heads     # та же ревизия — расхождений нет
+```
+
+> **⚠️ Историческая справка (S8R-ALEMBIC-FRESH-DB-DRIFT, 2026-07-28).**
+> До ревизии **`d1e2f3a4b5c6`** (`s8r_fresh_db_drift`) сценарий именно из этого
+> раздела был сломан: на **чистой** БД после `alembic upgrade head` не
+> создавались таблица `user_ai_settings` и восемь колонок
+> (`strategies.description`, `instruments.logo_name`, 6 колонок в
+> `ai_provider_configs`) — модели ушли вперёд миграций. Первый же вход
+> (`POST /api/v1/auth/login`) отдавал **500**
+> `no such column: strategies.description`, то есть развёртывание с нуля по
+> этому гайду давало неработающую систему. На уже работающих стендах дефект
+> не проявлялся — их БД получили недостающие объекты другим путём (`init_db`),
+> поэтому он и не всплывал три недели.
+> Миграция `d1e2f3a4b5c6` **идемпотентна** (каждый объект добавляется только
+> если его ещё нет), поэтому безопасна и для чистой, и для существующей БД.
+> Регресс-защита в CI —
+> `backend/tests/unit/test_migration.py::test_fresh_db_schema_matches_models`:
+> сверяет всю `Base.metadata` (таблицы **и** колонки) с фактической схемой
+> чистой БД. Класс ловушки —
+> [`Develop/stack_gotchas/gotcha-13-forward-model-drift.md`](../Develop/stack_gotchas/gotcha-13-forward-model-drift.md).
+
+Если `alembic current` пуст или ниже `d1e2f3a4b5c6` — контейнер стартовал без
+миграций (см. §9.1), вход работать не будет.
+
 ### 3.4 Bootstrap первого администратора
 
 При первом запуске backend применяет миграции (`alembic upgrade head`) — таблицы создаются пустыми.
@@ -244,9 +278,49 @@ docker compose ps            # проверить healthy
 
 Миграции `alembic upgrade head` выполняются в entrypoint backend контейнера автоматически — отдельно запускать не нужно.
 
+После апдейта сверьте, что миграции доехали до головы:
+
+```bash
+docker compose exec backend alembic current   # ожидается: d1e2f3a4b5c6 (head)
+```
+
+> **ℹ️ Обновление с версии старше `d1e2f3a4b5c6` (S8R, 2026-07-28).**
+> Ревизия `d1e2f3a4b5c6` (`s8r_fresh_db_drift`) досоздаёт таблицу
+> `user_ai_settings` и восемь колонок, которых не хватало на чистых установках
+> (подробности — §3.3). Она **идемпотентна**: на стенде, где эти объекты уже
+> появились через `init_db`, миграция проходит без ошибки «duplicate column» и
+> данные не трогает. Отдельных действий администратора не требуется.
+> Ограничение `downgrade`: обратная миграция удаляет добавленные объекты
+> **вместе с данными** в `user_ai_settings` — перед откатом снимите backup
+> (§6.1).
+
 > **⚠️ Разовая процедура при обновлении до версии с BE-TRAD-06 (денежный учёт paper-портфеля, Model A).**
 > До этой версии paper-BUY не списывал `PaperPortfolio.balance` и не блокировал капитал. Позиция, **открытая на старом коде и ещё не закрытая на момент апдейта**, при закрытии на новом коде получит зачисление `proceeds` без парного списания при открытии → `balance` завысится, а `blocked_amount` уйдёт в underflow (безопасно зажимается в 0 с `log.error("paper_blocked_amount_underflow")`). Эффект только на paper, транзиентный (само-исцеляется после одного цикла закрытия), но искажает equity/CB-drawdown для straddle-позиций.
-> **Перед обновлением:** закрыть/сбросить открытые paper-сессии (в UI закрыть все позиции активных paper-сессий, либо остановить paper-сессии). Альтернатива — одноразовая реконсиляция БД: `blocked_amount = Σ(volume_rub открытых сделок)`, `balance = initial_capital + Σ(realized pnl)`. Пред-апдейтные значения `balance/blocked_amount` и так были фикцией (см. `Спринты/Code_Review_Full_2026-07/BE_TRAD_06_LOG.md`), поэтому сброс безопасен.
+> **Перед обновлением:** закрыть/сбросить открытые paper-сессии (в UI закрыть все позиции активных paper-сессий, либо остановить paper-сессии). Оба пути ведут в один и тот же код: `stop_session` → `OrderManager.close_all_positions` → `close_position` → `PaperPortfolioAccountant.apply_close`, то есть деньги возвращаются в портфель штатно.
+> **Закрытие — best-effort, обязательно проверьте результат.** `stop_session` доводит сессию до `stopped` даже если часть позиций закрыть не удалось (нет рыночной цены, брокер недоступен): такие позиции остаются в реальном open-статусе, в лог уходит `stop_session_positions_not_closed`, пользователю — уведомление `positions.close_failed`. Drain считается выполненным только когда открытых paper-позиций не осталось:
+> ```bash
+> docker compose exec backend python -c "
+> import asyncio, sqlalchemy as sa
+> import app.common.database as database
+> from app.trading.models import LiveTrade, TradingSession
+> async def main():
+>     # AsyncSessionLocal создаётся в init_db() (lifespan приложения); в разовом
+>     # скрипте её надо инициализировать явно, иначе она равна None.
+>     await database.init_db()
+>     async with database.AsyncSessionLocal() as db:
+>         rows = (await db.execute(
+>             sa.select(TradingSession.id, sa.func.count(LiveTrade.id))
+>             .join(LiveTrade, LiveTrade.session_id == TradingSession.id)
+>             .where(TradingSession.mode == 'paper',
+>                    LiveTrade.status.in_(['filled', 'pending']),
+>                    LiveTrade.closed_at.is_(None))
+>             .group_by(TradingSession.id)
+>         )).all()
+>         print(rows or 'открытых paper-позиций нет — drain выполнен')
+> asyncio.run(main())
+> "
+> ```
+> **Альтернатива** — одноразовая реконсиляция БД: `blocked_amount = Σ(volume_rub открытых сделок)`, `balance = initial_capital + Σ(realized pnl)`, **и обязательно** `peak_equity = balance + blocked_amount`. Про `peak_equity` забывать нельзя: по нему Circuit Breaker считает max drawdown (`(peak_equity − equity) / peak_equity`, `app/circuit_breaker/engine.py`), и оставленное завышенное пред-апдейтное значение даст фиктивную просадку на первой же проверке — CB поставит сессии на паузу без причины. `volume_rub` для paper уже включает `lot_size` (пишется как `price × lots × lot_size` при создании сделки), так что множитель в формуле не нужен. Пред-апдейтные значения `balance/blocked_amount` и так были фикцией (см. `Спринты/Code_Review_Full_2026-07/BE_TRAD_06_LOG.md`), поэтому сброс безопасен.
 
 **Rollback** (при провале миграции):
 ```bash
@@ -284,7 +358,34 @@ curl http://localhost/api/v1/health
 Plotly Dash панель — только для admin role (см. C-S8-9 DEV-4 W2):
 - Откройте `http://localhost/api/v1/admin/metrics`.
 - Авторизуйтесь через JWT (cookie `access_token` после логина в SPA).
-- Графики: signal→order latency, dashboard LCP, Telegram webhook latency, backtest jobs throughput.
+- Графики: signal→order latency, оценка стратегии на свече, dashboard LCP,
+  Telegram webhook latency, backtest jobs throughput.
+
+**Источник данных и его ограничения (S8R, 2026-07-30).** До этой версии все
+графики рисовали зашитые в код mock-массивы. Теперь четыре из пяти питаются
+живыми замерами `@timed_event` из кольцевого буфера
+`app/common/metrics_store.py`; пятый (backtest jobs) пока остаётся mock и так и
+подписан на странице. Что из этого следует для эксплуатации:
+
+- **Буфер в памяти процесса.** Рестарт backend (`docker compose restart
+  backend`, деплой, падение) обнуляет графики — это не потеря данных, а
+  отсутствие персистентности по замыслу: писать в SQLite на каждый тик
+  торгового хот-пути дороже, чем сама метрика.
+- **Глубина = ёмкость буфера**, последние N замеров на метрику, а не
+  фиксированное окно времени. На тихом стенде это сутки, под нагрузкой —
+  минуты.
+- **Несколько воркеров покажут только свою долю.** Текущая поставка
+  однопроцессная (один backend-контейнер), поэтому вопрос не стоит; при
+  масштабировании график перестанет быть полным.
+- **Пустой график с подписью «нет замеров» — нормальное состояние** сразу
+  после старта: метрика ещё не срабатывала. Правдоподобных чисел вместо
+  пустоты страница не рисует намеренно.
+- **Dashboard LCP приходит из браузера**: `PerformanceObserver` в SPA шлёт
+  замер в `POST /api/v1/observability/lcp` при уходе вкладки в фон. Эндпоинт
+  требует обычной аутентификации (не admin — замер шлёт пользователь) и
+  отбрасывает значения свыше 10 минут. Если график LCP пуст, а остальные
+  наполнены — значит SPA не доходит до отправки (пользователь не логинился,
+  либо браузер не поддерживает `largest-contentful-paint`).
 
 ### 8.3 Логи
 
