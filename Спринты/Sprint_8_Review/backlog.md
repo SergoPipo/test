@@ -164,9 +164,67 @@ timeout = clamp(⌈период / чанк(таймфрейм)⌉ × BACKTEST_DA
 
 | # | Что | Severity | Статус |
 |---|-----|----------|--------|
-| 1 | В основном worktree `Develop/` висит незакоммиченная правка `.env.example` (`AI_ALLOW_PRIVATE_PROVIDER_URLS`) — не из этого цикла | low | ⬜ требует решения заказчика (закоммитить / откатить / оставить) |
-| 2 | `S8R-SANDBOX-ACCOUNT-STALE-REOPEN` (см. ниже) | medium | ⬜ вне объёма цикла |
-| 3 | Плавающее падение `tests/test_circuit_breaker/test_integration.py::test_order_passes_when_no_violations` | low | ⬜ наблюдалось 1 раз из 3 полных прогонов (в одиночку и в своей директории — стабильно зелёный). В остальных полных прогонах того же окружения — 2222 passed. Кандидат в тот же класс, что разобранный флейк `test_max_positions_limit` |
+| 1 | В основном worktree `Develop/` висит незакоммиченная правка `.env.example` (`AI_ALLOW_PRIVATE_PROVIDER_URLS`) — не из этого цикла | low | ⬜ решение заказчика 2026-07-29: **оставить как есть**, не трогать |
+| 2 | `S8R-SANDBOX-ACCOUNT-STALE-REOPEN` (см. ниже) | medium | ✅ **ЗАКРЫТО 2026-07-29** (решение заказчика — чинить в этом цикле) |
+| 3 | Плавающее падение `tests/test_circuit_breaker/test_integration.py::test_order_passes_when_no_violations` | low | ✅ **ЗАКРЫТО 2026-07-29** — причина найдена и воспроизведена детерминированно |
+
+---
+
+## Пятая волна — финальное сведение 2026-07-29 (одиночная сессия)
+
+### Мержи
+
+| Что | Как | Результат |
+|---|---|---|
+| PR #10 `s8r/backlog-fixes-2026-07-27` → `s8r/bug-31-unified-codegen` | merge commit (решение заказчика) | ✅ смёржен, `cc04ef5`. Конфликтов не было: дерево `bug-31` после мержа **побайтово равно** дереву `backlog-fixes` |
+
+**Сверка веток по remote-рефам вскрыла расхождение с исходной постановкой:**
+
+- `p1/wave2-backend` числилась «не сведённой ни с чем». Фактически она **прямой предок** `s8r/backlog-fixes-2026-07-27` (`git merge-base --is-ancestor` → true), как и `p1/wave3-frontend`, `p1/auth-hardening`, `s8r/acceptance-fixes-2026-07-26`. Сводить нечего — всё уже внутри.
+- Локальный ref `s8r/bug-31-unified-codegen` был протухшим (behind 92); фактические счётчики берутся только с `origin/*`.
+- `develop` содержит коммит `21c3326` (PR #6), которого нет ни в одной S8R-ветке, — единственный источник конфликта при сведении в `develop` (файл `frontend/e2e/s5-paper-trading.spec.ts`).
+
+### Конфликт `s5-paper-trading.spec.ts` — разбор
+
+Обе стороны **независимо реализовали один и тот же фикс** flaky-теста `pause and resume session`: одинаковая переменная `currentStatus`, одинаковая фабрика `sessionPayload()`, одинаковые три `page.route`. Различия:
+
+| Сторона | Уникальное |
+|---|---|
+| `develop` (PR #6, cherry-pick `ce791f1`) | развёрнутый комментарий с корневой причиной (`store.pauseSession` подменял сессию объектом без `id`/`mode` → `TypeError` в `SessionCard` → `ErrorBoundary`) |
+| `s8r/bug-31` | дополнительно сняты **6** вызовов `waitForLoadState('networkidle')` (закрытие E2E-пункта closeout, gotcha-46) |
+
+**Разрешение:** файл берётся со стороны `s8r/bug-31` (строгий superset по поведению), комментарий — развёрнутый из PR #6. Результат отличается от версии `develop` ровно на 6 строк `networkidle`, от версии `s8r/bug-31` — только текстом комментария.
+
+### E2E — перепрогон после правки `ws_sessions.py`
+
+**162 passed / 3 skipped / 0 failed** из 165 (прогон 6 мин). Паритет с baseline: 162 + 1 тест `auth-hardening`, проходящий на моках и входивший в прежние 163, = **163 passed / 3 skipped**.
+
+Из набора исключены 6 из 7 тестов `auth-hardening.spec.ts` — им нужен выделенный стенд `:8120`/`:5193` (в baseline они тоже не входили).
+
+**Два ложных вывода, на которые ушло два лишних прогона:**
+
+1. **«Набор завис»** — на самом деле виснет **выход** Playwright: все 165 тестов отработали, последний прошёл за 1.0 с, после чего процесс 10+ минут держится на 0% CPU без браузеров и не печатает сводку. → [gotcha-49](../../Develop/stack_gotchas/gotcha-49-playwright-hangs-after-last-test.md).
+2. **«Регресс в `s7-export`»** — 2 падения CSV/PDF в двух прогонах подряд. Оба прогона шли **параллельно с backend-pytest**; тот же файл в одиночку — 3 passed за 3.2 с, чистый полный прогон — 0 падений. Причина — конкуренция за CPU, а не код.
+
+### Гейты пятой волны
+
+backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 новых) · vitest **835 passed / 121 файл** (baseline 832/120) · `tsc` 0 · `eslint --max-warnings 0` 0 · `ruff` 0 · `mypy` Success (171 файл) · `bandit` 0 issues · E2E 162/3/0.
+
+---
+
+## Флейк `test_order_passes_when_no_violations` — ✅ FIXED 2026-07-29
+
+- **Причина (воспроизведена детерминированно).** `OrderManager.process_signal` зовёт `MarketDataService.ensure_lot_size_strict`, а тот при отсутствии свежего кэша инструмента идёт **в сеть**: T-Invest → MOEX ISS (`app/market_data/service.py`, `_resolve_lot_size`). В тестовой БД инструментов нет, поэтому каждый такой тест делал реальный сетевой запрос. Когда ISS подтормаживал, строгий резолв бросал `LotSizeUnavailableError`, Circuit Breaker блокировал сигнал (fail-closed по FIX-1), `process_signal` возвращал `None` → падал `assert result is not None`.
+- **Тот же класс, что закрытый ранее флейк** `test_max_positions_limit` (юнит-тест ходил в MOEX ISS за размером лота).
+- **RED (детерминированный):**
+  ```
+  MOEX_ISS_BASE_URL=http://127.0.0.1:9 pytest tests/test_circuit_breaker/test_integration.py -q
+  → 1 failed
+     cb_position_size_lot_size_unavailable → signal_blocked_temporary → circuit_breaker_blocked
+  ```
+  В обычных условиях тот же тест — 1 passed. Это и есть механизм «1 раз из 4».
+- **GREEN:** модульная `autouse`-фикстура `stub_lot_size` в `tests/test_circuit_breaker/test_integration.py` патчит `ensure_lot_size_strict` → `1` (ровно то, что ISS отдаёт по SBER, — поведение остальных тестов файла не меняется). Тот же приём уже применён в соседнем `test_engine.py`.
+- **Проверка:** при недоступном ISS — **4 passed** (было 1 failed); вся директория `test_circuit_breaker` — **65 passed**. Побочно файл ускорился с ~3 с до 0.23 с: сетевых запросов больше нет.
 
 ---
 
@@ -193,7 +251,45 @@ timeout = clamp(⌈период / чанк(таймфрейм)⌉ × BACKTEST_DA
 
 ---
 
-## S8R-SANDBOX-ACCOUNT-STALE-REOPEN — ⬜ OPEN (обнаружено 2026-07-09) — авто-переоткрытие протухшего sandbox-аккаунта
+## S8R-SANDBOX-ACCOUNT-STALE-REOPEN — ✅ FIXED 2026-07-29 (обнаружено 2026-07-09)
+
+**Решение заказчика 2026-07-29:** чинить в этом цикле, вариант «автодетект + кнопка в UI»; при протухании **посреди живой сессии — обновить счёт и продолжить торговать**.
+
+Дизайн: `docs/superpowers/specs/2026-07-29-sandbox-account-stale-reopen-design.md`.
+
+### Как закрыто (TDD, RED → GREEN по каждому блоку)
+
+**Новый модуль `app/broker/sandbox_recovery.py`** — единственное место, знающее про дефект. Вынесен отдельно от `broker/service.py`, потому что потребителей двое (`app/broker/service.py` и `app/trading/engine.py`), а `trading` уже импортирует из `broker` — обратная зависимость замкнула бы цикл.
+
+| Функция | Ответственность |
+|---|---|
+| `is_account_not_found(exc)` | распознаёт `NOT_FOUND` + код `50004` — структурно (`.code`/`.details` у `RequestError`/`AioRequestError`) и по строке через обёртку `BrokerError`, обходя цепочку `__cause__`/`__context__`. Посторонние `NOT_FOUND` (инструмент — `50002`) отсеиваются |
+| `refresh_sandbox_account_id(db, account, adapter)` | `get_accounts()` → активный счёт → запись в `broker_accounts.account_id`. Отдельный `open_sandbox_account()` не нужен: `TInvestAdapter.get_accounts()` сам создаёт счёт при пустом списке |
+
+**Три точки подключения**, все строго под `account.is_sandbox` (production-путь не изменён ни строкой):
+
+1. `BrokerService.get_sandbox_balance` — при `NOT_FOUND` переоткрыть и повторить **ровно один раз**.
+2. `TradingEngine` (`_recover_stale_sandbox_account` + повтор `place_order`) — переоткрыть, **реконсилировать позиции**, повторить один раз.
+3. `POST /api/v1/broker-accounts/{id}/reopen-sandbox` + `BrokerService.reopen_sandbox_account` — ручное переоткрытие под кнопку.
+
+**Реконсиляция позиций — почему обязательна.** Заказчик выбрал «обновить и продолжить торговать». Само по себе это даёт недостоверные цифры: старый счёт удалён брокером **вместе с позициями**, а `PositionTracker` и Circuit Breaker продолжают считать их открытыми — SL/TP закрывали бы несуществующие позиции, CB мерил бы просадку по мёртвым данным. Поэтому `_reconcile_positions_after_reopen` закрывает открытые сделки сессии (`exit_price = entry_price`, `pnl = 0.00`): новый sandbox-счёт пуст, физически позиций нет. Это реализация выбранного варианта, а не отступление от него.
+
+**UI:** кнопка «Пересоздать sandbox-счёт» в списке аккаунтов (`/settings?tab=broker`), рендерится только для sandbox. Evidence — `screenshots/s8r-sandbox-reopen-button.png`: у sandbox-строки 4 действия (включая пересоздание), у production — 3.
+
+**Тесты: +23** (2223 → 2246).
+
+| Файл | Тестов | Что покрыто |
+|---|---|---|
+| `tests/test_broker/test_sandbox_recovery.py` | 15 | распознавание ошибки (сырой SDK, `AioRequestError`, обёртка `BrokerError`, посторонние ошибки, чужой `NOT_FOUND`); запись живого `account_id`; `None` при пустом списке / упавшем адаптере; пропуск production; выбор активного счёта; ретрай сервиса и его однократность |
+| `tests/test_trading/test_engine_sandbox_reopen.py` | 4 | повтор ордера после переоткрытия; реконсиляция позиций; однократность ретрая; посторонняя ошибка счёт не пересоздаёт |
+| `tests/unit/test_broker/test_broker_router.py` | 4 | endpoint: 401 без JWT, 200 владелец, 422 для production, 404 для чужого |
+| `frontend/.../BrokerAccountListSandboxReopen.test.tsx` | 3 | кнопка видна у sandbox, скрыта у production, клик зовёт `reopenSandbox(id)` |
+
+**Сознательно не делалось:** новый `event_type` не заводился (потребовал бы синхронизации `EVENT_MAP` ↔ `EVENT_TYPE_LABELS` — лишний объём); факт подмены уходит в structlog (`sandbox_account_reopened`, `sandbox_positions_reconciled_after_reopen`) и в ответ API.
+
+---
+
+## S8R-SANDBOX-ACCOUNT-STALE-REOPEN — исходное описание (2026-07-09)
 
 - **Источник:** живая переверификация W7 (2026-07-09). При попытке sandbox-операции T-Invest вернул `NOT_FOUND '50004' Account not found` для `account_id`, записанного в `broker_accounts` (id=3).
 - **Причина:** T-Invest-**sandbox-аккаунты эфемерны** — периодически удаляются/пересоздаются на стороне брокера. Токен при этом остаётся валиден, но `get_accounts()` возвращает **новый** `account_id` (в нашем кейсе старый `8de9093c-…` → новый `f925da17-…`). В БД хранился старый → **любая новая sandbox-сессия падала «Account not found»** (не баг W7 — операционный дрейф).
