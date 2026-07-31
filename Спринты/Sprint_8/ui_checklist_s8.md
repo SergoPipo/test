@@ -75,7 +75,8 @@
 - [ ] `NotificationSettingsPage.tsx:24-43` содержит **17 ключей** в `EVENT_TYPE_LABELS`.
 - [ ] 13 UI типов (S7): `trade_opened`, `trade_closed`, `partial_fill`, `cb_triggered`, `order_error`, `all_positions_closed`, `session_recovered`, `connection_lost`, `connection_restored`, `backtest_completed`, `daily_stats`, `corporate_action`, `price_alert`.
 - [ ] 4 новых backend-типа S8 (W2 / C-S8-9): `session_started`, `session_stopped`, `order_placed`, `trade_filled` — лейблы добавлены, синхронны с `app/notification/event_map.py`.
-- [ ] Включить Telegram + Email для типа `trade_filled` → реальная сделка → доставка в 3 канала (in-app, telegram, email).
+- [ ] Включить Telegram + Email для типа `trade_filled` → реальная сделка → **in-app + Telegram** по самой сделке. **Email подтверждается на событии из белого списка** `EMAIL_ALLOWED_EVENTS` — например `all_positions_closed`, которое порождается закрытием позиции той же сделкой (`notifications.channels_sent = in_app,telegram,email`).
+  ⚠️ Email по событиям сделок (`order_placed`, `trade_opened`, `trade_filled`, `trade_closed`) не рассылается **намеренно**: иначе активная стратегия слала бы письмо на каждую сделку. API отдаёт по ним `email_supported: false`, тумблер Email в UI погашен — это не дефект (`S8R-S87-EMAIL-NOT-FOR-TRADE-EVENTS`, решение заказчика 2026-07-31).
 - [ ] data-testid `event-type-row-<event_name>` или таблица с `<tr data-event-type=...>` для каждого ивента.
 - [ ] Дефолт: `in_app_enabled=true`, остальные `false`.
 
@@ -206,6 +207,20 @@
 - [ ] **C-S8-7 (is_admin field):** Sidebar пункт условный — ✅ (`Sidebar.tsx:12,15`).
 - [ ] **C-S8-8 (/admin/metrics):** страница рендерится — ✅ через анализ `metrics_dash.py` + `AdminAuthASGIMiddleware`.
 - [ ] **C-S8-9 (event sync):** NotificationSettingsPage содержит 17 ключей — ✅ (`NotificationSettingsPage.tsx:24-43`).
+
+## S8.18 Статус-футер и WS торговых сессий (S8R, 2026-07-31)
+
+Добавлено по итогам находки `S8R-FOOTER-NO-ACTIVE-SESSIONS`. Подпись в футере
+была строкой-константой «Нет активных сессий» — она не зависела ни от каких
+данных и врала при живой сессии.
+
+- [ ] При **активной** торговой сессии футер (`data-testid="trading-mode"`) показывает «Активных сессий: N», где N — число сессий в статусе `active`. Скриншот: `Sprint_8_Review/screenshots/b1_footer_active_sessions.png`.
+- [ ] `paused` и `stopped` в счётчик **не** входят: остановили последнюю сессию → подпись сразу вернулась к «Нет активных сессий» (без перезагрузки страницы — список сессий на `/trading` живёт по WS).
+- [ ] Число берётся из `GET /trading/dashboard` (опрос раз в минуту плюс внеочередной — при изменении состава сессий) и показывается одинаково на всех страницах: Дашборд, Графики, Настройки. ⚠️ Отдельно проверить сценарий из код-ревью: открыть `/trading` с активными сессиями → уйти на Дашборд → остановить сессии из другого места → подпись обязана обновиться (список сессий в store не очищается и вне `/trading` не живёт по WS, поэтому опираться на него нельзя).
+- [ ] Backend недоступен → футер не ломается и **не** подменяет содержимое страницы `/trading` алертом ошибки (опрос идёт мимо `tradingStore.error`).
+- [ ] Бейдж WS на `/trading` (`data-testid="trading-ws-status"`) при живом соединении — «ПОДКЛЮЧЕНО». Проверять после перезагрузки страницы в **dev**-режиме: `<React.StrictMode>` монтирует эффект дважды, и раньше закрытие первого сокета переводило бейдж в «ПЕРЕПОДКЛЮЧЕНИЕ» при исправно идущих данных и оставляло второе соединение незакрытым.
+
+---
 
 ## S8.17 Общие проверки за S8
 
