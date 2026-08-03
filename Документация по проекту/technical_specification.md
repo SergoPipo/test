@@ -3,15 +3,16 @@
 # ТЕХНИЧЕСКОЕ ЗАДАНИЕ (ТЗ)
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия:** 2.0
-**Дата:** 2026-07-31
-**Основание:** Функциональные требования v3.0 от 2026-07-31
+**Версия:** 2.1
+**Дата:** 2026-08-03
+**Основание:** Функциональные требования v3.1 от 2026-08-03
 **Статус:** ✅ M4 Production-ready. Gate Sprint_8_Review пройден (PASS WITH NOTES), остаток приёмки (8 замечаний) и весь backlog доведения закрыты. Актуализировано по итогам код-ревью P0–P1, финальной приёмки и closeout-цикла S8R.
 
 ### История версий
 
 | Версия | Дата | Спринт | Ключевые изменения |
 |--------|------|--------|-------------------|
+| 2.1 | 2026-08-03 | Sprint_8_Review — сведение веток и остаток замечаний | §5.4 — состав Trading Engine приведён к фактическому (`TradingSessionManager`, `SessionRuntime`, `SignalProcessor`, `OrderManager`, `RiskMonitor`, `PaperTradingEngine`); `PositionTracker` убран из описания компонентов и из схемы потока сигнала — класс удалён 2026-07-31, но §5.4 об этом ещё не знал. §5 — нереализованный P&L **нигде не хранится**: считается на лету `app/trading/unrealized.py::unrealized_pnl_by_session`, и все три потребителя (Circuit Breaker, `TradingService.get_positions`, `SchedulerService.send_daily_stats`) обязаны давать одно число на одних данных; дневной отчёт больше не считает его своей копией формулы без множителя штук/лот. §8 — колонка `daily_stats.unrealized_pnl` удалена миграцией `e2f3a4b5c6d7` (не заполнялась никогда; `deployment_guide.md` §7 обновлён синхронно). §4 — фронтовый тип `TradingDashboard` приведён к `DashboardResponse` (`active_sessions`, `paused_sessions`, `total_sessions`, `total_pnl`, `total_open_positions`), состав полей закреплён сверкой `.ts` ↔ Pydantic-схемы. §3 — дефолты риск-лимитов `User` заданы `Decimal`, а не `float` (конвенция «деньги и проценты — Decimal»; float ронял арифметику Circuit Breaker на ещё не перезагруженном из БД пользователе). §9 — нагрузочный стенд `signal→order` гоняет Circuit Breaker (раньше звал `process_signal` без `user_id`, и девять проверок риска в замеры не входили); потолок ~20 одновременных сессий подтверждён **на боевом пути**. |
 | 2.0 | 2026-07-31 | Sprint_8_Review — починка находок части 2 | §5 — `DailyStat.realized_pnl` ведут **оба** пути закрытия (`OrderManager.close_position` наравне с `RiskMonitor`), поле — источник кривой капитала в `AccountService.get_balance_history`; ключ строки `daily_stats.date` и «сегодня» в `SchedulerService.send_daily_stats` считаются **по UTC** (писатели и читатели сведены к одной зоне, конвенция «все даты в UTC»); у синхронизации календаря MOEX год **биржевой** (`Europe/Moscow`) — на UTC 1 января загрузился бы уходящий год. §5/§12 — Circuit Breaker считает нереализованный P&L открытых позиций на лету (`app/trading/unrealized.py`) вместо колонки `daily_stats.unrealized_pnl`, которую никто не заполнял; лишних записей в горячем пути не добавилось. §4 — `PositionTracker` удалён (мёртвый класс, 0 вызовов из `app/`), состав движка: `TradingSessionManager`, `SignalProcessor`, `OrderManager`, `RiskMonitor`. §5 — lot_size из T-Invest берётся у **торгуемого** инструмента (`api_trade_available_flag` + доска `TQBR`), а не у первого совпадения по тикеру. §6 — `StatusFooter` показывает фактическое число активных сессий; WS-хук `/ws/trading-sessions` игнорирует события вытесненного сокета (StrictMode-дубль больше не даёт ни ложного «переподключения», ни утечки соединения). §4 — Email-канал ограничен `EMAIL_ALLOWED_EVENTS`, синхронизировано с ФТ v3.0. |
 | 1.9 | 2026-07-30 | Sprint_8_Review — хвост | §4 Performance metrics — метрики стали **живыми**: заведён кольцевой буфер `app/common/metrics_store.py`, куда пишет `@timed_event`; `/admin/metrics` читает его вместо зашитых mock-массивов; появился недостающий декоратор `trading.signal_to_order` на `OrderManager.process_signal` и клиентский `PerformanceObserver` → `POST /api/v1/observability/lcp`. Зафиксированы измеренные числа и предел масштабирования (p95 держится до ~20 одновременных сессий, при 40 бюджет 500 мс превышен). |
 | 1.8 | 2026-07-28 | Sprint_8_Review — closeout | §9 — контракт окружения backend-job в CI (`DEBUG=false` + не-дефолтные фиктивные `SECRET_KEY`/`ENCRYPTION_KEY`, чтобы гейт `check_production_secrets` продолжал работать); запрет `waitForLoadState('networkidle')` в E2E-спеках при живом WebSocket; требования к стенду `auth-hardening.spec.ts` (`PW_API_URL`/`PW_WS_URL`/`PW_ORIGIN`, `PW_ORIGIN` == `CORS_ORIGINS`, `LOGIN_RATE_LIMIT_PER_MINUTE` ≥ 10). Регресс-сверка схемы БД с `Base.metadata` на чистой установке (закрыт S8R-ALEMBIC-FRESH-DB-DRIFT: не хватало таблицы `user_ai_settings` и 8 колонок, login отдавал 500). Baseline: 2223 pytest / 832 vitest, E2E 163 passed одним прогоном, Stack Gotchas 46 → 47. |
@@ -1474,9 +1475,22 @@ class OHLCVValidator:
 - `TradingSessionManager` — управление жизненным циклом сессий (start, pause, stop, resume). Делегирует `SessionRuntime.start/stop` для live-части.
 - `SessionRuntime` *(введён в S5R.2, `app/trading/runtime.py`)* — **единственная production-точка вызова** `SignalProcessor.process_candle()`. Держит per-session listener'ы на каналах EventBus `market:{ticker}:{timeframe}`, загружает скользящее окно истории свечей при старте, реагирует на closed-свечи, публикует события в канал `trades:{session_id}`. Создаётся один раз в `main.py lifespan`, вызывает `restore_all(active_sessions)` при старте backend, `shutdown()` при остановке.
 - `SignalProcessor` — получает от runtime скользящее окно свечей (`candles: list[dict]`, по умолчанию N=200), прогоняет через стратегию в sandbox, генерирует сигналы. Сохранены алиасы `candle_open/candle_high/candle_low/candle_close/candle_volume` для обратной совместимости со старыми сгенерированными стратегиями.
-- `OrderManager` — конвертирует сигналы в ордера, проверяет circuit breaker, отправляет в брокер.
-- `PositionTracker` — отслеживает открытые позиции, P&L, slippage.
-- `PaperTradingEngine` — эмуляция исполнения ордеров для paper trading.
+- `OrderManager` — конвертирует сигналы в ордера, проверяет circuit breaker, отправляет в брокер, закрывает позиции (`close_position`, `close_all_positions`).
+- `RiskMonitor` — мониторинг SL/TP по открытым позициям и их закрытие при срабатывании; здесь же `derive_lot_size` — авторитетный множитель штук/лот, восстановленный из `volume_rub`.
+- `PaperTradingEngine` — эмуляция исполнения ордеров для paper trading; вся денежная мутация paper-портфеля идёт через `PaperPortfolioAccountant` (`apply_open` / `apply_close`).
+
+> **Нереализованный P&L нигде не хранится** — он считается на лету
+> (`app/trading/unrealized.py`, `unrealized_pnl_by_session`) и одинаково у трёх
+> потребителей: Circuit Breaker (`_check_daily_loss_limit`), карточка сессии
+> (`TradingService.get_positions`) и дневной отчёт
+> (`SchedulerService.send_daily_stats`). Величина устаревает на следующем баре,
+> поэтому запись в горячий путь не добавлялась; колонка
+> `daily_stats.unrealized_pnl`, которая никогда не заполнялась, удалена
+> миграцией `e2f3a4b5c6d7` (S8R, 2026-08-03).
+
+> **`PositionTracker` удалён** 2026-07-31 (`S8R-POSITIONTRACKER-DEAD-CODE`):
+> класс не вызывался из `app/` ни разу с момента появления в S5, а его
+> `calculate_unrealized_pnl` был четвёртой копией расчёта нереализованного P&L.
 
 **5.4.2 Поток обработки сигнала (Real, после S5R):**
 
@@ -1495,8 +1509,6 @@ CircuitBreakerEngine.check_before_order(session, signal)
 OrderManager.place_order(session, signal)
     ↓
 BrokerAdapter.place_order(order)
-    ↓
-PositionTracker.register_order(order)
     ↓
 EventBus.publish(f"trades:{session.id}", {"type": "order.placed", "latency_ms": ...})
 ```
