@@ -1398,6 +1398,30 @@ class GeneratedStrategy(bt.Strategy):
 - `money_management` -> `bt.sizers.PercentSizer` или кастомный sizer
 - `time_filter` -> проверка `self.data.datetime.time()` в `next()`
 
+**5.2.4 Единый кодоген через StrategyIR (S8R, BUG-31):**
+
+> С приёмки Sprint 8 backtrader-код генерируется из **того же промежуточного
+> представления** (`StrategyIR`), что используют интерпретатор стратегий
+> (live-торговля) и parity-сверка. Это единственный источник правды:
+>
+> ```
+> blocks_json (канонический Blockly) → parse_blocks → StrategyIR ─┬─→ ir_to_backtrader_code → Python (backtrader)
+>                                                                  └─→ evaluate/interpreter (live + parity-shadow)
+> ```
+>
+> **Зачем:** раньше код для backtrader строила отдельная цепочка (фронтовые
+> Blockly-генераторы → плоский формат → `code_generator.py`), которая
+> рассинхронизировалась с блоками (теряла индикаторы из-за разного регистра имён,
+> не вставляла `buy`) — бэктест прогонял НЕ ту стратегию. Единый IR убирает этот
+> класс багов: backtrader и live согласованы по построению.
+>
+> **Реализация:** `app/strategy/ir_codegen.py` (`ir_to_backtrader_code`). `StrategyIR`
+> (`app/strategy/ir.py`) включает индикаторы, условия входа/выхода, а также SL/TP,
+> размер позиции и тайм-фильтр. Stochastic генерируется как `bt.indicators.StochasticFast`
+> (числовой паритет %K с интерпретатором). Старый `code_generator.py` оставлен для
+> legacy-тестов и не используется в production-пути. Подробности и ловушка —
+> `Develop/stack_gotchas/gotcha-35-dual-block-translators-drift.md`.
+
 ### 5.3 Backtest Engine
 
 **Ответственный: BACK1**
