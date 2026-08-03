@@ -3,15 +3,17 @@
 # ТЕХНИЧЕСКОЕ ЗАДАНИЕ (ТЗ)
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия:** 1.8
-**Дата:** 2026-07-28
-**Основание:** Функциональные требования v2.9 от 2026-07-27
+**Версия:** 2.0
+**Дата:** 2026-07-31
+**Основание:** Функциональные требования v3.0 от 2026-07-31
 **Статус:** ✅ M4 Production-ready. Gate Sprint_8_Review пройден (PASS WITH NOTES), остаток приёмки (8 замечаний) и весь backlog доведения закрыты. Актуализировано по итогам код-ревью P0–P1, финальной приёмки и closeout-цикла S8R.
 
 ### История версий
 
 | Версия | Дата | Спринт | Ключевые изменения |
 |--------|------|--------|-------------------|
+| 2.0 | 2026-07-31 | Sprint_8_Review — починка находок части 2 | §5 — `DailyStat.realized_pnl` ведут **оба** пути закрытия (`OrderManager.close_position` наравне с `RiskMonitor`), поле — источник кривой капитала в `AccountService.get_balance_history`; ключ строки `daily_stats.date` и «сегодня» в `SchedulerService.send_daily_stats` считаются **по UTC** (писатели и читатели сведены к одной зоне, конвенция «все даты в UTC»); у синхронизации календаря MOEX год **биржевой** (`Europe/Moscow`) — на UTC 1 января загрузился бы уходящий год. §5/§12 — Circuit Breaker считает нереализованный P&L открытых позиций на лету (`app/trading/unrealized.py`) вместо колонки `daily_stats.unrealized_pnl`, которую никто не заполнял; лишних записей в горячем пути не добавилось. §4 — `PositionTracker` удалён (мёртвый класс, 0 вызовов из `app/`), состав движка: `TradingSessionManager`, `SignalProcessor`, `OrderManager`, `RiskMonitor`. §5 — lot_size из T-Invest берётся у **торгуемого** инструмента (`api_trade_available_flag` + доска `TQBR`), а не у первого совпадения по тикеру. §6 — `StatusFooter` показывает фактическое число активных сессий; WS-хук `/ws/trading-sessions` игнорирует события вытесненного сокета (StrictMode-дубль больше не даёт ни ложного «переподключения», ни утечки соединения). §4 — Email-канал ограничен `EMAIL_ALLOWED_EVENTS`, синхронизировано с ФТ v3.0. |
+| 1.9 | 2026-07-30 | Sprint_8_Review — хвост | §4 Performance metrics — метрики стали **живыми**: заведён кольцевой буфер `app/common/metrics_store.py`, куда пишет `@timed_event`; `/admin/metrics` читает его вместо зашитых mock-массивов; появился недостающий декоратор `trading.signal_to_order` на `OrderManager.process_signal` и клиентский `PerformanceObserver` → `POST /api/v1/observability/lcp`. Зафиксированы измеренные числа и предел масштабирования (p95 держится до ~20 одновременных сессий, при 40 бюджет 500 мс превышен). |
 | 1.8 | 2026-07-28 | Sprint_8_Review — closeout | §9 — контракт окружения backend-job в CI (`DEBUG=false` + не-дефолтные фиктивные `SECRET_KEY`/`ENCRYPTION_KEY`, чтобы гейт `check_production_secrets` продолжал работать); запрет `waitForLoadState('networkidle')` в E2E-спеках при живом WebSocket; требования к стенду `auth-hardening.spec.ts` (`PW_API_URL`/`PW_WS_URL`/`PW_ORIGIN`, `PW_ORIGIN` == `CORS_ORIGINS`, `LOGIN_RATE_LIMIT_PER_MINUTE` ≥ 10). Регресс-сверка схемы БД с `Base.metadata` на чистой установке (закрыт S8R-ALEMBIC-FRESH-DB-DRIFT: не хватало таблицы `user_ai_settings` и 8 колонок, login отдавал 500). Baseline: 2223 pytest / 832 vitest, E2E 163 passed одним прогоном, Stack Gotchas 46 → 47. |
 | 1.6 | 2026-07-27 | Code Review P0–P1 + S8R | §7 — auth Model A (3 HttpOnly-cookie, CSRF double-submit, WS cookie-auth на upgrade, single-flight refresh на `navigator.locks`) + правило «клиент мимо axios обязан слать `X-CSRF-Token`»; §3/§5 — `PaperPortfolioAccountant` как единая точка мутации денег paper-портфеля и инвариант `Δequity == trade.pnl`; §8 — Alembic обязан уважать `DATABASE_URL`, разовый drain paper-сессий при выкатке; §6 — контракт слоя разметки графика (`requestUpdate` в `attached()`, единая выборка фигуры под курсором); §9 — актуальные baseline-цифры тестов |
 | 1.5 | 2026-05-13 | S8 W3 | Добавлен §8.4 «Deployment Architecture (Mac mini + Docker)»; §7 расширен под admin role + security headers + ASGI mount auth; §9 — coverage gate 80% + bandit/safety CI gates; §4 — performance baseline числа из W2 |
@@ -27,6 +29,9 @@
 | §2.1 Архитектура | Admin role + admin panel (Plotly Dash под `/api/v1/admin/metrics` через `AdminAuthASGIMiddleware`) | S8 W2 |
 | §4 API | `/api/v1/health` extended: `cb_state`, `tinvest_connected`, `scheduler_running`, `scheduler_jobs[]`; `/api/v1/market-data/sparkline?ticker=X&hours=N`; `/api/v1/account/balance/history?since_first_activity=true`; `POST /api/v1/notifications/telegram/test`; admin namespace `/api/v1/admin/*` под `require_admin` | S8 W1+W2 |
 | §4 Performance metrics (реальные, baseline W2) | signal→order p95: измеряется `@timed_event(name="trading.signal_to_order")` (цель < 500мс — мониторинг через `/admin/metrics`); dashboard LCP (PerformanceObserver) < 2с; Telegram webhook handle p95 (`@timed_event(name="telegram.handle")`) < 3с | S8 W2 §4.3 |
+| §4 Performance metrics — **живой источник** (S8R хвост, 2026-07-30) | До этой правки метрики существовали только на бумаге: `/admin/metrics` рисовал **зашитые в код** mock-массивы, `@timed_event` писал длительность в structlog на уровне DEBUG и никуда её не агрегировал, декоратора `trading.signal_to_order` в коде **не было вовсе** (были только `signal.process` и `order.place`), а `PerformanceObserver` не был реализован нигде. Теперь: кольцевой буфер `app/common/metrics_store.py` (в памяти процесса, последние N замеров на метрику) наполняется из `@timed_event`; `OrderManager.process_signal` обёрнут `@timed_event("trading.signal_to_order")`; браузер шлёт LCP в `POST /api/v1/observability/lcp` (обычная аутентификация, **не** `require_admin` — замер шлёт пользователь, а не администратор; значение санитизируется потолком 10 мин); Dash-layout собран как callable, иначе страница застыла бы на состоянии при импорте модуля. Ограничения буфера: рестарт backend обнуляет графики, при нескольких воркерах каждый видит только свою долю. Backtest jobs остаётся mock. | S8R хвост |
+| §4 Performance — измеренные значения (2026-07-30, залповый ритм баров, paper) | `signal.process` (оценка стратегии) p95 ≤ **5,6 мс** на всех уровнях нагрузки. `trading.signal_to_order` (полный путь сигнал → ордер) p50/p95: 1 сессия — 18,9 / **21,1 мс**; 5 сессий — 15,0 / **33,4 мс**; 20 сессий — 17,2 / **172,3 мс**; 40 сессий — 27,1 / **827,7 мс**. Цель ТЗ **< 500 мс p95 держится до ~20 одновременных сессий и нарушается при 40** (в 1,7×). Узкое место — не стратегия, а обвязка ордера (последовательные записи в SQLite: sizing, Circuit Breaker, денежный учёт, DailyStat, шина событий). Замеры сняты на paper-режиме; gRPC к T-Invest (`order.place`) в цифры не входит, то есть приведённые числа — **пол**, вклад собственного кода. **Решение заказчика 2026-07-30: потолок разделён надвое.** Причина архитектурная — у SQLite один писатель, БД в WAL с `busy_timeout=30000`, поэтому конкурирующие транзакции ждут в очереди, а не падают (деградация тихая, в виде растущей задержки, а не ошибок); число конкурирующих транзакций = `сессии × commit'ов на сигнал`. **Переход на более производительную СУБД → Sprint 9.** **Сокращение числа пишущих транзакций внутри текущей архитектуры → цикл доведения:** схлопывание двух `commit` в один на paper-пути, `DailyStat` через атомарный upsert вместо read-then-write, снятие лишних `refresh`. Обязательный порядок — замер «до» → профилирование → фиксы → замер «после»; мера без подтверждённого замером выигрыша откатывается. | S8R хвост, B1 |
+| §4 Performance — результат трёх мер (2026-07-30, вечер) | **Профилирование выполнено** (`backend/scripts/load_signal_to_order.py --profile`, раскладка по фактическим SQL-операциям): на сигнал приходилось ~20 запросов и **2,2 пишущих транзакции**; время при 40 сессиях доминировал `INSERT INTO live_trades` — 281 мс на вызов, то есть ожидание лока писателя, а не стоимость самой вставки. После мер F1–F3: **1,1 пишущей транзакции** на сигнал, `UPDATE daily_stats` устранён (слился в `INSERT … ON CONFLICT`), минус один `SELECT` (`refresh`). Замеры «до» сняты на отдельном worktree с базовым коммитом, по 3 прогона на уровень, медианы: 1 сессия p95 18,9 → **13,1 мс** (−31%), 5 сессий p50 26,6 → **20,3 мс** (−24%), 20 сессий p50 93,8 → 90,7 мс, 40 сессий p50 190,8 → **170,1 мс** (−11%). ⚠️ **p95 при 20 и 40 сессиях не изменился**: разброс между прогонами на одном коде достигает ±20% (949…1174 мс), и разница «до/после» укладывается в него. Половина транзакций ушла, но очередь к единственному писателю осталась — **потолок снимает только смена СУБД (Sprint 9)**, что подтверждает разделение решения. Меры оставлены: выигрыш измерим на p50 всех уровней, на p95 одной сессии и детерминированно — по числу пишущих транзакций. | S8R хвост, F |
 | §7 Security | SecurityHeadersMiddleware: CSP / HSTS / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy. XSS-protection (html.escape) в Telegram + Email диспетчерах. bandit + safety security-scan job в CI (medium+ блокирует PR). 0 high findings (см. `Спринты/Sprint_8/security_audit_s8.md`) | S8 W1+W2 |
 | §8 Deployment | **Новый §8.4:** Docker compose (backend uvicorn + frontend nginx + sqlite volume) на Mac mini + launchd auto-start + Cloudflare Tunnel SSL. Гайд установки: [deployment_guide.md](deployment_guide.md) | S8 W3 |
 | §9 Тестирование | Coverage gate `--cov-fail-under=80` активен в CI. Baseline 2026-05-13: 1490 backend pytest passed, 544 frontend vitest, 158 Playwright nightly. Bandit 0 medium+, safety 1 documented CVE | S8 W1+W2+W3 |
@@ -1393,6 +1398,30 @@ class GeneratedStrategy(bt.Strategy):
 - `money_management` -> `bt.sizers.PercentSizer` или кастомный sizer
 - `time_filter` -> проверка `self.data.datetime.time()` в `next()`
 
+**5.2.4 Единый кодоген через StrategyIR (S8R, BUG-31):**
+
+> С приёмки Sprint 8 backtrader-код генерируется из **того же промежуточного
+> представления** (`StrategyIR`), что используют интерпретатор стратегий
+> (live-торговля) и parity-сверка. Это единственный источник правды:
+>
+> ```
+> blocks_json (канонический Blockly) → parse_blocks → StrategyIR ─┬─→ ir_to_backtrader_code → Python (backtrader)
+>                                                                  └─→ evaluate/interpreter (live + parity-shadow)
+> ```
+>
+> **Зачем:** раньше код для backtrader строила отдельная цепочка (фронтовые
+> Blockly-генераторы → плоский формат → `code_generator.py`), которая
+> рассинхронизировалась с блоками (теряла индикаторы из-за разного регистра имён,
+> не вставляла `buy`) — бэктест прогонял НЕ ту стратегию. Единый IR убирает этот
+> класс багов: backtrader и live согласованы по построению.
+>
+> **Реализация:** `app/strategy/ir_codegen.py` (`ir_to_backtrader_code`). `StrategyIR`
+> (`app/strategy/ir.py`) включает индикаторы, условия входа/выхода, а также SL/TP,
+> размер позиции и тайм-фильтр. Stochastic генерируется как `bt.indicators.StochasticFast`
+> (числовой паритет %K с интерпретатором). Старый `code_generator.py` оставлен для
+> legacy-тестов и не используется в production-пути. Подробности и ловушка —
+> `Develop/stack_gotchas/gotcha-35-dual-block-translators-drift.md`.
+
 ### 5.3 Backtest Engine
 
 **Ответственный: BACK1**
@@ -2445,7 +2474,7 @@ Endpoint `/api/v1/health` проверяет:
 4. Дождаться завершения pending orders (timeout 30s) — ордера, находящиеся в процессе исполнения у брокера.
 5. `stream_manager.unsubscribe_all()` — отписка от всех gRPC streaming подписок.
 6. Закрыть gRPC-каналы, WebSocket-соединения.
-7. Отправить `create_notification(event_type="system_shutdown", title="Система остановлена", severity="warning")` — доставляется во все 3 канала (Telegram, Email, In-app).
+7. Отправить `create_notification(event_type="system_shutdown", title="Система остановлена", severity="warning")` — доставляется в **in-app и Telegram**. ⚠️ Уточнено 2026-07-31: Email уходит только по белому списку `EMAIL_ALLOWED_EVENTS` (`app/notification/email.py`), и `system_shutdown` в него не входит; см. ФТ §19.12.
 8. Закрыть БД-соединения.
 
 **Recovery при следующем старте** (реализован в S5R + S6):
