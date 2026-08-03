@@ -10,6 +10,165 @@
 
 ---
 
+## 2026-08-03 — S8R: зелёный CI, наблюдаемость и остаток находок
+
+Ветка кода `s8r/ci-green-2026-08` (от `develop` `7c5a718`), worktree
+`Develop/.claude/worktrees/s8r-ci-green`. Постановка —
+`prompt_s8r_ci_and_observability.md`, ответы заказчика: Q1=b, Q2=a, Q3=a,
+Q4=c (ретроактивно — нет), Q5=a, Q6=все, Q7=a, Q8=b, Q9=рекомендованные,
+Q10 = пуш по команде.
+
+### Блок 1 — зелёный CI
+
+- **Что:** `s8r/backlog-cleanup-2026-08` сведена в `develop` через PR #15,
+  мерж `--no-ff` (`7c5a718`). CI на PR зелёный, backend-job **реально прогнал**
+  тесты — `2352 passed / 1 xfailed`, совпадает с локальным baseline; vitest
+  `850 passed / 124 файла`.
+- **Что (Q1=b):** nightly Playwright поднимает backend. Шаги: установка
+  patched T-Invest SDK и backend-зависимостей, `alembic upgrade head` на чистой
+  БД, `uvicorn` на :8000, ожидание `/api/v1/health` (60 c, при таймауте печатает
+  лог backend'а), посев пользователя `e2e_auth` через `POST /auth/setup`.
+  `DEBUG=true` обязателен — иначе auth-cookie уходят с флагом `Secure` и
+  браузер по http их не сохраняет. `LOGIN_RATE_LIMIT_PER_MINUTE=1000`: штатные
+  5/мин рассчитаны на человека, а сюита логинится в каждом из шести сценариев,
+  и `retries: 2` умножает это втрое. Добавлена выгрузка лога backend'а
+  артефактом при падении.
+  **Файлы:** `.github/workflows/playwright-nightly.yml`.
+- **Что (Q2=a):** убрана сетевая зависимость unit-тестов. Autouse-фикстура
+  `_block_outbound_http` в `tests/conftest.py` режет исходящий транспорт
+  `httpx` (ASGITransport и MockTransport не затрагиваются). Она сразу вскрыла
+  **22 теста в четырёх файлах**, ходивших в живой MOEX ISS через резолв
+  лотности; все закрыты посевом кэша `Instrument` (общий хелпер
+  `tests/conftest.py::seed_instrument_cache`).
+  **RED → GREEN:** `test_engine_sandbox_flow.py` — 12 failed / 1 passed →
+  13 passed; полный прогон 12 failed → 0.
+  ⚠️ `lot_size=1` в посеве — не «на глазок», а фактический ответ ISS на
+  2026-08-03 (`MOEXISSClient.get_lot_size("SBER")` → 1), под который написаны
+  ожидания тестов.
+  **Файлы:** `tests/conftest.py`, `tests/test_trading/test_engine_sandbox_flow.py`,
+  `test_engine_sandbox_reopen.py`, `test_exit_signal_be_trad_03.py`,
+  `test_process_signal_be_trad_08_09.py`, `tests/test_circuit_breaker/test_engine.py`.
+
+### Блок 2 — наблюдаемость (Q3=a)
+
+- **Что:** заведена вторая метрика `trading.signal_to_order_full` — полное окно
+  «сигнал → ордер», включающее ожидание за per-user локом Circuit Breaker.
+  Старая `trading.signal_to_order` не тронута: исторические замеры блока F
+  остаются сопоставимыми. Инструмент — новый контекстный менеджер
+  `app/common/observability.py::timed_block` (декоратором такую границу задать
+  нельзя: окно начинается в середине `_handle_candle`). На `/admin/metrics`
+  полное окно выводится **первым** графиком.
+- **RED → GREEN:** `test_full_window_metric_includes_cb_wait` и
+  `test_full_window_measured_even_when_cb_blocks` — 2 failed → passed;
+  `test_existing_metric_is_blind_to_cb_wait` документирует прежнее поведение и
+  зелёный в обе стороны.
+- **Замеры (3 прогона, медиана, стенд `scripts/load_signal_to_order.py`):**
+
+  | Сессий | Старая метрика p50/p95 | Новая метрика p50/p95 | Факт (секундомер) |
+  |---|---|---|---|
+  | 1 | 6,3 / 6,6 | 24,5 / 28,2 | 24,5 / 28,3 |
+  | 5 | 6,6 / 8,4 | 50,4 / 81,5 | 50,4 / 81,5 |
+  | 20 | 6,8 / 8,6 | 183,6 / 326,8 | 178,9 / 332,5 |
+  | 40 | 7,2 / 9,0 | 407,2 / 764,4 | 406,9 / 764,4 |
+
+  Новая метрика совпадает с секундомером стенда в пределах шума; старая
+  остаётся плоской (6–7 мс) на всех уровнях. Стенд научился печатать обе.
+  **Файлы:** `app/common/observability.py`, `app/trading/runtime.py`,
+  `app/admin/metrics_dash.py`, `backend/scripts/load_signal_to_order.py`,
+  `tests/test_trading/test_runtime.py`.
+
+### Блок 3 — функциональные правки
+
+- **Что (Q4, вариант a из ответа «c»):** paper-торговля удерживает комиссию по
+  ставке сессии. Новое поле `trading_sessions.commission_pct`
+  (`Numeric(10,4)`, `server_default='0'`, миграция **`b7c8d9e0f1a2`**,
+  `batch_alter_table`, обратимый `downgrade`), поле «Комиссия, %» в модалке
+  запуска (дефолт 0,05 % — тот же, что у бэктеста), удержание с **каждой**
+  стороны сделки (вход и выход), включая закрытие по SL/TP. Колонка
+  `live_trades.commission` впервые получила писателя. `trade.pnl` остался
+  **gross** — как `trade.pnl` у backtrader.
+- **Сверка (критерий приёмки):** один круг 200 шт по 250 → 260 ₽, ставка 0,05 %,
+  капитал 100 000 ₽. **backtrader `broker.getvalue()` = 101 949,00 ₽**,
+  **paper equity = 101 949,00 ₽**, расхождение **0,00 ₽**; `trade.commission`
+  = 51,00 ₽ = формула `(250+260) × 200 × 0,05 %`.
+- **RED → GREEN:** 4 failed + 3 errors → 7 passed
+  (`tests/test_trading/test_q4_paper_commission.py`).
+- ⚠️ Ретроактивно комиссия **не удерживается**: дефолт в модели ноль, старые
+  сессии считают деньги по-прежнему (решение заказчика).
+- **Что (Q5=a):** дневной отчёт включает сессии с открытой позицией, даже без
+  сегодняшних сделок. Отдельный запрос по открытым сделкам, `setdefault` по
+  `session.id` защищает от задваивания; сессия без позиций строки не получает.
+  **RED → GREEN:** 2 failed / 2 passed → 4 passed
+  (`tests/unit/test_scheduler/test_q5_daily_stats_idle_session.py`).
+  **Файлы:** `app/scheduler/service.py`, `app/trading/{engine,models,schemas,
+  paper_engine,risk_monitor,service}.py`, `alembic/versions/b7c8d9e0f1a2_*.py`,
+  `frontend/src/api/types.ts`,
+  `frontend/src/components/trading/LaunchSessionModal.tsx`.
+
+### Блок 4 — мелочи (Q6 = все)
+
+- **(a)** Убрана невалидная директива `# noqa: unreachable` в
+  `tests/unit/test_broker/test_tinvest_multiplexer.py` — `ruff check .` теперь
+  без предупреждений. ⚠️ Попутно: слова «noqa» в поясняющем комментарии ruff
+  тоже читает как директиву, формулировка переписана.
+- **(b)** Актуализированы мажорные теги actions в обоих workflow — версии
+  **сверены через GitHub API**, а не подставлены по догадке: `checkout@v7`,
+  `setup-node@v7`, `setup-python@v7`, `cache@v6`, `upload-artifact@v7`,
+  `pnpm/action-setup@v6`.
+- **(c)** ФТ: сноска к исторической справке S5 — `PositionTracker` удалён
+  2026-07-31.
+
+### Код-ревью (4 ревьюера) — 6 дефектов в свежих правках, все исправлены
+
+- **Что:** ревью локального диффа четырьмя независимыми агентами (CLAUDE.md,
+  баги в диффе, история git, комментарии в коде). Каждая находка проверена по
+  коду; две отклонены с обоснованием.
+- **Исправлено:** (1) сессия со 100 %-сайзингом перестала открывать позиции —
+  объём теперь резервирует комиссию (`бюджет / (цена × штук/лот × (1 + ставка))`);
+  (2) `DailyStat.realized_pnl` пишется за вычетом комиссии, иначе кривая
+  капитала расходилась с портфелем; (3) paper-сделки исключены из выборки
+  3-НДФЛ; (4) дневной отчёт не цепляет остановленные сессии с зависшей
+  позицией; (5) комиссия входа пишется только вместе с удержанием;
+  (6) `le=100` на ставку + поле «Комиссия, %» только для paper.
+- **Отклонено:** «`lot_size=1` в фикстуре неверен» — проверено фактом, ISS
+  отдаёт 1 (совпадает с решением C2 от 2026-07-31); «упавший блок не помечается
+  `error=`» — исключение гасится внутри `with` самим `_handle_candle`.
+- **RED → GREEN:** 5 failed / 1 passed → 6 passed
+  (`test_q4_commission_review_fixes.py`) + 2 теста на статус сессии.
+- **Файлы:** `app/trading/{engine,risk_monitor,schemas}.py`,
+  `app/tax/service.py`, `app/scheduler/service.py`, `app/admin/metrics_dash.py`,
+  `app/common/observability.py`, `frontend/src/components/trading/LaunchSessionModal.tsx`,
+  `FAQ/position_sizing.md`, `Develop/CLAUDE.md`,
+  `tests/unit/test_tax/{test_user_isolation,test_year_boundary}.py`.
+- **Результат:** полный прогон backend **2375 passed / 1 xfailed / 0 failed**,
+  сверка бэктест ↔ paper по-прежнему 0,00 ₽ расхождения.
+
+### Находка стенда E2E: мастер первого запуска ломал auth-сюиту
+
+- **Что:** локальный прогон с поднятым backend'ом показал, что у свежего
+  пользователя `wizard_completed_at` пуст → после логина открывается
+  FirstRunWizard, модалка перехватывает pointer events и `click()` ретраится до
+  таймаута (gotcha-47). Сценарий A падал за 30 с и выглядел как дефект auth.
+- **Файлы:** `.github/workflows/playwright-nightly.yml` — добавлен шаг
+  `POST /api/v1/users/me/wizard/complete` штатным путём (login → CSRF
+  double-submit), а не `UPDATE` в БД.
+
+### Новая ловушка
+
+- **Что:** `gotcha-53-alembic-duplicate-revision-id.md` — дубликат `revision id`
+  даёт вторую голову вместо ошибки. `INDEX.md` 52 → **53**, version 17 → **18**.
+
+### Дефект, пойманный собственным прогоном
+
+- **Что:** первая версия миграции получила идентификатор `a1b2c3d4e5f6`, уже
+  занятый `a1b2c3d4e5f6_update_ai_provider_configs`. Alembic молча завёл вторую
+  голову, `upgrade head` падал «Multiple head revisions are present» — 6 failed
+  в `tests/unit/test_migration.py`. Ревизия переименована в `b7c8d9e0f1a2`,
+  уникальность проверена; добавлен round-trip тест новой миграции.
+- **Результат:** `alembic heads` → `b7c8d9e0f1a2 (head)`, 7 passed.
+
+---
+
 ## 2026-08-03 — S8R: сведение веток обоих репозиториев + семь остаточных замечаний
 
 Ветка кода `s8r/backlog-cleanup-2026-08` (от `develop` `9fc729d`), worktree
