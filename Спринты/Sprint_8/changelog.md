@@ -10,6 +10,303 @@
 
 ---
 
+## 2026-08-03 — S8R: зелёный CI, наблюдаемость и остаток находок
+
+Ветка кода `s8r/ci-green-2026-08` (от `develop` `7c5a718`), worktree
+`Develop/.claude/worktrees/s8r-ci-green`. Постановка —
+`prompt_s8r_ci_and_observability.md`, ответы заказчика: Q1=b, Q2=a, Q3=a,
+Q4=c (ретроактивно — нет), Q5=a, Q6=все, Q7=a, Q8=b, Q9=рекомендованные,
+Q10 = пуш по команде.
+
+### Блок 1 — зелёный CI
+
+- **Что:** `s8r/backlog-cleanup-2026-08` сведена в `develop` через PR #15,
+  мерж `--no-ff` (`7c5a718`). CI на PR зелёный, backend-job **реально прогнал**
+  тесты — `2352 passed / 1 xfailed`, совпадает с локальным baseline; vitest
+  `850 passed / 124 файла`.
+- **Что (Q1=b):** nightly Playwright поднимает backend. Шаги: установка
+  patched T-Invest SDK и backend-зависимостей, `alembic upgrade head` на чистой
+  БД, `uvicorn` на :8000, ожидание `/api/v1/health` (60 c, при таймауте печатает
+  лог backend'а), посев пользователя `e2e_auth` через `POST /auth/setup`.
+  `DEBUG=true` обязателен — иначе auth-cookie уходят с флагом `Secure` и
+  браузер по http их не сохраняет. `LOGIN_RATE_LIMIT_PER_MINUTE=1000`: штатные
+  5/мин рассчитаны на человека, а сюита логинится в каждом из шести сценариев,
+  и `retries: 2` умножает это втрое. Добавлена выгрузка лога backend'а
+  артефактом при падении.
+  **Файлы:** `.github/workflows/playwright-nightly.yml`.
+- **Что (Q2=a):** убрана сетевая зависимость unit-тестов. Autouse-фикстура
+  `_block_outbound_http` в `tests/conftest.py` режет исходящий транспорт
+  `httpx` (ASGITransport и MockTransport не затрагиваются). Она сразу вскрыла
+  **22 теста в четырёх файлах**, ходивших в живой MOEX ISS через резолв
+  лотности; все закрыты посевом кэша `Instrument` (общий хелпер
+  `tests/conftest.py::seed_instrument_cache`).
+  **RED → GREEN:** `test_engine_sandbox_flow.py` — 12 failed / 1 passed →
+  13 passed; полный прогон 12 failed → 0.
+  ⚠️ `lot_size=1` в посеве — не «на глазок», а фактический ответ ISS на
+  2026-08-03 (`MOEXISSClient.get_lot_size("SBER")` → 1), под который написаны
+  ожидания тестов.
+  **Файлы:** `tests/conftest.py`, `tests/test_trading/test_engine_sandbox_flow.py`,
+  `test_engine_sandbox_reopen.py`, `test_exit_signal_be_trad_03.py`,
+  `test_process_signal_be_trad_08_09.py`, `tests/test_circuit_breaker/test_engine.py`.
+
+### Блок 2 — наблюдаемость (Q3=a)
+
+- **Что:** заведена вторая метрика `trading.signal_to_order_full` — полное окно
+  «сигнал → ордер», включающее ожидание за per-user локом Circuit Breaker.
+  Старая `trading.signal_to_order` не тронута: исторические замеры блока F
+  остаются сопоставимыми. Инструмент — новый контекстный менеджер
+  `app/common/observability.py::timed_block` (декоратором такую границу задать
+  нельзя: окно начинается в середине `_handle_candle`). На `/admin/metrics`
+  полное окно выводится **первым** графиком.
+- **RED → GREEN:** `test_full_window_metric_includes_cb_wait` и
+  `test_full_window_measured_even_when_cb_blocks` — 2 failed → passed;
+  `test_existing_metric_is_blind_to_cb_wait` документирует прежнее поведение и
+  зелёный в обе стороны.
+- **Замеры (3 прогона, медиана, стенд `scripts/load_signal_to_order.py`):**
+
+  | Сессий | Старая метрика p50/p95 | Новая метрика p50/p95 | Факт (секундомер) |
+  |---|---|---|---|
+  | 1 | 6,3 / 6,6 | 24,5 / 28,2 | 24,5 / 28,3 |
+  | 5 | 6,6 / 8,4 | 50,4 / 81,5 | 50,4 / 81,5 |
+  | 20 | 6,8 / 8,6 | 183,6 / 326,8 | 178,9 / 332,5 |
+  | 40 | 7,2 / 9,0 | 407,2 / 764,4 | 406,9 / 764,4 |
+
+  Новая метрика совпадает с секундомером стенда в пределах шума; старая
+  остаётся плоской (6–7 мс) на всех уровнях. Стенд научился печатать обе.
+  **Файлы:** `app/common/observability.py`, `app/trading/runtime.py`,
+  `app/admin/metrics_dash.py`, `backend/scripts/load_signal_to_order.py`,
+  `tests/test_trading/test_runtime.py`.
+
+### Блок 3 — функциональные правки
+
+- **Что (Q4, вариант a из ответа «c»):** paper-торговля удерживает комиссию по
+  ставке сессии. Новое поле `trading_sessions.commission_pct`
+  (`Numeric(10,4)`, `server_default='0'`, миграция **`b7c8d9e0f1a2`**,
+  `batch_alter_table`, обратимый `downgrade`), поле «Комиссия, %» в модалке
+  запуска (дефолт 0,05 % — тот же, что у бэктеста), удержание с **каждой**
+  стороны сделки (вход и выход), включая закрытие по SL/TP. Колонка
+  `live_trades.commission` впервые получила писателя. `trade.pnl` остался
+  **gross** — как `trade.pnl` у backtrader.
+- **Сверка (критерий приёмки):** один круг 200 шт по 250 → 260 ₽, ставка 0,05 %,
+  капитал 100 000 ₽. **backtrader `broker.getvalue()` = 101 949,00 ₽**,
+  **paper equity = 101 949,00 ₽**, расхождение **0,00 ₽**; `trade.commission`
+  = 51,00 ₽ = формула `(250+260) × 200 × 0,05 %`.
+- **RED → GREEN:** 4 failed + 3 errors → 7 passed
+  (`tests/test_trading/test_q4_paper_commission.py`).
+- ⚠️ Ретроактивно комиссия **не удерживается**: дефолт в модели ноль, старые
+  сессии считают деньги по-прежнему (решение заказчика).
+- **Что (Q5=a):** дневной отчёт включает сессии с открытой позицией, даже без
+  сегодняшних сделок. Отдельный запрос по открытым сделкам, `setdefault` по
+  `session.id` защищает от задваивания; сессия без позиций строки не получает.
+  **RED → GREEN:** 2 failed / 2 passed → 4 passed
+  (`tests/unit/test_scheduler/test_q5_daily_stats_idle_session.py`).
+  **Файлы:** `app/scheduler/service.py`, `app/trading/{engine,models,schemas,
+  paper_engine,risk_monitor,service}.py`, `alembic/versions/b7c8d9e0f1a2_*.py`,
+  `frontend/src/api/types.ts`,
+  `frontend/src/components/trading/LaunchSessionModal.tsx`.
+
+### Блок 4 — мелочи (Q6 = все)
+
+- **(a)** Убрана невалидная директива `# noqa: unreachable` в
+  `tests/unit/test_broker/test_tinvest_multiplexer.py` — `ruff check .` теперь
+  без предупреждений. ⚠️ Попутно: слова «noqa» в поясняющем комментарии ruff
+  тоже читает как директиву, формулировка переписана.
+- **(b)** Актуализированы мажорные теги actions в обоих workflow — версии
+  **сверены через GitHub API**, а не подставлены по догадке: `checkout@v7`,
+  `setup-node@v7`, `setup-python@v7`, `cache@v6`, `upload-artifact@v7`,
+  `pnpm/action-setup@v6`.
+- **(c)** ФТ: сноска к исторической справке S5 — `PositionTracker` удалён
+  2026-07-31.
+
+### Код-ревью (4 ревьюера) — 6 дефектов в свежих правках, все исправлены
+
+- **Что:** ревью локального диффа четырьмя независимыми агентами (CLAUDE.md,
+  баги в диффе, история git, комментарии в коде). Каждая находка проверена по
+  коду; две отклонены с обоснованием.
+- **Исправлено:** (1) сессия со 100 %-сайзингом перестала открывать позиции —
+  объём теперь резервирует комиссию (`бюджет / (цена × штук/лот × (1 + ставка))`);
+  (2) `DailyStat.realized_pnl` пишется за вычетом комиссии, иначе кривая
+  капитала расходилась с портфелем; (3) paper-сделки исключены из выборки
+  3-НДФЛ; (4) дневной отчёт не цепляет остановленные сессии с зависшей
+  позицией; (5) комиссия входа пишется только вместе с удержанием;
+  (6) `le=100` на ставку + поле «Комиссия, %» только для paper.
+- **Отклонено:** «`lot_size=1` в фикстуре неверен» — проверено фактом, ISS
+  отдаёт 1 (совпадает с решением C2 от 2026-07-31); «упавший блок не помечается
+  `error=`» — исключение гасится внутри `with` самим `_handle_candle`.
+- **RED → GREEN:** 5 failed / 1 passed → 6 passed
+  (`test_q4_commission_review_fixes.py`) + 2 теста на статус сессии.
+- **Файлы:** `app/trading/{engine,risk_monitor,schemas}.py`,
+  `app/tax/service.py`, `app/scheduler/service.py`, `app/admin/metrics_dash.py`,
+  `app/common/observability.py`, `frontend/src/components/trading/LaunchSessionModal.tsx`,
+  `FAQ/position_sizing.md`, `Develop/CLAUDE.md`,
+  `tests/unit/test_tax/{test_user_isolation,test_year_boundary}.py`.
+- **Результат:** полный прогон backend **2375 passed / 1 xfailed / 0 failed**,
+  сверка бэктест ↔ paper по-прежнему 0,00 ₽ расхождения.
+
+### Находка стенда E2E: мастер первого запуска ломал auth-сюиту
+
+- **Что:** локальный прогон с поднятым backend'ом показал, что у свежего
+  пользователя `wizard_completed_at` пуст → после логина открывается
+  FirstRunWizard, модалка перехватывает pointer events и `click()` ретраится до
+  таймаута (gotcha-47). Сценарий A падал за 30 с и выглядел как дефект auth.
+- **Файлы:** `.github/workflows/playwright-nightly.yml` — добавлен шаг
+  `POST /api/v1/users/me/wizard/complete` штатным путём (login → CSRF
+  double-submit), а не `UPDATE` в БД.
+
+### Новая ловушка
+
+- **Что:** `gotcha-53-alembic-duplicate-revision-id.md` — дубликат `revision id`
+  даёт вторую голову вместо ошибки. `INDEX.md` 52 → **53**, version 17 → **18**.
+
+### Дефект, пойманный собственным прогоном
+
+- **Что:** первая версия миграции получила идентификатор `a1b2c3d4e5f6`, уже
+  занятый `a1b2c3d4e5f6_update_ai_provider_configs`. Alembic молча завёл вторую
+  голову, `upgrade head` падал «Multiple head revisions are present» — 6 failed
+  в `tests/unit/test_migration.py`. Ревизия переименована в `b7c8d9e0f1a2`,
+  уникальность проверена; добавлен round-trip тест новой миграции.
+- **Результат:** `alembic heads` → `b7c8d9e0f1a2 (head)`, 7 passed.
+
+---
+
+## 2026-08-03 — S8R: сведение веток обоих репозиториев + семь остаточных замечаний
+
+Ветка кода `s8r/backlog-cleanup-2026-08` (от `develop` `9fc729d`), worktree
+`Develop/.claude/worktrees/s8r-cleanup`. Постановка — `prompt_s8r_merge_and_fixes.md`.
+
+### Блок A — сведение веток
+
+- **Что:** `s8r/tail-fixes` → `develop` через PR #14, мерж `--no-ff` (`9fc729d`).
+  CI зелёный, backend-job прогнал **2338 passed / 1 xfailed** — сверено с
+  локальным baseline. Красный CI 31 июля оказался не кодом: GitHub Actions не
+  стартовал job'ы из-за исчерпанного spending limit, лимит сбросился 1 августа.
+- **Что:** документация — `docs/sprint-8-review` свёрнута в рабочую ветку
+  (конфликт «add/add» в `acceptance_checklist.md` разрешён вручную, сохранены
+  оба блока карточек), рабочая ветка → `main` `--no-ff`.
+  `docs/s7-chart-drawings-backlog` **не сводилась**: все 219 её уникальных
+  строк уже присутствуют в актуальном `Sprint_7/changelog.md` побайтово.
+- **Результат:** все ветки обоих репозиториев либо содержатся в интеграционных,
+  либо помечены к удалению с обоснованием. Решение заказчика: `main` в
+  репозитории кода не размораживать.
+
+### Блок B — шесть замечаний, все test-first
+
+- **B1 (`S8R-DAILY-STATS-UNREALIZED-NO-LOT`)** — **Что:** дневной отчёт в
+  Telegram считал нереализованный P&L как `(цена − вход) × лоты`, без
+  множителя штук/лот; для SBER/GAZP (`lot_size = 10`) занижал в 10 раз.
+  Пятая копия формулы заменена общим хелпером: новый
+  `unrealized_pnl_by_session` (разбивка по сессиям),
+  `unrealized_pnl_for_sessions` стал обёрткой-суммой — сигнатура для Circuit
+  Breaker не менялась. **Файлы:** `app/trading/unrealized.py`,
+  `app/scheduler/service.py`, `tests/unit/test_scheduler/test_b1_daily_stats_lot_size.py`.
+  **Результат:** 3 failed → 3 passed. Критерий приёмки — согласие трёх
+  потребителей на одних данных: 500 ₽ у отчёта, `get_positions` и хелпера CB
+  (было 50 ₽ у отчёта). Побочно: переходящая со вчера открытая позиция теперь
+  учитывается в строке сессии.
+- **B2 (`S8R-LOADBENCH-SKIPS-CIRCUIT-BREAKER`)** — **Что:** стенд не вызывал
+  Circuit Breaker вовсе. ⚠️ Первая версия правки (просто передать `user_id` в
+  `process_signal`, как предлагала постановка) оказалась неверной — вскрыто
+  код-ревью: в рантайме `user_id` в `process_signal` не передаётся **никогда**,
+  `runtime.py:1394-1447` зовёт `check_before_order` сам и затем передаёт
+  `user_id=None`, чтобы проверки не отработали дважды. Стенд переписан так,
+  чтобы зеркалить рантайм; цена CB меряется отдельным окном. Плюс посев
+  проходимого `CircuitBreakerConfig` (иначе ночью `_check_trading_hours`
+  обрывал путь и занижал p95) и подсчёт заблокированных сигналов.
+  **Файлы:** `scripts/load_signal_to_order.py`. **Результат:** таблица по
+  3 повторам. Фактическая задержка сигнал→ордер: 1 сессия 23,7/24,7 мс,
+  5 — 51,7/79,0, 20 — 183,0/335,5, 40 — 407,3/776,7. Вывод по бюджету ТЗ не
+  изменился: потолок ~20 сессий. **Главное вскрытое — не производительность,
+  а слепота мониторинга:** метрика `trading.signal_to_order` плоская (6–10 мс)
+  на всех уровнях, потому что очередь за per-user локом CB выстаивается ДО
+  декорированной функции. При 40 сессиях `/admin/metrics` покажет 7,7 мс при
+  фактических 407 мс. Заведено `S8R-METRIC-SIGNAL-TO-ORDER-BLIND` (high).
+- **B3 (`S8R-DASHBOARD-TYPE-DRIFT`)** — **Что:** фронтовый `TradingDashboard`
+  объявлял `sessions`, которого backend не отдаёт, и не знал про
+  `paused_sessions`/`total_sessions`/`total_open_positions`. Тип приведён к
+  `DashboardResponse`; заведена сверка (backend-тест читает `types.ts`).
+  Удалён мёртвый store-экшен `fetchDashboard` и состояние `dashboard`.
+  **Файлы:** `frontend/src/api/types.ts`, `stores/tradingStore.ts`,
+  `components/layout/StatusFooter.tsx`, два теста фронта,
+  `tests/unit/test_trading/test_b3_dashboard_contract_sync.py`.
+  **Результат:** 1 failed → 5 passed; vitest 851 → 850 (минус тест удалённого
+  экшена).
+- **B4 (`S8R-DAILYSTAT-UNREALIZED-COLUMN-DEAD`)** — **Что:** колонка
+  `daily_stats.unrealized_pnl` не заполнялась никогда; удалена миграцией
+  `e2f3a4b5c6d7` (идемпотентная, `batch_alter_table` — gotcha-12).
+  **Файлы:** миграция, `app/trading/models.py`,
+  `tests/unit/test_migration.py`, `deployment_guide.md` §7.
+  **Результат:** 5 → 6 passed, `test_fresh_db_schema_matches_models` зелёный,
+  round-trip `downgrade` проверен отдельным тестом.
+- **B5** — **Что:** FAQ ссылались на удалённый `PositionTracker`. Проверка по
+  коду вскрыла, что **посылка карточки неверна**: в paper-торговле комиссия не
+  удерживается вообще (`PaperPortfolioAccountant.apply_open/apply_close` её не
+  содержат, `live_trades.commission` никто не пишет), моделируется только в
+  бэктесте. FAQ переписан по факту. **Файлы:** `FAQ/position_sizing.md`,
+  `FAQ/sprint5_features.md`, ТЗ §5.4.1/§5.4.2 (там `PositionTracker` всё ещё
+  числился действующим компонентом).
+- **B6** — **Что:** дефолты риск-лимитов `User` заданы `float` при колонках
+  `Numeric(10, 4)`; у не перезагруженного из БД объекта арифметика Circuit
+  Breaker падала `TypeError`. Заменено на `Decimal`. **Файлы:**
+  `app/auth/models.py`, `tests/unit/test_auth/test_b6_risk_defaults_decimal.py`.
+  **Результат:** 5 failed → 5 passed. `grep` по всем `app/*/models.py` —
+  других float-дефолтов нет.
+
+### Код-ревью (5 независимых ревьюеров, по локальному диффу)
+
+Найден **1 реальный дефект в свежей правке** — как и в прошлом цикле:
+
+1. **B2 чинился по неверной посылке (существенно, исправлено).** Два
+   независимых ревьюера сошлись на одном: `runtime.py` намеренно зовёт
+   `process_signal(user_id=None)`, а Circuit Breaker выполняет сам, раньше.
+   Проверено по коду — ревьюеры правы. Первая версия правки завела бы CB внутрь
+   окна `@timed_event`, то есть мерила бы путь, которого в бою нет, — просто
+   в другую сторону от исходного дефекта. Стенд переписан, замеры пересняты.
+2. **Неточность в моём же комментарии (исправлено).** Ревьюер истории кода:
+   переходящая позиция учитывается только у сессии, **попавшей** в отчёт, а
+   состав сессий B1 не менял — сессия совсем без сегодняшних сделок в отчёт
+   не попадает и сейчас. Комментарий и докстринг теста уточнены, ограничение
+   заведено как `S8R-DAILY-STATS-IDLE-SESSION-HIDDEN`.
+
+Остальные ревьюеры (CLAUDE.md, замечания прошлых ревью) нарушений не нашли.
+Отдельно подтверждено: `unrealized_pnl_by_session` вызывается из
+production-кода (`SchedulerService.send_daily_stats`), не только из тестов;
+докстринг с числом запросов и замерами соответствует коду после рефакторинга;
+обещание «ключ на каждую переданную сессию» держится на всех ветках выхода.
+
+Попутное наблюдение ревьюера, заведено `S8R-UNIT-TESTS-REACH-NETWORK` (medium):
+`_resolve_lot_size` при отсутствии свежего кэша `Instrument` делает реальный
+HTTP к MOEX ISS, то есть тесты `test_engine_sandbox_flow.py` уходят в сеть.
+Сначала не воспроизводилось (383 passed на том же наборе папок, два полных
+прогона зелёные), но затем **воспроизвелось**: полный прогон дал `1 failed` на
+`TestPaperRegressionUnchanged::test_paper_does_not_call_adapter`, повтор того же
+прогона — `2352 passed`, файл изолированно — `13 passed`. Флейк реальный,
+зависит от порядка и тайминга. Не чинил — вне объёма цикла, но это первый
+кандидат: он маскирует настоящие регрессии в CI.
+
+### Гейты
+
+backend pytest **2352 passed / 1 xfailed / 0 failed** (было 2338, +14 новых) ·
+vitest **850 / 124** (было 851 — минус удалённый тест мёртвого экшена, новый
+baseline 850) · `tsc --noEmit` 0 · `eslint --max-warnings 0` 0 ·
+`ruff check .` 0 · mypy Success (177 файлов) · bandit 0 medium+ ·
+E2E **162 passed / 3 skipped / 0 failed** одним прогоном (5,5 мин).
+Stack Gotchas 52, `INDEX.md` version 17 — новых ловушек нет.
+
+### Новые находки (в backlog, не чинились)
+
+`S8R-METRIC-SIGNAL-TO-ORDER-BLIND` (**high**) — метрика в `/admin/metrics` не
+видит ожидание за локом Circuit Breaker: при 40 сессиях показывает 7,7 мс при
+фактических 407 мс и плоская на всех уровнях нагрузки.
+`S8R-PAPER-NO-COMMISSION` (medium) — paper не удерживает комиссию, бэктест
+удерживает, поэтому paper систематически оптимистичнее.
+`S8R-DAILY-STATS-IDLE-SESSION-HIDDEN` (low) — сессия без сегодняшних сделок
+выпадает из дневного отчёта вместе с открытой позицией.
+`S8R-UNIT-TESTS-REACH-NETWORK` (low) — unit-тест без посева кэша инструментов
+уходит в живую сеть через `_resolve_lot_size` (структурно подтверждено,
+конкретный флейк не воспроизведён).
+
+---
+
 ## 2026-06-26 — BUG-31 ревью: строгий parity-гейт по классу расхождений + 12 доводок
 
 - **Запрос:** заказчик попросил исправить все 12 находок code-review доводок BUG-31 (предыдущие записи 2026-06-26). Реализованы по TDD, на ветке Develop `s8r/bug-31-unified-codegen` (коммит `e4aad3d`).
