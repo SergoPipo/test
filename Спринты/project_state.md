@@ -116,10 +116,31 @@
     - S8R-PAPER-TARIFF-UNREACHABLE-FROM-UI (low),
       S8R-TELEGRAM-TRADE-CLOSED-GROSS-PNL (low).
 
+    СВЕДЕНО И ПРИМЕНЕНО 2026-08-04 (по команде заказчика):
+    - PR #17 смёржен в develop (ecf5c3a). CI зелёный, backend-job реально
+      прогнал 2406 passed / 1 xfailed — сверено с локальным baseline.
+    - Документация: docs/backlog-006-strategy-builder → main (41beaef).
+    - РАБОЧАЯ БД `Develop/backend/data/terminal.db` обновлена:
+      бэкап `terminal.db.bak-2026-08-04`; накачена с b8c4d2e6f3a1 до
+      c3d4e5f6a7b8 (пять ревизий, БД отставала); тариф всех трёх
+      брокерских счетов выставлен 0,05 % (та же ставка, что у формы
+      запуска и бэктеста); устаревшие отчёты 3-НДФЛ удалены — 21 запись
+      `tax_reports`, 21 `tax_lots` и 2 файла xlsx (считались по лотам,
+      база занижена; формируются заново по запросу).
+
     ТРЕБУЕТ РУЧНОГО ДЕЙСТВИЯ ЗАКАЗЧИКА:
-    - `git -C Develop branch -D s8r/merge-to-develop-2 fix/nightly-pause-resume`
-      (команда заблокирована permission-правилом у исполнителя).
-    - Задать тариф в «Настройки → Брокер» для каждого счёта: по умолчанию 0.
+    - `git -C Develop branch -D s8r/merge-to-develop-2 s8r/ci-green-2026-08 \
+       s8r/tax-and-commission-tail fix/nightly-pause-resume`
+      (команда заблокирована permission-правилом у исполнителя). Первые три
+      содержатся в develop; fix/nightly-pause-resume в origin уже нет, а её
+      единственный коммит возвращает 6 вхождений networkidle (gotcha-46) —
+      сводить нельзя, только удалять.
+    - Проверить nightly на develop после мержа: он падал из-за ключа
+      rate-limiter, теперь должен пройти без 429.
+
+    ПОСТАНОВКА СЛЕДУЮЩЕГО ЦИКЛА: Sprint_8_Review/prompt_s8r_sltp_and_locks.md
+    (SL/TP не закрывает позицию у брокера — high; гонки close_position;
+    Telegram с валовым P&L; тариф paper в UI).
 
   ---
   Предыдущее (2026-07-29): Sprint_8_Review закрыт содержательно.
