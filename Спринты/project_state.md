@@ -140,15 +140,34 @@
       отвечает INTERNAL 70001; движок ведёт себя верно, но текст ошибки
       пользователю ничего не объясняет.
 
+    ПРИМЕНЕНО 2026-08-05 (по команде заказчика):
+    - CI по PR #18 зелёный, backend-job реально прогнал 2441 passed —
+      совпадает с локальным; frontend 855/124.
+    - РАЗЪЕХАВШИЕСЯ СДЕЛКИ ЗАКРЫТЫ (решение заказчика по Q1-бис). Бэкап
+      `data/terminal.db.bak-2026-08-05` (через backup API SQLite, gotcha-19).
+      Закрытие выполнено штатным путём продукта
+      (`OrderManager._reconcile_positions_after_reopen` для счетов #3 и #4),
+      а не ручным UPDATE — иначе DailyStat разошёлся бы с числом сделок
+      (S8R-RECONCILE-DAILYSTAT-EVENT). Результат: #42 (сессия 3) и #43
+      (сессия 6) → status=closed, exit_price=entry_price, pnl=0.00
+      (позиций у брокера нет, результат выдумывать нечем), в DailyStat обеих
+      сессий строка за 2026-08-05 с trades_closed=1. Открытых sandbox/real
+      сделок в рабочей БД не осталось; paper-сделки #50 и #52 не трогались.
+
     ТРЕБУЕТ РУЧНОГО ДЕЙСТВИЯ ЗАКАЗЧИКА:
-    - `git -C Develop branch -D s8r/merge-to-develop-2 s8r/ci-green-2026-08 \
-       s8r/tax-and-commission-tail fix/nightly-pause-resume s8r/sltp-broker-close`
-      (branch -D заблокирована permission-правилом у исполнителя). Первые
-      три содержатся в develop; fix/nightly-pause-resume в origin уже нет, а
-      её единственный коммит возвращает 6 вхождений networkidle (gotcha-46) —
-      сводить нельзя, только удалять. Последнюю удалять ПОСЛЕ мержа PR.
-    - Решить судьбу разъехавшихся сделок #42/#43 в рабочей БД (Q1-бис
-      остался без ответа; БД не трогалась).
+    - Ветки. Команда прошлого цикла называла ветки, которых уже нет
+      (s8r/merge-to-develop-2, s8r/ci-green-2026-08,
+      s8r/tax-and-commission-tail, fix/nightly-pause-resume) — заказчик
+      получил на неё «branch not found». Фактически в `Develop` остались
+      локальные ветки, полностью содержащиеся в develop:
+      ```
+      git -C Develop branch -D s8r-acceptance s8r/acceptance-fixes-2026-07-26 \
+          s8r/backlog-cleanup-2026-08 s8r/backlog-fixes-2026-07-27 \
+          s8r/bug-23-interpreter s8r/bug-31-unified-codegen \
+          s8r/sandbox-account-reopen s8r/sandbox-review-fixes s8r/tail-fixes
+      ```
+      `s8r/sltp-broker-close` — удалять ПОСЛЕ мержа PR #18 (сейчас не в
+      develop). `branch -D` заблокирована permission-правилом у исполнителя.
 
     ПОСТАНОВКА СЛЕДУЮЩЕГО ЦИКЛА: не подготовлена. Кандидаты — три карточки
     выше, начиная с S8R-EXIT-ORDER-NOT-TRACKED.
