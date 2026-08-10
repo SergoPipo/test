@@ -4,6 +4,267 @@
 
 ---
 
+## Доведение до деплоя — 2026-08-10 (ветка `s8r/pre-deploy` от `develop` `fe46f00`)
+
+Постановка — `prompt_s8r_pre_deploy.md`, объём — `pre_deploy_checklist.md`.
+Ответы заказчика: **Q1=c** (блокеры + гигиена + учёт backlog), **Q2=b** (курс ЦБ),
+**Q3=b** (docker отложить, зафиксировать риск), **Q4=b** (общая сборка запроса),
+**Q5=b** (гасить кнопку заранее), **Q6=a** (запретить удаление счёта),
+**Q7=b** (вернуть Режим B), **Q8=a** (карточку FIGI закрыть как неприменимую),
+**Q9=a** (миграций нет), **Q10=b** (живой брокер не трогать),
+**Q11=a** (unit + ручной чеклист вместо E2E), Q12 — ветка `s8r/pre-deploy`,
+пуш и PR. Sprint 9 не стартовал.
+
+### 🔴 Главная находка цикла — `S8R-FRONTEND-BUILD-BROKEN` (блокер деплоя, ЗАКРЫТА)
+
+**Production-сборка фронтенда на `develop` не проходила.** `frontend/Dockerfile`
+собирает образ командой `pnpm build` = `tsc -b && vite build`; `tsc -b` падал со
+**102 ошибками типов в 45 файлах**. То есть `docker compose build frontend` —
+первый шаг развёртывания — завершился бы ошибкой.
+
+**Почему этого никто не видел.** Гейт «tsc 0», который проходил во всех циклах и
+стоял в CI (`pnpm tsc --noEmit`), **не проверял ни одного файла**: корневой
+`frontend/tsconfig.json` — solution-файл с `"files": []` и `references`, а без
+флага `-b` такая команда завершается мгновенно с кодом 0. Гейт был зелёным
+ровно потому, что ничего не делал.
+
+Ошибки копились минимум с S7 и включали настоящие дефекты, а не только
+несоответствия фикстур:
+
+| Что | Следствие |
+|---|---|
+| `LiveTrade.direction` объявлен `'long' \| 'short'`, backend отдаёт `buy`/`sell` (`VALID_DIRECTIONS`) | сравнения `=== 'buy'` компилятор считал заведомо ложными; тип расходился с API |
+| `react-resizable-panels` обновлён до v4, где проп называется `orientation`, а код передавал `direction` | проп молча игнорировался в 3 местах (AI-панель, редактор стратегии) — сплит раскладывался по умолчанию |
+| `Backtest` не описывал поля списочного ответа (`net_profit_pct`, `total_trades`) | страница списка бэктестов читала их «сквозь» тип |
+| `getSession` типизирован как `TradingSession`, а отдаёт `SessionDetailResponse` | стор разбирал `raw.session ?? raw` вслепую |
+| `launchBacktest` объявлен `Promise<number>`, фактически мог вернуть `undefined` | подписка на прогресс навешивалась на несуществующий id |
+| `fancy-canvas` импортируется напрямую в 8 файлах примитивов графика, но не объявлена в `package.json` | типы резолвились случайно, через зависимость lightweight-charts |
+| `vite.config.ts` использовал `defineConfig` из `vite`, хотя содержит секцию `test` | падение уже самой сборки, после починки типов |
+
+**Что сделано.** Все 102 ошибки устранены (правки в 45 файлах: контракты типов,
+mixin-типы Blockly, parameter properties под `erasableSyntaxOnly`, устаревшие
+фикстуры тестов). `fancy-canvas@2.1.0` объявлена прямой зависимостью.
+
+**Гейт починен, чтобы регресс не вернулся:**
+
+* `package.json` → новый скрипт `typecheck: tsc -b`;
+* CI (`.github/workflows/ci.yml`) → шаг `pnpm tsc --noEmit` заменён на
+  `pnpm typecheck` **и** добавлен шаг `pnpm build` — ровно то, что делает
+  Dockerfile. Теперь падение сборки образа видно в PR, а не на выкатке.
+
+| Проверка | До | После |
+|---|---|---|
+| `tsc -b` | 102 ошибки | **0** |
+| `pnpm build` (= сборка образа) | падала | **проходит**, `dist/` собран |
+
+### Гейты приёмки цикла
+
+| Гейт | Baseline | Факт |
+|---|---|---|
+| backend pytest | 2558 / 1 xfailed | **2589 passed / 1 xfailed / 0 failed** |
+| frontend vitest | 864 / 125 файлов | **902 passed / 129 файлов** |
+| `tsc -b` | гейт был фиктивным | **0** |
+| `pnpm build` | падал | **проходит** |
+| `eslint . --max-warnings 0` | 0 | 0 |
+| `ruff check .` | 0 | 0 |
+| mypy | Success (177) | **Success (178)** |
+| bandit | 0 medium+ | Medium 0, High 0 |
+| E2E локально, одним прогоном | 169 / 3 skipped | **169 passed / 3 skipped / 0 failed** |
+| nightly на `develop` | зелёный | зелёный (прогон 11:40; предыдущий падал на «backend did not become healthy in 60s» — таймаут стенда CI, не код) |
+| CI на PR | — | зелёный, backend-job **реально прогнал** тесты: **2588 passed**, совпало с локальным на том коммите |
+
+### ✅ Блок 1 — `S7R-SESSION-RERUN-PAYLOAD-BROKEN` (Q4=b, Q5=b)
+
+«Запустить заново» на остановленной sandbox/real-сессии давала 422: payload
+собирался вручную и не содержал `broker_account_id` и `timeframe`, а `mode`
+приводился к `'paper' | 'real'` — `'sandbox'` терялся.
+
+Появился общий модуль `frontend/src/components/trading/sessionRequest.ts`:
+`buildSessionStartRequest` — единственная точка сборки тела запроса (Q4=b), она
+же решает, какие поля уместны для режима (счёт только sandbox/real, комиссия
+только paper, `override_parity` только когда выставлен). `LaunchSessionModal` и
+«Запустить заново» переведены на неё, проверка конфликта и текст отказа тоже
+общие.
+
+Q5=b: кнопка «Запустить заново» гасится заранее, причина — видимым `Alert`
+(над `disabled`-кнопкой Mantine Tooltip не показывается, gotcha-39). Отдельно
+закрыт случай, которого не было в постановке: у legacy-сессии без сохранённого
+таймфрейма перезапуск блокируется с объяснением, а не подставляет чужой ТФ.
+
+| Что | RED | GREEN |
+|---|---|---|
+| `sessionRequest.test.ts` + `SessionDashboard.rerun.test.tsx` | 7 failed | **27 passed** |
+
+Мутации: снять передачу `broker_account_id` → 4 failed; вернуть подмену
+`sandbox → paper` → 3 failed.
+
+### ✅ Блок 2 — `S8R-DELETE-ACCOUNT-ORPHANS-SESSIONS` (Q6=a)
+
+`BrokerService.delete_account` состоял из трёх строк без единой проверки, а FK
+объявлен `ondelete='SET NULL'`: удаление счёта обнуляло `broker_account_id` у
+работающих сессий, и они выпадали и из запрета дублей, и из дедупликации
+`restore_all`, продолжая торговать.
+
+Удаление запрещено, пока есть сессии в статусах `active`/`paused`/`suspended`;
+текст отказа перечисляет мешающие сессии (номер, тикер, статус). Сессии не
+останавливаются намеренно: остановка закрывает позиции у брокера, то есть
+распоряжается деньгами, — это пользователь делает осознанно на экране торговли.
+Режим сессии не проверяется: осиротеет любая запись, ссылающаяся на счёт.
+
+Фронт больше не глотает ответ сервера: `handleDelete` показывает `detail` через
+`getApiErrorMessage`, модалка остаётся открытой (текст длинный).
+
+| Что | RED | GREEN |
+|---|---|---|
+| `test_delete_account_guard.py` | 5 failed / 3 passed | **8 passed** |
+| `BrokerAccountListDeleteBlocked.test.tsx` | 2 failed | **4 passed** |
+
+### ✅ Блок 3 — курс USD от ЦБ РФ, `S9-MULTICURRENCY-CBR-RATE` (Q2=b)
+
+`BalanceWidget` пересчитывал рубли в доллары по константе `USD_RUB_MOCK_RATE = 90`.
+
+Добавлен `app/market_data/cbr_rate.py` — клиент официального
+`https://www.cbr.ru/scripts/XML_daily.asp` с кэшем на 6 часов (ЦБ публикует курс
+раз в сутки) и `asyncio.Lock`, чтобы N открытых вкладок не давали N запросов.
+Endpoint `GET /api/v1/market-data/usd-rate` → `{rate, as_of, stale}`.
+
+Поведение при недоступности ЦБ (решение цикла, вопроса о нём не было):
+
+* есть последний известный курс → отдаётся с `stale=true`, виджет показывает
+  дату курса рядом с суммой;
+* известного курса нет → 503, и переключатель валюты **не рисуется вовсе**.
+  Сохранённый в localStorage выбор USD в этом состоянии игнорируется — иначе
+  рублёвая сумма показывалась бы со знаком доллара.
+
+| Что | RED | GREEN |
+|---|---|---|
+| `test_cbr_rate.py` (сервис + endpoint) | не собирался | **15 passed** |
+| `BalanceWidgetUsdRate.test.tsx` | 5 failed | **5 passed** |
+
+Мутация: вернуть константу 90 → тест курса краснеет.
+
+XML разбирается `xml.etree` с лимитом на размер тела (1 МБ) и инлайн-`nosec
+B314`: ответ приходит с фиксированного HTTPS-хоста, внешние сущности CPython не
+резолвит, а от раздувания защищает лимит. Новую зависимость (`defusedxml`) ради
+этого не заводили.
+
+### ✅ Блок 5.1 — `S8R-RESUME-STOP-NO-SESSION-LOCK`
+
+`pause_session`/`stop_session`/`resume_session` читали статус, делали несколько
+`await` (реальный I/O на остановке listener'а) и только потом коммитили.
+Двойной клик «Стоп» одновременно с «Возобновить»: обе задачи проходили
+проверку, побеждал последний коммит. Если это `resume` — пользовательский «Стоп»
+молча отменялся, а listener поднимался для сессии, которую пользователь считает
+остановленной.
+
+Введён ключ `session_lifecycle` по `session_id`, **самый внешний** в порядке
+захвата (`app/common/locks.py` обновлён): под ним берутся
+`session_start_account` при возобновлении и `close_trade` при закрытии позиций.
+
+| Что | RED | GREEN |
+|---|---|---|
+| `test_session_lifecycle_lock.py` | 3 failed / 2 passed | **5 passed** |
+
+Мутация: снять лок со `stop_session` → 2 failed.
+
+### ✅ Блок 5.2 — `S8R-ENTRY-PATH-NO-CLOSE-LOCK`
+
+Все пути закрытия держат `keyed_lock("close_trade", trade_id)`, путь открытия —
+нет: ордер уходит брокеру, ответ ждётся секундами, и всё это время строка
+сделки не защищена, причём сделка в этом окне `pending` без `broker_order_id`.
+`_submit_order_to_broker` теперь берёт лок своей сделки, тело вынесено в
+`_submit_order_locked`.
+
+| Что | RED | GREEN |
+|---|---|---|
+| `test_entry_path_close_lock.py` | 1 failed (лок свободен) | **2 passed** |
+
+### ✅ Блок 6 — учёт в backlog (Q1=c)
+
+29 карточек раздела D сверены с кодом на `develop` **по одной**, каждая по
+своему доказательству (файл/строка/наличие спека). **Расхождений не найдено:
+все 29 действительно закрыты**, включая `S7R-CI-NODE24-MIGRATION` (в CI везде
+`@v7`, дедлайн 16.09 неактуален) и `S7R-GRID-HEATMAP-ENTRYPOINT`
+(`BackgroundBacktestsBadge` подключён в `Header.tsx:133`, из него открывается
+`GridSearchHeatmap`).
+
+### ✅ Код-ревью цикла — 4 находки, все закрыты здесь же
+
+Четыре независимых ревьюера (соответствие CLAUDE.md / баги в диффе /
+исторический контекст git / комментарии в коде и прошлые PR).
+
+| # | Находка | Чем подтверждена | Фикс |
+|---|---|---|---|
+| 1 | `# nosec B405/B314` в `cbr_rate.py` не занесены в `.bandit` | `CLAUDE.md`, «Security audit»: подавление требует и инлайн-обоснования, **и** записи в `.bandit` | запись с разбором XXE/billion-laughs добавлена |
+| 2 | **ABBA-дедлок на пути открытия позиции** | история `S8R-RECONCILE-LOCK-DIVERGENCE` + `locks.py` | восстановление песочницы выполняется без удержания своего лока |
+| 3 | `startSession` в «Запустить заново» без `try/catch` | gotcha-45 (store и пишет `error`, и ре-throw'ит) | `try/catch` + видимый Alert с ответом сервера |
+| 4 | Сужение типа теряло инлайновое условие logic-блока | разбор диффа + ветка «Inline FlatBlock» в `attachInput` | тип приведён к принимаемому `attachInput` |
+
+**Находка №2 — главная, и она про мою же правку этого цикла.** Собственная
+проверка показала, что самодедлока нет (сделка исключена из кандидатов по
+`in_flight_trade_id`) и что таймаут не даёт зависнуть навсегда, — и на этом
+я остановился. Ревьюер довёл рассуждение до конца: свежая сделка заведомо
+имеет **наибольший** `trade_id`, значит под её локом захватываются **меньшие**
+— обратный документированный порядок. Брокер пересоздаёт sandbox-счёт разом
+для всех сессий, поэтому две сессии одного счёта входят в восстановление
+одновременно и встают в ABBA. Не «зависнет навсегда», но обе простаивают до
+30 секунд на открытии позиции, а сверка после переоткрытия — ровно та, ради
+которой всё и написано, — срывается по таймауту.
+
+Фикс: восстановление идёт без удержания собственного лока. Это безопасно
+именно здесь — ордер отвергнут, в полёте ничего нет, сделка `pending` без
+`broker_order_id`. Мутация (убрать освобождение) даёт самодедлок: прогон
+виснет, а не краснеет, — что само по себе показывает некорректность.
+
+| Что | RED | GREEN |
+|---|---|---|
+| `test_entry_path_close_lock.py` (+ тест на порядок захвата) | 1 failed | **3 passed** |
+| `SessionDashboard.rerun.test.tsx` (+ 2 теста на отказ backend) | 2 failed | **9 passed** |
+
+### ⬜ Что осталось и почему
+
+Пять карточек гигиены из раздела B чеклиста **не сделаны** — цикл ушёл на
+`S8R-FRONTEND-BUILD-BROKEN`, которого не было в постановке и который блокирует
+деплой сильнее, чем весь раздел B вместе взятый. Приоритет выбран исполнителем;
+карточки остаются открытыми в прежнем виде:
+
+| Карточка | Sev | Оценка |
+|---|---|---|
+| `S8R-FIGI-NO-NEGATIVE-CACHE` | low | ~1 ч |
+| `S8R-PAPER-TARIFF-UNREACHABLE-FROM-UI` | low | ~2 ч |
+| `S7R-E2E-7.9-MISSING` (E2E на backup/restore CLI) | low | ~3 ч |
+| `S7R-BG-BACKTEST-AUTOCOLLAPSE` | low | ~1 ч |
+| `S5R-BLOCKLY-MODE-B-MODAL` + `-CHECK` (Q7=b, вернуть Режим B) | low | ~4 ч |
+
+По Режиму B разбор сделан и остаётся в силе: backend-парсер, endpoint
+`POST /strategy/parse-template` и компонент `TemplateModeModal` живы, не хватает
+кнопки в редакторе и синхронизации шаблона модалки (10 секций) с форматом
+парсера v2 (7 секций). Два `test.skip` в `e2e/blockly.spec.ts:86,90` пока
+оставлены как есть — удалять их при выбранном варианте (b) неверно.
+
+### ✅ `S8R-TRADES-WITHOUT-FIGI-UNMATCHABLE` — закрыта как неприменимая (Q8=a)
+
+Значение имеют только **открытые** сделки: у них `LiveTrade.figi = NULL` гасит
+сверку с брокером (`runtime.py:1836`, флаг `has_unmatchable_trades`) и ослабляет
+атрибуцию позиций (`broker/service.py::_fetch_strategy_figis` уходит в fallback
+по тикеру). На стенде таких записей нет — все sandbox-сделки закрыты; для
+наката на другую БД требование «закрыть и переоткрыть позиции» уже записано в
+`deployment_guide.md` §7. Писать доучёт, который на единственной существующей БД
+не найдёт ни одной строки и при этом правит исторические торговые записи, —
+размен не в нашу пользу.
+
+### ⬜ `S8R-W5-DOCKER-COMPOSE-VALIDATE` — риск зафиксирован (Q3=b)
+
+Docker на машине разработки отсутствует (нет ни CLI, ни Docker Desktop),
+`docker compose build/up` не выполнялись ни разу. Первый запуск стека придётся
+на первый деплой. **Существенная поправка по итогам цикла:** сборка
+frontend-образа до этого цикла упала бы гарантированно (см.
+`S8R-FRONTEND-BUILD-BROKEN`) — то есть риск был не гипотетическим. Сейчас
+`pnpm build` проходит локально, но сам `docker compose build` по-прежнему не
+проверен.
+
+---
+
 ## Один инструмент — одна сессия на счёте — 2026-08-06 (ветка `s8r/session-uniqueness` от `develop` `752b8dc`)
 
 Постановка — `prompt_s8r_session_uniqueness.md`. Ответы заказчика: **Q1=a**
@@ -2230,7 +2491,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 
 ## Sprint 7 — переносы из 7.11 финального E2E (QA W3, 2026-04-26)
 
-### S7R-AI-CHAT-TESTID-DRIFT — regression от 7.19 (gotcha-22 кандидат)
+### S7R-AI-CHAT-TESTID-DRIFT — regression от 7.19 (gotcha-22 кандидат) — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: селектор `[data-testid="ai-chat"] textarea` в `e2e/ai-chat.spec.ts:81`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, QA W3 (7.11), `reports/QA_W3_final.md` §3.
 - **Симптом:** `e2e/ai-chat.spec.ts:68` (`AI Chat Mode › 2. Send message`) падает с `expect(locator '[data-testid="chat-input"] textarea, [data-testid="chat-input"]').toBeVisible() — element not found`.
@@ -2238,7 +2502,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 - **Что сделать на 7.R fix-волне:** заменить selector в `e2e/ai-chat.spec.ts:81` на `page.locator('[data-testid="ai-chat"] textarea').first()` (или эквивалент, как в `s7-ai-commands.spec.ts`). Production-код НЕ трогать.
 - **Опционально:** ARCH решает, заводить ли `Develop/stack_gotchas/gotcha-22-mantine-combobox-target-testid-clone.md` или зафиксировать как тестовый паттерн в `e2e/README.md`.
 
-### S6R-AICHAT-APPLY-MOCK — pre-existing skip с baseline
+### S6R-AICHAT-APPLY-MOCK — pre-existing skip с baseline — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `ai-chat.spec.ts:97` — обычный `test(`, не `test.skip(`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** `e2e/ai-chat.spec.ts:97` (`test.skip('3. "Apply to blocks" button triggers block loading'`).
 - **Причина:** кнопка «Применить на схеме» disabled в mock-окружении (не получает блоков от mock AI-ответа).
@@ -2256,7 +2523,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 - **Причина:** см. выше (mode B).
 - **Что сделать:** парный с предыдущим — решается одной задачей.
 
-### S7R-E2E-7.3-MISSING — экспорт CSV/PDF без E2E
+### S7R-E2E-7.3-MISSING — экспорт CSV/PDF без E2E — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `e2e/s7-export.spec.ts`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, e2e_test_plan_s7.md секция 7.3 (S7.3.1, S7.3.2). Backend pytest 867/0 покрывает endpoint, но E2E на скачивание + проверка содержимого не написан.
 - **Что сделать на S8:** реализовать spec `s7-export.spec.ts` через `page.waitForEvent('download')` — 2 теста (CSV структура колонок, PDF magic-bytes + размер ≥ 5 KB).
@@ -2266,22 +2536,34 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 - **Источник:** e2e_test_plan_s7.md секция 7.9. Backend pytest 36/0 покрывает BackupService, но subprocess-spec из Playwright не написан.
 - **Что сделать на S8:** spec вызывает `python -m app.cli.backup` через `child_process.spawn`, проверяет файл и `python -m app.cli.restore`.
 
-### S7R-E2E-7.13-MISSING — 5 event_type без E2E
+### S7R-E2E-7.13-MISSING — 5 event_type без E2E — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `e2e/s7-events.spec.ts`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** e2e_test_plan_s7.md секция 7.13 (5 сценариев). MR.5 закрыт W1 backend-тестами BACK1 39/0, frontend-проверки колокольчика не написаны.
 - **Что сделать на S8:** spec, который через `_test/emit-event` (или mock-WS) триггерит каждый из 5 типов и проверяет рендер в `[data-testid="notification-bell"]`.
 
-### S7R-E2E-7.14-MISSING — Telegram callbacks без E2E
+### S7R-E2E-7.14-MISSING — Telegram callbacks без E2E — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `e2e/s7-tg-callbacks.spec.ts`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** e2e_test_plan_s7.md секция 7.14 (2 сценария). Backend BACK2 W1 покрывает CallbackQueryHandler, frontend deep-link тесты не написаны.
 - **Что сделать на S8:** spec на `/sessions/{id}` и `/chart?ticker=...` через симуляцию callback'а.
 
-### S7R-E2E-7.16-MISSING — interactive zones и аналитика без E2E
+### S7R-E2E-7.16-MISSING — interactive zones и аналитика без E2E — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `e2e/s7-backtest-analytics.spec.ts`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** e2e_test_plan_s7.md секция 7.16 (4 сценария). FRONT1 W1 7.16 реализован, но E2E отсутствует.
 - **Что сделать на S8:** spec на hover/клик зон бэктеста, проверку `[data-testid="trade-detail-panel"]`, `[data-testid="pnl-histogram"]`, `[data-testid="win-loss-donut"]`. **Важно:** также проверить расхождение `backtest-pnl-histogram` vs `pnl-histogram` (UX W3 deltas, MEDIUM).
 
-### S7R-E2E-7.17-MISSING — background backtest без E2E
+### S7R-E2E-7.17-MISSING — background backtest без E2E — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `e2e/s7-bg-backtest.spec.ts`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** e2e_test_plan_s7.md секция 7.17 (4 сценария). FRONT1 W1 7.17 реализован, но E2E отсутствует.
 - **Что сделать на S8:** spec на toast «запущен в фоне», бейдж `[data-testid="bg-backtest-badge"]` инкремент/декремент через мок WS-фреймов C2.
@@ -2292,7 +2574,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 
 > Карточки добавлены ARCH-агентом по итогам финального ревью S7. Все — DEFERRED-S8 (не блокеры PASS).
 
-### S7R-GRID-HEATMAP-ENTRYPOINT — GridSearchHeatmap PARTIALLY CONNECTED
+### S7R-GRID-HEATMAP-ENTRYPOINT — GridSearchHeatmap PARTIALLY CONNECTED — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `BackgroundBacktestsBadge` подключён в `Header.tsx:133`, из него открывается `GridSearchHeatmap`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, FRONT2 W2 sub-wave 2 (`reports/DEV-4_FRONT2_W2.md` §4), UX W3 §5 #6.
 - **Симптом:** компонент `GridSearchHeatmap` написан, имеет 3 режима (bar / 2D heatmap / sortable table) и unit-тесты, но НЕ имеет точки вызова в production-коде. Из `BackgroundBacktestsBadge` нет ссылки «Открыть результат» для grid-job'а с `result.matrix`.
@@ -2306,56 +2591,80 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 - **Что сделано:** в рамках CI hotfix-волны 2026-04-27 (см. `Sprint_7/changelog.md`) исправлены все 6 + ещё 10 новых из S7 (GridSearchHeatmap static-components, GridSearchForm only-export-components, DrawingsLayer immutability, FirstRunWizardGate set-state-in-effect, ChartPage refs). Использованы переименования с `_`-префиксом, удаление неиспользуемых импортов, обоснованные `eslint-disable` для DOM-мутаций. Frontend lint: 16 errors → 0 errors / 10 warnings.
 - **Приоритет:** low → закрыт.
 
-### S7R-WIDGETS-UNIT-COVERAGE — HealthWidget / ActivePositionsWidget без unit-тестов
+### S7R-WIDGETS-UNIT-COVERAGE — HealthWidget / ActivePositionsWidget без unit-тестов — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `dashboard/__tests__/HealthWidget.test.tsx`, `ActivePositionsWidget.test.tsx`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, UX W3 §5 #11.
 - **Симптом:** unit-тесты есть только для `BalanceWidget` (4 теста). `HealthWidget` и `ActivePositionsWidget` покрыты только E2E `s7-front2.spec.ts` (smoke render).
 - **Что сделать:** написать по 3–5 unit-тестов на каждый виджет (graceful degrade на yellow, sortable по abs(P&L), navigate на click).
 - **Приоритет:** low.
 
-### S7R-ORDER-MANAGER-REAL-MODE-COVERAGE — paper-only тесты OrderManager
+### S7R-ORDER-MANAGER-REAL-MODE-COVERAGE — paper-only тесты OrderManager — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `TestRealMode` в `test_engine_sandbox_flow.py`; файла `order_manager.py` больше нет — карточка описывает исчезнувшую структуру.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** midsprint_check §53, Sprint 7 W1 BACK1 §6.
 - **Симптом:** `tests/test_trading/test_order_manager.py::TestOrderManagerProcessSignal::test_process_buy_signal` покрывает только paper-mode (instant fill `status='filled'`). Real-mode (`status='pending'` до broker callback) не покрыт.
 - **Что сделать:** `@pytest.mark.parametrize` с двумя ветвями — paper и real (mock broker_adapter).
 - **Приоритет:** medium (касается trading-engine, критический путь).
 
-### S7R-DRAWING-EDITING — drag/перенос/изменение углов фигуры
+### S7R-DRAWING-EDITING — drag/перенос/изменение углов фигуры — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: drag-обработчики в `DrawingsLayer.tsx`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, FRONT1 PHASE1 §6 + UX W3 §2 (HIGH).
 - **Симптом:** UX-макет drawing_tools.md §4 предусматривает state «editing» (drag/перенос/изменение углов выделенной фигуры) — НЕ реализован в S7 (PHASE1 ограничен hit-test'ом). Удаление через delete-кнопку и список — есть.
 - **Что сделать:** реализовать hit-test на canvas + drag-handler. Требует серьёзной работы FRONT1 (~1–2 дня).
 - **Приоритет:** medium-high (UX delta).
 
-### S7R-DRAWING-INTRADAY-COORDS — sequential mode координаты
+### S7R-DRAWING-INTRADAY-COORDS — sequential mode координаты — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `charts/sequentialIndex.ts` + `e2e/s7r-chart-drawings-fix.spec.ts`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, FRONT1 PHASE1 §8 + UX W3 §2 (MEDIUM).
 - **Симптом:** в sequential index mode (intraday TF: 1m/5m/15m/1h/4h) координаты time→x для drawings рассчитываются неточно — `MSK_OFFSET_SEC + sequentialIndex` не синхронизированы. Фигуры могут «уезжать».
 - **Что сделать:** вынести `MSK_OFFSET_SEC` + хелперы в `components/charts/utils.ts`, синхронизировать конверсию между `CandlestickChart` и `DrawingsLayer`. Кандидат на новый Stack Gotcha.
 - **Приоритет:** medium.
 
-### S7R-WIDGET-SPARKLINE-24H — endpoint для ActivePositions sparkline
+### S7R-WIDGET-SPARKLINE-24H — endpoint для ActivePositions sparkline — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `GET /api/v1/market-data/sparkline` (`market_data/router.py:53`).
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, UX W3 §2 (MEDIUM).
 - **Симптом:** `ActivePositionsWidget` рендерит sparkline 60×24 с **пустым массивом** `data: []`. UX-макет dashboard_widgets.md §5 требует реальные мини-графики 24h.
 - **Что сделать:** новый endpoint `GET /api/v1/market-data/sparkline?ticker=X&hours=24` (агрегация из существующего OHLCV-кэша свечей 1h) + подключение в виджет.
 - **Приоритет:** medium.
 
-### S7R-WIZARD-TELEGRAM-TEST-BUTTON — кнопка «Проверить подключение» Telegram
+### S7R-WIZARD-TELEGRAM-TEST-BUTTON — кнопка «Проверить подключение» Telegram — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `POST /notifications/telegram/test` + живая доставка в приёмке 26.07.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, UX W3 §2 (MEDIUM).
 - **Симптом:** на шаге 4 wizard'а (настройка уведомлений) UX-макет требует кнопку «Проверить подключение» Telegram (`data-testid="wizard-telegram-test"`). Backend endpoint `POST /api/v1/notifications/telegram/test` не реализован, frontend кнопку скипнул.
 - **Что сделать:** smoke-тест endpoint (отправляет тестовое сообщение с bot_token/chat_id из payload, без сохранения), кнопка во frontend.
 - **Приоритет:** medium.
 
-### S7R-HEALTH-WS-MIGRATION — HealthWidget polling 30s → WS
+### S7R-HEALTH-WS-MIGRATION — HealthWidget polling 30s → WS — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `HealthWidget.tsx` — подписка на WS-канал `health`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, UX W3 §2 (LOW).
 - **Симптом:** `HealthWidget` обновляется через `setInterval(30s)` REST polling. UX-макет dashboard_widgets.md §7 требует WS-обновление.
 - **Что сделать:** новый WS-канал `health` (или переиспользовать существующий) → push при изменении CB/T-Invest/Scheduler состояния.
 - **Приоритет:** low.
 
-### S7R-MULTICURRENCY-TOGGLE — переключатель валют RUB/USD/EUR в BalanceWidget
+### S7R-MULTICURRENCY-TOGGLE — переключатель валют RUB/USD/EUR в BalanceWidget — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `BalanceWidget` — `SegmentedControl` (курс подключён к ЦБ 10.08).
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, UX W3 §2 (LOW).
 - **Симптом:** UX-макет dashboard_widgets.md §3 предусматривает toggle RUB/USD/EUR. Backend возвращает только RUB. Не реализовано.
@@ -2367,7 +2676,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 - **Симптом:** UX-макет background_backtest_badge.md §5 предлагал auto-collapse `done`-записи через 10 секунд. Текущее поведение: запись остаётся до явного «Очистить завершённые» — допустимо, но UX просил иначе.
 - **Приоритет:** low.
 
-### S7R-HISTOGRAM-MANTINE-TOOLTIP — Mantine `<Tooltip>` на bar гистограммы
+### S7R-HISTOGRAM-MANTINE-TOOLTIP — Mantine `<Tooltip>` на bar гистограммы — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `PnLDistributionHistogram.tsx:189`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, UX W3 §2 (LOW).
 - **Симптом:** `PnLDistributionHistogram` использует нативный `title` для tooltip'а bar'а. UX-макет рекомендует Mantine `<Tooltip>` для консистентности.
@@ -2392,7 +2704,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 - **Что сделать на S8:** сделать `TInvestStreamMultiplexer` singleton в `app.state.tinvest_multiplexer`, share между всеми `TInvestAdapter`. Lifespan создаёт/закрывает один экземпляр. Флаг `_connection_event_published` гарантированно один.
 - **Приоритет:** medium. Cooldown работает как defense-in-depth, но архитектурно multiplexer должен быть singleton (как описано в Gotcha 4 для S6 DEV-5: «единственный persistent gRPC stream на весь адаптер» — но требование не распространено на «весь процесс»).
 
-### S7R-API-PAGINATED-TYPE-MISMATCH — type/runtime mismatch в api-клиентах
+### S7R-API-PAGINATED-TYPE-MISMATCH — type/runtime mismatch в api-клиентах — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `unwrapPaginated` в `api/types.ts` и 8 файлах.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, hotfix 2026-04-26 «ActivePositionsWidget runtime crash» (см. `Sprint_7/changelog.md` запись от 2026-04-26 после S7 closeout).
 - **Симптом:** `tradingApi.getSessions` (`Develop/frontend/src/api/tradingApi.ts:17`) декларирует возврат `TradingSession[]`, но backend `GET /api/v1/trading/sessions` возвращает `PaginatedResponse {items, total, ...}` (см. `Develop/backend/app/trading/router.py:list_sessions(response_model=PaginatedResponse)`). TS не отловил — ложная аннотация. FRONT2 в W2 sub-wave 2 написал `setSessions(r.data)` доверившись типу — на runtime `r.data.filter is not a function` крашит весь дашборд.
@@ -2403,21 +2718,30 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
   3. Опционально: создать `Develop/stack_gotchas/gotcha-23-api-paginated-type-mismatch.md` для будущих DEV.
 - **Приоритет:** medium-high. Аналогичные runtime-crash могут быть в других виджетах/страницах. ErrorBoundary вокруг top-level routes (как минимум) — отдельная карточка S7R-FRONTEND-ERROR-BOUNDARY-MISSING.
 
-### S7R-FRONTEND-ERROR-BOUNDARY-MISSING — нет ErrorBoundary вокруг страниц
+### S7R-FRONTEND-ERROR-BOUNDARY-MISSING — нет ErrorBoundary вокруг страниц — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `App.tsx` (app-level) + `DashboardPage.tsx` (по виджету).
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, hotfix 2026-04-26 «ActivePositionsWidget runtime crash».
 - **Симптом:** runtime-ошибка в одном виджете (ActivePositionsWidget) уронила всю страницу `/dashboard` — пустой экран, мигание. React не имеет ErrorBoundary вокруг роутов / виджетов.
 - **Что сделать на S8:** добавить `<ErrorBoundary>` в `App.tsx` вокруг `<Routes>` (top-level fallback) + `<ErrorBoundary>` вокруг каждого виджета на `DashboardPage` (graceful degrade — один сломанный виджет не валит остальные).
 - **Приоритет:** medium. Защита от любых будущих runtime-багов в UI.
 
-### S7R-CONNECTION-EVENTS-MARKET-CLOSED — не публиковать в нерабочие часы
+### S7R-CONNECTION-EVENTS-MARKET-CLOSED — не публиковать в нерабочие часы — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `multiplexer.py:594` — `multiplexer_connection_event_suppressed_market_closed`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, hotfix 2026-04-27.
 - **Симптом:** ночью биржа MOEX закрыта (~19:00–10:00 МСК + выходные). T-Invest всё равно держит соединение, но регулярно разрывает по idle/lifecycle. `connection.lost`/`connection.restored` уведомления в это время — некритичны, пользователь не торгует.
 - **Что сделать на S8:** в `NotificationService._broker_status_loop` (или в `multiplexer._publish_connection_event`) проверять MOEX-календарь через `app/scheduler/calendar.py` (или эквивалент). Если биржа закрыта — пропускать publish (но логировать в backend.log на debug). Cooldown 15 мин остаётся как defense-in-depth.
 - **Приоритет:** low (cooldown 15 мин уже сильно сглаживает, market-closed filter — улучшение качества).
 
-### S7R-DASHBOARD-BALANCE-SPARKLINE-RANGE — sparkline баланса показывает «уступ» из-за фиксированного окна 30 дней
+### S7R-DASHBOARD-BALANCE-SPARKLINE-RANGE — sparkline баланса показывает «уступ» из-за фиксированного окна 30 дней — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `account/router.py` — параметр `since_first_activity`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7 + dashboard-аудит 2026-04-28 (см. `Документация по проекту/FAQ/dashboard.md` §2.3).
 - **Симптом:** виджет «Баланс» рисует sparkline за `days=30`. Если сессии созданы недавно (например, 7 дней назад), первые ~22 точки — нули, потом скачок в текущее значение. Визуально выглядит как «бурный рост в самом конце месяца», хотя на деле это просто момент создания первой сессии. Текущая надпись «+0 ₽ (+0.00%) за день» при таком sparkline вводит пользователя в заблуждение.
@@ -2427,7 +2751,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
   3. Альтернатива: всегда подписывать sparkline датой начала (даже без 1-го пункта).
 - **Приоритет:** medium. Не баг, а UX-неточность — пользователю кажется что баланс растёт, хотя он стоит на месте.
 
-### S7R-DASHBOARD-HEALTH-EXTENDED-FIELDS — backend `/health` не отдаёт `cb_state` / `tinvest_connected` / `scheduler_running`
+### S7R-DASHBOARD-HEALTH-EXTENDED-FIELDS — backend `/health` не отдаёт `cb_state` / `tinvest_connected` / `scheduler_running` — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `main.py` — `cb_state`, `tinvest_connected`, `scheduler_running`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7 (HealthWidget.tsx:9-12 — намеренный degrade) + dashboard-аудит 2026-04-28.
 - **Симптом:** виджет «Состояние систем» постоянно показывает «нет данных» (yellow) для всех 3 систем — даже если backend в полном порядке. Причина: `GET /api/v1/health` возвращает только `{status, version, database}`, а frontend ищет дополнительные поля `cb_state`, `tinvest_connected`, `scheduler_running`, `scheduler_jobs`. При их отсутствии — graceful yellow «нет данных». Этот compromise был сознательным в S7 (DEV-4 промпт), но техдолг остался.
@@ -2440,14 +2767,20 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
   3. **Frontend** уже готов читать эти поля (`HealthWidget.tsx:42-51` — defensive types optional).
 - **Приоритет:** medium. Виджет существует, но бесполезен без реальных данных. Связано с `S7R-HEALTH-WS-MIGRATION` (low) — миграция на WS вместо polling 30s.
 
-### S7R-DASHBOARD-POSITION-SPARKLINE-EMPTY — пустой sparkline в виджете «Активные позиции»
+### S7R-DASHBOARD-POSITION-SPARKLINE-EMPTY — пустой sparkline в виджете «Активные позиции» — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: дубликат `S7R-WIDGET-SPARKLINE-24H`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7 (ActivePositionsWidget.tsx:54 `spark: []`) + dashboard-аудит 2026-04-28.
 - **Симптом:** в карточках позиций (LKOH/SBER/...) sparkline пустой — отрисован только пустой SVG-контейнер. Causes: `r.spark = []` захардкожено в `buildRows`, потому что нужен отдельный endpoint для intraday OHLCV.
 - **Связь:** дублирует существующую карточку `S7R-WIDGET-SPARKLINE-24H` (low). **Не дублируем — пометить как duplicate.**
 - **Действие:** не заводить, при работе над `S7R-WIDGET-SPARKLINE-24H` упомянуть оба места использования (виджет + потенциально strategy table).
 
-### S7R-STRATEGY-STATUS-CHANGE-UI — нет UI для смены статуса стратегии
+### S7R-STRATEGY-STATUS-CHANGE-UI — нет UI для смены статуса стратегии — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `components/strategy/StrategyStatusMenu.tsx` + `strategyApi.updateStatus`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** аудит дашборда 2026-04-28 (см. `Документация по проекту/FAQ/strategy_status.md` §2.3).
 - **Симптом:** backend поддерживает 6 статусов стратегии (`draft, tested, paper, live, paused, archived`) и принимает `PATCH /api/v1/strategies/{id}` с полем `status`. **Frontend нигде НЕ вызывает** `updateStrategy({status: ...})` — нет ни Select, ни кнопок «Архивировать» / «В paper». Все стратегии у всех пользователей навсегда остаются в `draft`. Единственный способ сменить статус — через `curl`/Postman.
@@ -2462,14 +2795,20 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
   4. **(Обсудить отдельно перед реализацией):** автопереходы `draft → tested` после первого успешного бэктеста, `tested → paper` после первого запуска paper-сессии. Сейчас всё ручное — может, оставить так?
 - **Приоритет:** medium-high. Не блокирует торговлю, но ломает UX — пользователь не понимает что фильтры «Активные/Архив» не работают (всё в `draft`).
 
-### S7R-STRATEGY-STATUS-PAUSED-FILTER — статус `paused` не попадает ни в один фильтр
+### S7R-STRATEGY-STATUS-PAUSED-FILTER — статус `paused` не попадает ни в один фильтр — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `DashboardPage.tsx` — фильтр «Пауза» со счётчиком.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** аудит 2026-04-28 (`FAQ/strategy_status.md` §3).
 - **Симптом:** на dashboard над таблицей стратегий 4 фильтра: `Все / Черновик / Активные / Архив`. «Активные» = `paper|live|tested`, «Архив» = `archived`, «Черновик» = `draft`. Стратегии в статусе `paused` показываются только во «Все».
 - **Что сделать:** включить `paused` в «Активные» (т.к. это «живая» стратегия, временно поставленная на паузу), либо добавить отдельный фильтр «Пауза».
 - **Приоритет:** low. Зависимость: `S7R-STRATEGY-STATUS-CHANGE-UI` (без UI смены статуса в `paused` никто и не попадёт).
 
-### S7R-STRATEGY-STATUS-ENUM-DRIFT — `live` (стратегия) vs `real` (тикер)
+### S7R-STRATEGY-STATUS-ENUM-DRIFT — `live` (стратегия) vs `real` (тикер) — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `strategy/schemas.py` — унифицировано на `live`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** аудит 2026-04-28 (`FAQ/strategy_status.md` §1.2).
 - **Симптом:** `Strategy.status` использует значение `live`, а `StrategyInstrumentSummary.status` — `real`. Оба в UI показываются как «Real Trading», но в коде это разные строки. Drift-источник: `StrategyInstrumentSummary` создавался позже (S6), исторически использовали значение `mode` сессии (`real`/`paper`/`sandbox`).
@@ -2483,7 +2822,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 - **Что сделано:** `Develop/frontend/src/utils/pickDefaultBrokerAccount.ts` (новый) + `stores/accountSelectionStore.ts` (zustand persist) + переписан `pages/AccountPage.tsx`. Алгоритм default-выбора: фильтр (is_active && !is_sandbox && account_id IS NOT NULL), затем приоритет (trading_rights > readonly), затем id ASC. Persist выбора в localStorage. Sandbox исключён из дропдауна полностью. Дефолт окна операций — последние 30 дней. +18 unit-тестов (utility 14 + AccountPage 4). Подробное описание алгоритма — в `Документация по проекту/FAQ/dashboard.md` §3.4.
 - **Приоритет:** high → закрыт.
 
-### S7R-CI-NODE24-MIGRATION — миграция GitHub Actions на Node.js 24
+### S7R-CI-NODE24-MIGRATION — миграция GitHub Actions на Node.js 24 — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `ci.yml`, `playwright-nightly.yml` — `checkout@v7`, `setup-node@v7`; дедлайн 16.09 неактуален.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, CI hotfix 2026-04-27, run #24999043671 annotations.
 - **Симптом:** GitHub Actions выводит warning на каждом run: `Node.js 20 actions are deprecated. The following actions are running on Node.js 20: actions/checkout@v4, actions/setup-python@v5, actions/setup-node@v4, pnpm/action-setup@v4. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Node.js 20 will be removed from the runner on September 16th, 2026.`
@@ -2493,7 +2835,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
   3. После 2026-06-02 — Node 24 станет default; до 2026-09-16 ещё можно временно опт-аутить через `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true`, после этой даты — обязательно мигрировать.
 - **Приоритет:** low (deadline 2026-09-16, до тех пор только warnings; функционально CI работает). Удобно сделать вместе с другими CI-улучшениями.
 
-### S7R-FE-LINT-WARNINGS-CLEANUP — 10 frontend lint warnings (react-hooks)
+### S7R-FE-LINT-WARNINGS-CLEANUP — 10 frontend lint warnings (react-hooks) — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `package.json` — `eslint . --max-warnings 0`, факт 0.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7, CI hotfix 2026-04-27 (см. `Sprint_7/changelog.md`). После фикса 16 errors остались 10 warnings — не валят CI, но накапливаются и зашумляют annotations.
 - **Симптом:** `pnpm lint` выдаёт 10 warnings:
@@ -2503,7 +2848,10 @@ backend pytest **2246 passed / 1 xfailed / 0 failed** (baseline 2223 + 23 нов
 - **Дополнительно:** включить `--max-warnings 0` в `frontend/package.json` lint-скрипте, чтобы CI блокировал любые НОВЫЕ warnings (предотвращение регрессии).
 - **Приоритет:** low. Не валит CI, не блокирует фичи. Удобно сделать одной волной с `S7R-CI-NODE24-MIGRATION` как «CI gardening» в S8.
 
-### S7R-SANDBOX-ACCOUNT-ID-MISSING — sandbox-аккаунт с account_id=NULL в БД
+### S7R-SANDBOX-ACCOUNT-ID-MISSING — sandbox-аккаунт с account_id=NULL в БД — ✅ ЗАКРЫТА (сверено с кодом 2026-08-10)
+
+> **Закрыта по факту.** Доказательство на `develop` `fe46f00`: `trading/service.py` — pre-flight проверка `account.account_id is None`.
+> Работа сделана волнами S8 W4/W5 и приёмкой, заголовок карточки не обновлялся.
 
 - **Источник:** Sprint 7 closeout 2026-05-12, обнаружено заказчиком при попытке запуска sandbox-сессии (см. `Sprint_7/changelog.md` запись «S7R-SANDBOX-TRADING-RIGHTS»).
 - **Симптом:** в БД `broker_accounts.id=1` (Сэндбокс) имеет `account_id=NULL` — пустое поле T-Invest sandbox account_id. После фикса `has_trading_rights` для sandbox (`s7/sprint-7` коммит 2dae943) `POST /trading/sessions` проходит, но при первой реальной сделке (`place_order` в T-Invest sandbox API) упадёт — `account_id` обязателен для API call'ов.
