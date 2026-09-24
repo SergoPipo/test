@@ -3,15 +3,16 @@
 # ТЕХНИЧЕСКОЕ ЗАДАНИЕ (ТЗ)
 ## Торговый терминал для рынка ценных бумаг РФ (MOEX)
 
-**Версия:** 2.9
-**Дата:** 2026-08-10
-**Основание:** Функциональные требования v3.9 от 2026-08-10
+**Версия:** 3.0
+**Дата:** 2026-09-24
+**Основание:** Функциональные требования v4.0 от 2026-09-24
 **Статус:** ✅ M4 Production-ready. Gate Sprint_8_Review пройден (PASS WITH NOTES), остаток приёмки (8 замечаний) и весь backlog доведения закрыты. Актуализировано по итогам код-ревью P0–P1, финальной приёмки и closeout-цикла S8R.
 
 ### История версий
 
 | Версия | Дата | Спринт | Ключевые изменения |
 |--------|------|--------|-------------------|
+| 3.0 | 2026-09-24 | S8R — фиксы аудита 2026-09 (`S8R-AUDIT-NNN`) | Изменения по карточкам аудита `audit_2026-09.md`, пополняется по мере закрытия. **§5.2.4** — `S8R-AUDIT-001`: исполняется только код из IR валидированных блоков — fallback `generated_code`, legacy live-путь и эндпоинты `/sandbox/*` удалены; прокси с allow-list атрибутов вместо модулей в песочнице и бэктесте; сужены builtins (§5.11). `S8R-AUDIT-036`: traceback без локалов (`plain_traceback`), процессор `mask_secrets` → `***` (§7.7). `S8R-AUDIT-035`: `users.token_version` + claim `ver`, отзыв всех сессий при смене пароля и reuse refresh; миграция `c5e8b2a7f913` (§7.3). `S8R-AUDIT-034`: при `DEBUG=False` слабые `SECRET_KEY`/`ENCRYPTION_KEY` (dev-, плейсхолдер change-me, < 32 байт, < 8 различных символов) роняют старт; мастер-ключ проверяется в lifespan; preflight-скрипт синхронен (§7.3, §7.8). `S8R-AUDIT-033`: `POST /auth/setup` закрыт после первого пользователя (403, атомарный bootstrap `INSERT … WHERE NOT EXISTS`), категория лимитера `auth`; новый `POST /api/v1/admin/users` (admin); `SetupPage` проверяет `setup-status`, ссылка «Создать аккаунт» со страницы входа убрана (§4.1, п. о первом запуске). `S8R-AUDIT-002`: значения полей блоков валидируются по схеме `BLOCK_FIELD_SCHEMA` на входе API и в `parse_blocks`; кодоген берёт выражение `SOURCE` из словаря, пользовательские строки в код стратегии не интерполируются; бэктест и Grid Search отклоняют версию с невалидными блоками (422). |
 | 2.9 | 2026-08-10 | S8R — гигиена перед деплоем | **§5.2.2 (парсер шаблона), §5.6 (рыночные данные), §5.4 (движок), §9.** (1) `S8R-FIGI-NO-NEGATIVE-CACHE` (Q4=a): `_fetch_figi_from_tinvest` возвращает `FigiLookup(figi, source_answered)` вместо `str \| None`. Флаг разделяет «провайдер ответил, инструмента нет» и «источник молчит» (нет счёта с токеном, `ImportError` SDK, ошибка расшифровки, `asyncio.TimeoutError`, любое исключение gRPC) — кэшируется **только первое**. Отметки промахов — модульный `_figi_negative_cache: dict[str, datetime]` с `FIGI_NEGATIVE_TTL = 15 мин`; кэш процессный, а не на экземпляре, потому что `process_signal` создаёт `MarketDataService(self.db)` заново на каждый сигнал. TTL читается при проверке (как `CbrRateService._is_fresh`), протухшие записи вычищаются при записи новой, успешный резолв снимает отметку. Публичная `reset_figi_negative_cache()` + autouse-фикстура в `tests/conftest.py`: без сброса состояние текло бы между тестами и падение зависело бы от их порядка. В БД отрицательный результат не пишется — колонка `instruments.figi` хранит либо настоящий идентификатор, либо ничего; миграций нет (Q8=a). (2) `S8R-PAPER-TARIFF-UNREACHABLE-FROM-UI` (Q5=a): наследование тарифа существовало в `start_session` с 2026-08-04, но включалось условием «ставка сессии == 0 И передан `broker_account_id`», а `buildSessionStartRequest` слал счёт только для `sandbox`/`real`. В черновике появилось поле `commission_source: 'manual' \| 'account'`; при `account` тело запроса содержит `broker_account_id` **и** `commission_pct: 0` — ровно та комбинация, которую backend распознаёт. Backend не менялся. Инварианты, закреплённые тестами (`test_paper_tariff_from_ui.py`): `broker_account_id` у paper-сессии не делает её брокерской — `PaperPortfolio` создаётся, запрет `S8R-DUPLICATE-SESSION-PER-INSTRUMENT` смотрит на `mode.in_(('sandbox','real'))`, ставка фиксируется в момент запуска. Для `sandbox`/`real` `commission_pct` по-прежнему принудительно 0. (3) `S7R-BG-BACKTEST-AUTOCOLLAPSE` (Q6=b): `AUTOCOLLAPSE_DELAY_MS = 30_000` в `BackgroundBacktestsBadge`; таймер на каждую терминальную карточку, задержка считается от `finished_at` (не от монтирования: `items` меняется на каждом тике прогресса соседнего джоба, и отсчёт «с нуля» не дошёл бы до конца; попутно карточка, завершившаяся до перезагрузки страницы, убирается сразу). `error` исключён намеренно — текст причины больше нигде не виден; при открытом popover отсчёт не идёт. (4) `S5R-BLOCKLY-MODE-B-MODAL` / `-CHECK` (Q2=a, Q3=a) — см. §5.2.2: кнопка в редакторе, шаблон приведён к семи секциям парсера, добавлен парсящийся пример, контракт закреплён тестом синхронизации `.tsx` ↔ `template_format_rules.py`; два `test.skip` в `e2e/blockly.spec.ts` заменены рабочими спеками. (5) `S7R-E2E-7.9-MISSING` (Q7=b): сценарий 7.9 закрыт pytest-интеграционным тестом (`tests/test_backup/test_cli_restore_roundtrip.py`), а не Playwright-спеком — сценарий целиком серверный (запуск `python -m app.cli.backup` через `subprocess` и чтение файла БД), браузер в нём не участвует. Проверяется результат, а не код возврата: round-trip восстановления потерянной строки, `PRAGMA integrity_check`, содержимое pre-restore-снимка, попадание в бэкап транзакции, оставшейся в WAL (gotcha-19), ротация 10 → `--keep 7` по `mtime` и неприкосновенность рабочей `data/terminal.db`. |
 | 2.8 | 2026-08-10 | S8R — доведение до деплоя | **(1) `S8R-FRONTEND-BUILD-BROKEN` — production-сборка фронтенда была сломана, а гейт этого не видел.** `frontend/Dockerfile` собирает образ через `pnpm build` (= `tsc -b && vite build`); `tsc -b` падал со 102 ошибками типов в 45 файлах. Гейт «tsc 0» (в том числе шаг CI `pnpm tsc --noEmit`) не проверял ни одного файла: корневой `tsconfig.json` — solution-файл с `"files": []`, и без `-b` команда завершается мгновенно с кодом 0. Все ошибки устранены; `package.json` получил скрипт `typecheck: tsc -b`, в CI шаг заменён на `pnpm typecheck` и добавлен `pnpm build`. `fancy-canvas` объявлена прямой зависимостью (импортируется в примитивах графика). **(2) Новый endpoint `GET /api/v1/market-data/usd-rate`** → `{rate, as_of, stale}`. Источник — `https://www.cbr.ru/scripts/XML_daily.asp`, кэш 6 ч в процессе + `asyncio.Lock` (один запрос к ЦБ на всех). Недоступность ЦБ: при наличии кэша — `stale=true`, иначе `503`. Разбор XML — `xml.etree` с лимитом тела 1 МБ и инлайн-`nosec B314` (фиксированный HTTPS-хост, внешние сущности CPython не резолвит). **(3) Порядок захвата локов дополнен** (`app/common/locks.py`): `session_lifecycle` (по `session_id`) — **самый внешний**, под ним `close_trade` (по возрастанию `trade_id`) → `sandbox_reconcile_account`; `session_start_account` — отдельная ветвь. `pause/stop/resume_session` сериализованы по сессии, `_submit_order_to_broker` берёт `close_trade` своей сделки. **(4) `BrokerService.delete_account`** отклоняет удаление счёта при сессиях в статусах `active`/`paused`/`suspended` (FK `ondelete='SET NULL'` иначе обнулял `broker_account_id` у работающих сессий). **(5) Единая сборка тела запроса на запуск сессии** — `frontend/src/components/trading/sessionRequest.ts`; ручная сборка в «Запустить заново» была источником расхождения контракта. Приведены к реальности типы `LiveTrade.direction` (`buy`/`sell`), `Backtest` (поля списочного ответа) и `tradingApi.getSession` (`SessionDetailResponse`). Миграций цикл не добавляет, alembic head прежний — `a7b8c9d0e1f2`. |
 | 2.7 | 2026-08-06 | Sprint_8_Review — один инструмент, одна сессия на счёте | **§5.4 (движок), §9.** (1) `S8R-DUPLICATE-SESSION-PER-INSTRUMENT`: `TradingSessionManager._assert_no_conflicting_session` — единая точка запрета для `start_session` и `resume_session`. Единица конфликта — пара «`broker_account_id` + `ticker`» (Q2=a): именно счёт определяет общий пул бумаг у брокера, а таймфрейм на пул не влияет. Область — режимы `sandbox`/`real` (Q1=a): механика песочницы идентична бою, отличается только цена ошибки. Блокирующие статусы — `BLOCKING_SESSION_STATUSES = (active, paused, suspended)` (Q3=a); `suspended` включён потому, что `restore_all` вернёт такую сессию в `active` сам. Выбор виновника — `ORDER BY CASE(status) , id LIMIT 1` + `.scalars().first()`, а не `scalar_one_or_none()`: конфликтующих кандидатов может быть несколько (исходное состояние БД заказчика — сессии #4/#6), и `MultipleResultsFound` дал бы 500 вместо понятного отказа. Схема БД **не** меняется: `UniqueConstraint` на «счёт + тикер» запретил бы и закрытые исторические сессии, которых у заказчика уже две (Q5=a). (2) **Атомарность** — новый ключ `keyed_lock("session_start_account", broker_account_id)`. Без него проверка была `SELECT`-затем-`INSERT` без сериализации: между ними есть `await` на реальном I/O, и два одновременных «Запустить» проходили оба (воспроизведено тестом: в БД оказывались две сессии). Место в документированном порядке захвата (`app/common/locks.py`) — **самый внешний**: путь запуска берёт только этот ключ, а `close_trade` и `sandbox_reconcile_account` внутри секции не запрашиваются, потому что под локом идёт только работа с БД. Подписка на стрим (`SessionRuntime.start`) вынесена из-под лока в `_announce_started_session`: `locks.py` разрешает сеть под локом лишь с таймаутом на самом вызове, а зависший стрим запер бы запуск всех сессий счёта. (3) `SessionRuntime.restore_all` дедуплицирует пару «счёт + тикер» за проход: пред-проход закрепляет её за уже `active`-сессиями, чтобы `suspended`, попавшаяся раньше по порядку, не забрала пару у сессии, которая в БД уже числится работающей. Пропуск логируется (`session_restore_skip_duplicate_instrument`), статус **не** переписывается — восстановление не место для ревизии пользовательских данных. (4) `S8R-RECONCILE-NO-ACCOUNT-DEDUP`: `_reconcile_broker_positions` считает `our_units` по **всем** sandbox/real-сессиям счёта (JOIN `LiveTrade` → `TradingSession` по `broker_account_id`), независимо от статуса сессии — брокеру всё равно, `stopped` у нас сессия или нет, незакрытая сделка занимает бумаги. Сравниваются только FIGI **этой** сессии; обратная проверка ограничена её тикером, иначе карточка сессии по SBER показывала бы расхождение соседа по GAZP. Портфель кэшируется на **один проход** фоновой сверки (`portfolio_cache`, ключ `broker_account_id`) — 10 сессий счёта давали 10 адаптеров и 10 одинаковых запросов; кэш дольше прохода означал бы сверку с устаревшим состоянием счёта. (5) **§9** — тест гонки на файловой БД с `NullPool` (gotcha-48), рандеву **до** захвата лока (gotcha-59); защита проверена мутацией: снятие `async with lock` даёт две сессии и роняет тест. (6) Фронт: `TradingSession.status` в `api/types.ts` дополнен `suspended` — backend отдавал его и раньше, в типе его не было. (7) `S8R-PAPER-CONFLICT-BY-VERSION-NOT-TIMEFRAME` (решение заказчика, вечер 2026-08-06): из `_create_session_locked` удалена унаследованная проверка «одна активная сессия на пару (`strategy_version_id`, `ticker`)» — она не учитывала `timeframe`, из-за чего SBER на 1h и SBER на D от одной версии не запускались вместе. Paper-режим ограничений на повтор инструмента больше не несёт **вообще**: у каждой сессии свой `PaperPortfolio`, брокерских ордеров нет, общего пула бумаг нет — ни одно из оснований `S8R-DUPLICATE-SESSION-PER-INSTRUMENT` к нему не применимо. Запрет для `sandbox`/`real` не затронут и покрыт отдельным классом тестов (`TestSandboxRestrictionUnaffected`). |
@@ -868,9 +869,12 @@ pending_events
 ### 4.1 Auth API
 
 ```
-POST   /api/v1/auth/setup          -- Первоначальная настройка (создание пользователя)
+POST   /api/v1/auth/setup          -- Первоначальная настройка (создание ЕДИНСТВЕННОГО пользователя)
        Body: { username, password }
-       Response: 201 { user_id, access_token, refresh_token }
+       Response: 201 (токены — в cookie, Model A)
+       Error 403: { detail: "Регистрация закрыта: …" } -- в БД уже есть пользователь (S8R-AUDIT-033);
+                  атомарно: INSERT … WHERE NOT EXISTS, из двух параллельных setup проходит один
+       -- Лимитер: категория auth (как login/refresh); /auth/setup-status — general
 
 POST   /api/v1/auth/login
        Body: { username, password }
@@ -1300,7 +1304,8 @@ GET    /api/v1/export/tax-report
 
 **Мастер первого запуска:**
 - При старте: проверка `SELECT COUNT(*) FROM users`. Если 0 — endpoint `/api/v1/auth/setup` доступен без JWT. После создания первого пользователя — endpoint становится недоступен (возвращает 403).
-- Frontend UX flow: при загрузке `LoginPage` вызывается `GET /api/v1/auth/setup-status`. Если `is_configured: false` — автоматический редирект на `/setup` (страница регистрации первого пользователя). На странице логина отображается ссылка «Первый запуск? Создать аккаунт» → `/setup`. На странице Setup — ссылка «Уже есть аккаунт? Войти» → `/login`.
+- Frontend UX flow: при загрузке `LoginPage` вызывается `GET /api/v1/auth/setup-status`. Если `is_configured: false` — автоматический редирект на `/setup` (страница регистрации первого пользователя). `SetupPage` сама проверяет `setup-status` и при `is_configured: true` уводит на `/login` (S8R-AUDIT-033: ссылки «Создать аккаунт» на странице логина больше нет). На странице Setup — ссылка «Уже есть аккаунт? Войти» → `/login`.
+- Дополнительные учётные записи (S8R-AUDIT-033, решение заказчика 2026-09-24): только администратор, `POST /api/v1/admin/users` (`require_admin`, тело `{ username, password }` с той же валидацией, что setup; 201 `UserResponse`, 409 — имя занято; создаваемый пользователь всегда `is_admin=false`). UI для этого нет.
 - При недоступности backend — LoginPage показывает Alert «Backend недоступен» и ссылку на Setup.
 
 **Подготовка к 2FA (фаза 2):**
@@ -1447,6 +1452,18 @@ class GeneratedStrategy(bt.Strategy):
 > (числовой паритет %K с интерпретатором). Старый `code_generator.py` оставлен для
 > legacy-тестов и не используется в production-пути. Подробности и ловушка —
 > `Develop/stack_gotchas/gotcha-35-dual-block-translators-drift.md`.
+>
+> **Валидация значений полей блоков (S8R-AUDIT-002).** Значения `fields`
+> Blockly-блока проверяются по схеме `BLOCK_FIELD_SCHEMA`
+> (`app/strategy/block_allowlist.py`) на двух рубежах: на входе API
+> (`validate_blocks_json` → 422 с текстом «блок, поле, допустимые значения») и в
+> `parse_blocks` перед кодогеном. `SOURCE` ∈ {open, high, low, close, volume};
+> числовые поля — только числа (bool и значения вне диапазона float — нет;
+> числовая строка допустима, gotcha-01); enum-поля (`OPERATOR`, `DIRECTION`,
+> `RIGHT_TYPE`, `TYPE`, `MODE`) — из перечислений фронта. Кодоген подставляет
+> выражение источника из словаря соответствий (`_BT_SOURCE_EXPR`): пользовательская
+> строка в исходник стратегии не попадает никогда. Запуск бэктеста и Grid Search
+> для версии с невалидными блоками → 422 «Стратегия не может быть запущена: …».
 
 ### 5.3 Backtest Engine
 
@@ -1968,6 +1985,16 @@ SMA, EMA, Bollinger Bands, RSI, MACD, Stochastic, ATR, Volume MA, и други�
 
 **Ответственный: SEC**
 
+> **Фактическая модель после S8R-AUDIT-001 (2026-09-24, решение заказчика Q4-001 = «а») — приоритет над эскизами 5.11.1–5.11.2 ниже.**
+>
+> 1. **Исполняется только код, порождённый кодогеном из IR валидированных блоков.** `runtime_backtrader_code(blocks_json)` (`strategy/ir_codegen.py`) больше не принимает сохранённый `generated_code` как fallback: пустые, вырожденные (нет ни входа, ни выхода), битые блоки или блоки неизвестного типа → `StrategyNotExecutableError` (наследник `ValidationError`, HTTP 422, «Версия стратегии не содержит блоков: исполнение произвольного кода отключено, пересоберите стратегию в конструкторе»). Единая проверка — `ir.parse_executable_blocks` (allow-list типов и полей блоков `validate_blocks_json` → IR); её вызывают старт бэктеста, rerun, фоновый запуск, Grid Search, старт и возобновление торговой сессии, live-маршрутизация свечей. Поле `generated_code` хранится (превью в редакторе) и нигде не исполняется.
+> 2. **Live-торговля — только IR-интерпретатор** (`evaluator.evaluate`). Legacy-путь (`_get_strategy_code` → `CodeSandbox.execute` → разбор `"buy" in output`, третий генератор `_blocks_to_sandbox`) удалён. Сессия на версии без исполнимых блоков: старт и «Возобновить» → 422; при восстановлении после рестарта — переводится в `paused` с причиной, listener не поднимается; на свече — HOLD + warning.
+> 3. **Эндпоинты `/api/v1/sandbox/execute` и `/api/v1/sandbox/analyze` сняты с регистрации** (UI их не использовал): исполнение произвольного кода по API отключено.
+> 4. **Граница исполнения — прокси вместо модулей** (`app/sandbox/module_proxies.py`): в namespace `CodeSandbox` и `BacktestEngine._compile_strategy` кладутся `types.SimpleNamespace` с явным allow-list атрибутов (`MODULE_ALLOWED_ATTRS`: `datetime` — классы дат/времени; `math` — публичные функции; `decimal` — `Decimal`, исключения, режимы округления; `backtrader`/`bt` — `Strategy`, `indicators` (только классы индикаторов), `Order`, `TimeFrame`). Ни один атрибут прокси не является модулем (инвариант проверяется при построении); прокси создаются заново на каждый запуск. Раньше разрешённый модуль давал `datetime.sys.modules['os']` — выполнение произвольного кода.
+> 5. **AST-анализатор — первый рубеж, не граница:** allow-list атрибутов на именах разрешённых модулей (`datetime.sys` → отказ), `from <модуль> import <имя>` — только из allow-list, перекрытое импортом имя проверяется по объединению allow-list модуля и публичных атрибутов импортированного объекта. Цепочки (`bt.indicators.x`) и псевдонимы через присваивание анализатор не отслеживает — их держат прокси (тесты `test_audit_s8r_escape.py` с отключённым анализатором).
+> 6. **Builtins бэктеста** — allow-list `_STRATEGY_BUILTINS` (без `print`, `getattr`, `type` и т. п.), `__import__` → `_safe_import`, отдающий прокси.
+> 7. Лимиты CPU/RAM из эскиза ниже в коде по-прежнему не применяются — карточка S8R-AUDIT-006.
+
 **5.11.1 AST-анализ (pre-execution):**
 
 ```python
@@ -2291,7 +2318,8 @@ class CryptoService:
 - Refresh Token TTL: 7 дней
 - Refresh Token: одноразовый; при каждом refresh — старый инвалидируется, выдаётся новый
 - При logout: access + refresh → в `revoked_tokens`
-- Секрет: `JWT_SECRET_KEY` в `.env`, минимум 64 символа
+- Версия токенов (S8R-AUDIT-035): claim `ver` = `users.token_version` (миграция `c5e8b2a7f913`, по умолчанию 0; токен без `ver` = версия 0). Проверяется в HTTP (`get_current_user`, `AdminAuthASGIMiddleware`), на WS-upgrade (`ws_authenticate`) и в `refresh`. Смена пароля и повторное предъявление использованного refresh (признак кражи) выполняют атомарный `token_version + 1` → все ранее выданные пары недействительны; `PATCH /auth/password` сразу отдаёт новую пару в cookie. Принятый риск: потерянный ответ `/refresh` с повтором старого cookie разлогинивает все устройства (отказ в безопасную сторону).
+- Секрет: `SECRET_KEY` в `.env` (в коде — `settings.SECRET_KEY`; имя `JWT_SECRET_KEY` в ранних редакциях ТЗ устарело). При `DEBUG=False`: ≥ 32 байт UTF-8, ≥ 8 различных символов, без префикса `dev-` и маркеров плейсхолдера `change-me`/`change_me`/`changeme` (S8R-AUDIT-034; порог 32 байт — по рецепту карточки и паритету с `ENCRYPTION_KEY`, прежние «64 символа» в коде не проверялись никогда)
 
 > **Примечание для фазы 2:** при переходе к мультипользовательскому режиму рекомендуется миграция на RS256 (асимметричные ключи) для минимизации последствий компрометации ключа. При HS256 компрометация секрета позволяет подделать токены всех пользователей.
 
@@ -2328,7 +2356,9 @@ response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
 ### 7.7 Маскирование секретов в логах
 
-Middleware для structlog: фильтрует поля `api_key`, `token`, `password`, `secret` — заменяет на `****` + последние 4 символа.
+Процессор structlog `mask_secrets` (`app/common/logging_config.py`, S8R-AUDIT-036): значение поля, имя которого целиком или последним `_`-сегментом равно `api_key` / `token` / `secret` / `password` / `encryption_key` (регистронезависимо; `access_token`, `api_secret`, `bot_token` — маскируются, `token_version`, `token_prefix` — нет), заменяется на `***` целиком (хвост токена — тоже утечка, S8R-AUDIT-042; прежнее «`****` + последние 4 символа» не было реализовано). Маскируются только поля верхнего уровня вызова логгера; вложенные словари и текст сообщения — нет.
+
+Traceback исключений — `ConsoleRenderer(exception_formatter=structlog.dev.plain_traceback)`: локальные переменные кадров не печатаются независимо от наличия `rich` (при `rich` дефолт structlog печатал их, включая расшифрованный токен брокера). Там, где в кадрах есть секреты (prefetch рыночных данных, планирование prefetch при логине), вместо `exc_info=True` пишется `error_type` + `error=str(e)`.
 
 ### 7.8 Проверка .env при старте
 
@@ -2351,8 +2381,8 @@ class Settings(BaseSettings):
 
 При старте: проверка `os.stat('.env').st_mode` — если файл readable others, выводится WARNING.
 
-**Защита от dev-секретов в production:**
-При `DEBUG=False` — `model_validator` проверяет, что `SECRET_KEY` и `ENCRYPTION_KEY` не содержат префикс `dev-`. Если содержат — выводится `warnings.warn` с требованием задать безопасные значения в `.env`.
+**Защита от слабых секретов в production (S8R-AUDIT-034, 2026-09-24):**
+При `DEBUG=False` `model_validator` (`config.py::_weak_secret_reason`) для `SECRET_KEY` и `ENCRYPTION_KEY` проверяет по порядку: префикс `dev-` → маркер плейсхолдера `change-me`/`change_me`/`changeme` без учёта регистра (все значения, когда-либо лежавшие в `.env.example`) → длина ≥ 32 байт UTF-8 → ≥ 8 различных символов. Нарушение → `RuntimeError` при импорте настроек: процесс не стартует (прежний `warnings.warn` легко пропускался). Пороги — из `CryptoService` (одна точка истины). `ENCRYPTION_KEY` дополнительно проверяется в `lifespan` первым действием (`get_crypto_service()` в strict-режиме), а не лениво при первой операции шифрования. Preflight контейнера `scripts/check_production_env.sh` применяет те же четыре правила (sync-тесты в `tests/unit/test_config.py`). При `DEBUG=True` dev-дефолты допустимы.
 
 ---
 

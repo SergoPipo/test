@@ -1,6 +1,6 @@
 # Deployment Guide — MOEX Trading Terminal
 
-> **Версия:** v1.0 (2026-05-13, Sprint 8 W3, M4 Production-ready).
+> **Версия:** v1.1 (2026-09-24 — правки по фиксам аудита `S8R-AUDIT-NNN`; v1.0 — 2026-05-13, Sprint 8 W3, M4 Production-ready).
 > **Целевая платформа:** Mac mini + Docker compose + launchd + Cloudflare Tunnel.
 > Утверждено заказчиком 2026-05-12 (arch_design_s8 §7.2, batch 3 п.10).
 
@@ -68,8 +68,8 @@ cp .env.example backend/.env.production
 
 | Переменная | Назначение | Как получить |
 |------------|-----------|--------------|
-| `SECRET_KEY` | JWT signing key | `python3 -c "import secrets; print(secrets.token_hex(32))"` (≥ 32 байт, см. Security audit §S8R-SEC-JWT) |
-| `ENCRYPTION_KEY` | AES-256-GCM master key для шифрования broker token'ов (**≥ 32 байт**, не начинается с `dev-`) | `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `SECRET_KEY` | JWT signing key (**≥ 32 байт**, ≥ 8 различных символов, без `dev-` и без `change-me`/`CHANGE_ME` — плейсхолдер шаблона отбраковывают preflight и валидатор настроек, S8R-AUDIT-034) | `python3 -c "import secrets; print(secrets.token_hex(32))"` |
+| `ENCRYPTION_KEY` | AES-256-GCM master key для шифрования broker token'ов (**≥ 32 байт**, те же правила, что у `SECRET_KEY`; проверяется **на старте** backend, а не при первом запросе) | `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `TINVEST_TOKEN` | Production T-Invest API token | Личный кабинет T-Invest |
 | `DATABASE_URL` | SQLite путь внутри контейнера | `sqlite+aiosqlite:////app/data/app.sqlite` (НЕ менять) |
 | `TZ` | Часовой пояс торговли | `Europe/Moscow` (НЕ менять) |
@@ -147,6 +147,18 @@ docker compose exec backend alembic heads     # та же ревизия — р�
 **Вариант B:** через CLI (если уже есть users без admin'а).
 ```bash
 docker compose exec backend python -m app.cli.users grant_admin <username>
+```
+
+> **С 2026-09-24 (S8R-AUDIT-033):** `POST /api/v1/auth/setup` работает только на пустой БД —
+> после первого пользователя он возвращает **403 «Регистрация закрыта»**. Регистрируйте
+> первого пользователя сразу после выкатки, до публикации адреса через Cloudflare Tunnel.
+
+**Дополнительные пользователи** (только admin, UI нет):
+```bash
+curl -X POST https://<домен>/api/v1/admin/users \
+  -H 'Authorization: Bearer <access_token администратора>' -H 'Content-Type: application/json' \
+  -d '{"username":"<логин>","password":"<пароль от 8 символов>"}'
+# 201 — создан (is_admin=false); 409 — имя занято; 403 — вы не администратор
 ```
 
 ---
@@ -281,8 +293,16 @@ docker compose ps            # проверить healthy
 После апдейта сверьте, что миграции доехали до головы:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: a7b8c9d0e1f2 (head)
+docker compose exec backend alembic current   # ожидается: c5e8b2a7f913 (head)
 ```
+
+> **ℹ️ Обновление с версии старше `c5e8b2a7f913` (S8R-AUDIT-035, 2026-09-24).**
+> Ревизия добавляет `users.token_version` (`INTEGER NOT NULL DEFAULT 0`). Смена пароля
+> и повторное предъявление уже использованного refresh-токена теперь отзывают **все**
+> сессии пользователя на всех устройствах; вкладка, где меняли пароль, получает новую
+> пару токенов автоматически. Перелогин после обновления не требуется: токены без
+> версии считаются версией 0. Миграция идемпотентна и обратима; SQLite пересоздаёт
+> таблицу `users` (`batch_alter_table`) — перед обновлением снимите backup (§6.1).
 
 > **ℹ️ Обновление с версии старше `a7b8c9d0e1f2` (S8R, 2026-08-06).**
 > Ревизия `a7b8c9d0e1f2` (`backfill_real_figi_in_broker_trades`) —
@@ -544,8 +564,9 @@ docker compose logs backend | tail -100
 | `alembic.util.exc.CommandError: Can't locate revision` | свежий clone, не применились миграции | `docker compose exec backend alembic upgrade head` |
 | `ModuleNotFoundError: tinkoff` | T-Invest SDK не установился в builder | очистить `docker compose build --no-cache backend` |
 | `KeyError: 'SECRET_KEY'` | `.env.production` не загружен | проверить `docker compose config` (секция env_file) |
-| контейнер backend сразу выходит (`exit 1`), в логах `check_production_env`: обнаружены dev-значения / нет `.env.production` | preflight-проверка секретов (CFG-BE-02): `.env.production` отсутствует, либо `SECRET_KEY`/`ENCRYPTION_KEY` начинаются с `dev-` или короче 32 байт | заполнить `.env.production` реальными значениями (см. §3.2); ключи ≥ 32 байт, без префикса `dev-` |
-| `ValueError: master_key too short` при первом брокер/AI-запросе | `ENCRYPTION_KEY` короче 32 байт (production, DEBUG=false — fail-fast) | сгенерировать новый ключ ≥ 32 байт; ⚠️ смена ключа делает уже сохранённые broker-токены нерасшифровываемыми — пользователям нужно заново ввести токены |
+| контейнер backend сразу выходит (`exit 1`), в логах `check_production_env`: обнаружены dev-значения / нет `.env.production` | preflight-проверка секретов (CFG-BE-02, S8R-AUDIT-034): `.env.production` отсутствует, либо `SECRET_KEY`/`ENCRYPTION_KEY` — `dev-*`, плейсхолдер `change-me`, < 32 байт или < 8 различных символов | заполнить `.env.production` реальными значениями (см. §3.2) |
+| `RuntimeError: SECRET_KEY is a placeholder copied from .env.example with DEBUG=False` (или `… is too short` / `has too little entropy`) | в `.env.production` осталось значение шаблона или слабый ключ | см. §3.2, сгенерировать ключ |
+| `ValueError: master_key too short` / `too little entropy` при старте контейнера (healthcheck не поднимается) | `ENCRYPTION_KEY` короче 32 байт или вырожденный (production, DEBUG=false — проверка в lifespan) | сгенерировать новый ключ ≥ 32 байт; ⚠️ смена ключа делает уже сохранённые broker-токены нерасшифровываемыми — пользователям нужно заново ввести токены |
 
 ### 9.2 Cloudflare Tunnel 502 Bad Gateway
 
