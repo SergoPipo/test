@@ -17,9 +17,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-033 — `/auth/setup` открыт всегда | BLOCKER | `assert 201 == 403` → 403 «Регистрация закрыта»; гонка двух setup → ровно один admin | `967fe10` | + `POST /admin/users`; лимитер `auth` для setup, `setup-status` — `general` (/code-review) |
 | S8R-AUDIT-002 — инъекция через `SOURCE` | BLOCKER | `DID NOT RAISE` ×2 → схема полей `BLOCK_FIELD_SCHEMA`, словарь источников в кодогене | `47bf073` | Grid Search тоже проверяет блоки; int-переполнение → 422 (/code-review) |
 | S8R-AUDIT-001 — побег из песочницы через `datetime.sys` | BLOCKER | `is_safe=True`, `success=True … CWD=` → прокси с allow-list, исполняется только код из IR (Q4-001=a) | `c6bf111` | fallback `generated_code`, legacy live-путь, `/sandbox/*` удалены; попутно закрыта **S8R-AUDIT-028**, часть 019; gotcha-61 |
-| S8R-AUDIT-034 — плейсхолдеры секретов проходят preflight | HIGH | `DID NOT RAISE RuntimeError` → чёрный список `change-me`, ≥ 32 байт, ≥ 8 символов; мастер-ключ в lifespan | `d42d1c4` (wt B, в `s8r/fix-high`) | ТЗ §7.3: порог 32 байт (было «64 символа», не проверялось) |
-| S8R-AUDIT-035 — смена пароля не гасит другие сессии | HIGH | `DID NOT RAISE ValueError` ×2 → `users.token_version` + claim `ver`, отзыв всех пар при смене пароля и reuse refresh | `ab41b18` (wt B, для `s8r/fix-high`) | миграция `c5e8b2a7f913`; принятый риск: потерянный ответ /refresh разлогинивает все устройства |
-| S8R-AUDIT-036 — traceback печатает токен брокера | HIGH | «локал api_key утёк» (12 failed) → `plain_traceback`, `mask_secrets` → `***`, `error=str(e)` в prefetch/auth | `b053904` (wt B, для `s8r/fix-high`) | Q12: `dev.log` проверен счётчиками — токена нет |
+| S8R-AUDIT-034 — плейсхолдеры секретов проходят preflight | HIGH | `DID NOT RAISE RuntimeError` → чёрный список `change-me`, ≥ 32 байт, ≥ 8 символов; мастер-ключ в lifespan | `b02f784` | ТЗ §7.3: порог 32 байт (было «64 символа», не проверялось) |
+| S8R-AUDIT-035 — смена пароля не гасит другие сессии | HIGH | `DID NOT RAISE ValueError` ×2 → `users.token_version` + claim `ver`, отзыв всех пар при смене пароля и reuse refresh | `c7c3775` | миграция `c5e8b2a7f913`; принятый риск: потерянный ответ /refresh разлогинивает все устройства |
+| S8R-AUDIT-036 — traceback печатает токен брокера | HIGH | «локал api_key утёк» (12 failed) → `plain_traceback`, `mask_secrets` → `***`, `error=str(e)` в prefetch/auth | `2414d59` | Q12: `dev.log` проверен счётчиками — токена нет |
+| S8R-AUDIT-093 — календарь MOEX без ISS-клиента | HIGH | `no attribute 'set_calendar_service'` → ISS `dailytable`, единый экземпляр | `bca0cec` | ресурс ISS был неверный (gotcha-70); Сб/Вс неторговые — **вопрос заказчику** о торгах выходного дня |
+| S8R-AUDIT-007 — сбой опроса брокера помечает сделку `failed` | HIGH | `assert 'failed' == 'pending'` ×2 → сбой опроса/отмены = `still_pending` | `a5f5c5b` | NOT_FOUND входного ордера → решается в 024 (клиентский ключ) |
+| S8R-AUDIT-089 — дивиденды/купоны без `lot_size` | HIGH | `100.00 == 1000.00` → штуки = лоты × lot_size | `6012089` | НКД на бумагу; семантика `nkd_*` → S8R-FIX-006 |
+| S8R-AUDIT-090 — начисление до отсечки, нет rollback | HIGH | `assert True is False`; `1000.00 == 0.00` → дата реестра + ex-date по календарю, rollback | `6e5a6c2` (wt B, перенос после 024) | /code-review: уведомления после rollback, закрытая после ex-date позиция — исправлено |
 
 ### Новые находки цикла (заведены, не чинились)
 
@@ -79,6 +83,28 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
   2. Правка: `vi.useFakeTimers()`/`findBy*` с явным `timeout`, либо `testTimeout` для файла с обоснованием; не поднимать глобальный таймаут.
   3. Готово, когда: 5 полных прогонов подряд под нагрузкой зелёные.
 Связанные: gotcha-40 (`userEvent` vs `fireEvent`), gotcha-46.
+
+### S8R-FIX-006 — `live_trades.nkd_entry/nkd_exit`: колонку никто не пишет, а tax и корп. действия трактуют её по-разному
+Аспект: K | Severity: low | Объём: S
+Где: `backend/app/trading/*` (писателя `nkd_entry`/`nkd_exit` нет), `backend/app/corporate_actions/service.py::process_coupon` (НКД — на одну бумагу × штуки, S8R-AUDIT-089), `backend/app/tax/service.py::_build_fifo_queue` (`nkd_exit − nkd_entry` как сумма по позиции, без × количество).
+Что не так: семантика поля не зафиксирована; при появлении писателя купон и налоговая база разойдутся (найдено DEV-AUDIT-089).
+Чем грозит: неверный НКД в 3-НДФЛ или в P&L облигаций, как только поле начнут заполнять.
+Как исправить: зафиксировать в ТЗ (модель `live_trades`) «НКД на одну облигацию, ₽»; tax → `× quantity_units`; тест на облигацию с 5 бумагами.
+Связанные: S8R-AUDIT-089, S8R-AUDIT-095, S8R-AUDIT-096.
+
+### S8R-FIX-007 — UI: статус сделки `pending` («ожидает подтверждения брокера») не подписан в торговых компонентах
+Аспект: L | Severity: low | Объём: S
+Где: `frontend/src/components/trading/**` (подписи статусов `LiveTrade` — нет `pending`; есть только у бэктестов).
+Что не так: после S8R-AUDIT-007 сделка при молчании брокера остаётся `pending` дольше; пользователь не видит, что ордер ждёт подтверждения (найдено DEV-AUDIT-007).
+Как исправить: подпись/бейдж «ожидает подтверждения брокера» + vitest; скриншот playwright.
+Связанные: S8R-AUDIT-007, S8R-AUDIT-024.
+
+### S8R-FIX-008 — Корп. действия: подпись «дата отсечки» показывает дату реестра; сплит без отсечки по `opened_at`; расписание джобы расходится с ФТ/ТЗ
+Аспект: K/Q | Severity: low | Объём: S
+Где: `backend/app/scheduler/service.py` (~245, текст уведомления «дата отсечки {ex_date}» — в `ex_date` лежит `registryclosedate` ISS), `backend/app/corporate_actions/service.py::process_split` (применяется ко всем открытым позициям на момент обработки), ФТ/ТЗ «ежедневно 08:00 MSK» vs джоба `check_corporate_actions` раз в 6 ч (найдено DEV-AUDIT-090).
+Что не так: пользователь видит неверную «дату отсечки» (на день позже ex-date); документы описывают другое расписание.
+Как исправить: в уведомлении — «дата закрытия реестра» или вычисленный ex-date (`accrual_ex_date`); ФТ/ТЗ — фактическое расписание; сплит — оценить, нужна ли отсечка по дате (решение по ФТ §6.4).
+Связанные: S8R-AUDIT-090, S8R-AUDIT-091.
 
 ---
 
