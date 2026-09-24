@@ -4,6 +4,84 @@
 
 ---
 
+## Аудит 2026-09 — исполнение (с 2026-09-24; ветки `s8r/fix-<пакет>` от `develop` `7ddb970`)
+
+Цикл фиксов по карточкам `S8R-AUDIT-NNN` из `audit_2026-09.md` (промпт `prompt_s8r_fixes.md`,
+ответы заказчика и контрольные точки — `fixes_progress.md`). Объём — все четыре пакета
+(Q1=d), DEV-субагенты ≤ 2 параллельно (Q8=b), ветка на пакет, мерж — по команде заказчика.
+PR #27 (доказательные тесты) смёржен в `develop` первым шагом → `7ddb970`; гейт «до»:
+2625 passed / 25 xfailed / 0 failed, coverage 87 %, vitest 924 + 2 expected fail.
+
+| Карточка | Пакет | RED → GREEN | Коммит | Примечание |
+|---|---|---|---|---|
+| S8R-AUDIT-033 — `/auth/setup` открыт всегда | BLOCKER | `assert 201 == 403` → 403 «Регистрация закрыта»; гонка двух setup → ровно один admin | `967fe10` | + `POST /admin/users`; лимитер `auth` для setup, `setup-status` — `general` (/code-review) |
+| S8R-AUDIT-002 — инъекция через `SOURCE` | BLOCKER | `DID NOT RAISE` ×2 → схема полей `BLOCK_FIELD_SCHEMA`, словарь источников в кодогене | `47bf073` | Grid Search тоже проверяет блоки; int-переполнение → 422 (/code-review) |
+| S8R-AUDIT-001 — побег из песочницы через `datetime.sys` | BLOCKER | `is_safe=True`, `success=True … CWD=` → прокси с allow-list, исполняется только код из IR (Q4-001=a) | `c6bf111` | fallback `generated_code`, legacy live-путь, `/sandbox/*` удалены; попутно закрыта **S8R-AUDIT-028**, часть 019; gotcha-61 |
+| S8R-AUDIT-034 — плейсхолдеры секретов проходят preflight | HIGH | `DID NOT RAISE RuntimeError` → чёрный список `change-me`, ≥ 32 байт, ≥ 8 символов; мастер-ключ в lifespan | `d42d1c4` (wt B, в `s8r/fix-high`) | ТЗ §7.3: порог 32 байт (было «64 символа», не проверялось) |
+| S8R-AUDIT-035 — смена пароля не гасит другие сессии | HIGH | `DID NOT RAISE ValueError` ×2 → `users.token_version` + claim `ver`, отзыв всех пар при смене пароля и reuse refresh | `ab41b18` (wt B, для `s8r/fix-high`) | миграция `c5e8b2a7f913`; принятый риск: потерянный ответ /refresh разлогинивает все устройства |
+| S8R-AUDIT-036 — traceback печатает токен брокера | HIGH | «локал api_key утёк» (12 failed) → `plain_traceback`, `mask_secrets` → `***`, `error=str(e)` в prefetch/auth | `b053904` (wt B, для `s8r/fix-high`) | Q12: `dev.log` проверен счётчиками — токена нет |
+
+### Новые находки цикла (заведены, не чинились)
+
+### S8R-FIX-001 — `SOURCE=volume`: live-интерпретатор считает индикатор по close, backtrader — по volume
+Аспект: G/H | Severity: low | Объём: S
+Где: `backend/app/strategy/evaluator.py:100-105` (`_series`: источник вне `open/high/low/close` → `closes`), `backend/app/strategy/ir_codegen.py` (`_BT_SOURCE_EXPR["volume"] = "self.data.volume"`, S8R-AUDIT-002).
+Что не так: для `SOURCE="volume"` бэктест строит SMA/EMA/Bollinger по объёму, а live-интерпретатор и parity-сверка — по цене закрытия; фронт `volume` в выпадающем списке не предлагает, но API его принимает (allow-list 002).
+Доказательство: код `evaluator._series` — `src in ("open","high","low","close") else closes`; найдено DEV-AUDIT-002.
+Чем грозит: стратегия, собранная через API/Режим B/AI с `SOURCE=volume`, в бэктесте и в live ведёт себя по-разному (parity `count_mismatch`).
+Как исправить:
+  1. Сначала тест: `tests/unit/test_strategy/test_evaluator_source_volume.py::test_volume_source_uses_volume_series` — SMA по volume в интерпретаторе совпадает с backtrader; сейчас RED.
+  2. Правка: `_series` — ветка `volume` → ряд объёмов; либо убрать `volume` из `SOURCE_VALUES` (синхронно с фронтом). Чего НЕ трогать: `safediv`/`StochasticFast` (BUG-31).
+  3. Готово, когда: тест GREEN; parity-тесты зелёные.
+  4. Прочитать: gotcha-35.
+Связанные: S8R-AUDIT-002, S8R-AUDIT-087 (б).
+
+### S8R-FIX-002 — `test_users_cli.py` проходит вакуумно: CLI без ключей падает на импорте настроек
+Аспект: O | Severity: low | Объём: S
+Где: `backend/tests/**/test_users_cli.py` (запуск `python -m app.cli.users` без `SECRET_KEY`/`ENCRYPTION_KEY` в окружении).
+Что не так: тест стартует CLI в подпроцессе без production-ключей; процесс падает на валидаторе настроек (а после S8R-AUDIT-034 — тем более), а утверждения теста этого не различают — тест зелёный, хотя CLI не выполнился (найдено DEV-AUDIT-034).
+Чем грозит: регресс CLI (`grant_admin`, сброс пароля) не ловится тестами.
+Как исправить:
+  1. Сначала тест: утверждение на код возврата 0 и на ожидаемый эффект в БД; сейчас RED.
+  2. Правка: передать в окружение подпроцесса `DEBUG=true` (или валидные тестовые ключи) и `DATABASE_URL` временной БД.
+  3. Готово, когда: мутация «сломать CLI» → тест красный.
+Связанные: S8R-AUDIT-034, S8R-AUDIT-053.
+
+### S8R-FIX-003 — ТЗ §8.4 описывает JSON-логи с ротацией, которых нет; `logs/dev.log` растёт без ротации
+Аспект: M/Q | Severity: low | Объём: S
+Где: ТЗ §8.4 (`logs/app.log|broker.log|audit.log`, `RotatingFileHandler` 50 МБ × 5), фактически — `scripts/start.sh:29` (`tee -a logs/dev.log`), `app/common/logging_config.py` (только ConsoleRenderer в stdout; `JSONRenderer`/`FileHandler` в `app/` нет).
+Что не так: документ описывает несуществующую подсистему логов; реальный файл стенда пишется `tee` без ротации (у заказчика 25 МБ на 08.07); права по умолчанию `rw-r--r--` (найдено DEV-AUDIT-036 и при проверке Q12).
+Чем грозит: рост файла без предела; ожидания эксплуатации (ротация, раздельные логи брокера/аудита) не выполняются; файл с потенциально чувствительными данными читается всеми локальными пользователями.
+Как исправить:
+  1. Решить: реализовать ротацию (например, `RotatingFileHandler` в `configure_logging` при `LOG_FILE`) или привести ТЗ §8.4 к факту (stdout + `tee` в `start.sh`, в Docker — `docker logs`).
+  2. `start.sh`: `umask 077` перед созданием файла / `chmod 600`.
+  3. Готово, когда: ТЗ §8.4 совпадает с кодом; права файла 600.
+Связанные: S8R-AUDIT-036, S8R-AUDIT-088, аспект M (ротация логов).
+
+### S8R-FIX-004 — Grid Search: имена параметров Bollinger расходятся между автодополнением и «Применить параметры»
+Аспект: H/I | Severity: low | Объём: S
+Где: `backend/app/backtest/router.py:~1581` (`GET /backtest/strategy-params/{id}` — имена из кодогена: `bollinger_period`/`bollinger_dev`), `backend/app/strategy/router.py` `create_version_from_params` + `strategy/params.py` (ожидают `bb_period`/`bb_dev`).
+Что не так: одна и та же стратегия называет параметры Bollinger по-разному в двух извлекателях (подтверждено прогоном обоих на одном workspace, /code-review 001, 2-й проход).
+Чем грозит: применить результат перебора только по Bollinger → 422 «параметры не найдены»; вместе с другими — значение Bollinger молча отбрасывается.
+Как исправить:
+  1. Сначала тест: один workspace с Bollinger → множества имён из `strategy-params` и из извлекателя `apply-params` совпадают; сейчас RED.
+  2. Правка: единый источник имён параметров — кодоген IR (`ir_codegen`); `params.py` сопоставляет по нему. Чего НЕ трогать: имена уже сохранённых результатов grid (миграция данных не нужна — имена вычисляются).
+  3. Готово, когда: тест GREEN; E2E grid ≥ baseline.
+Связанные: S8R-AUDIT-001, S8R-AUDIT-080.
+
+### S8R-FIX-005 — vitest: `StrategyEditPageDelete` «Удалить все при частичном отказе» таймаутит (5000 мс) в полном прогоне под нагрузкой
+Аспект: O | Severity: low | Объём: S
+Где: `frontend/src/components/strategy/__tests__/StrategyEditPageDelete.test.tsx:125`.
+Что не так: при load average ≥ 10 (IDE, соседние процессы) тест стабильно падает по таймауту 5000 мс в полном `pnpm test` (95 с, 133 файла), отдельно — 3/3 зелёный; тот же эффект видел DEV-AUDIT-093 в трёх модальных файлах. Зона фронта циклом фиксов не менялась.
+Чем грозит: ложно-красный гейт vitest на загруженной машине → соблазн «чинить» рабочий код или игнорировать красный гейт.
+Как исправить:
+  1. Сначала: воспроизвести под искусственной нагрузкой (`stress`/параллельный прогон); найти ожидание, которое ждёт реальный таймер/анимацию Mantine.
+  2. Правка: `vi.useFakeTimers()`/`findBy*` с явным `timeout`, либо `testTimeout` для файла с обоснованием; не поднимать глобальный таймаут.
+  3. Готово, когда: 5 полных прогонов подряд под нагрузкой зелёные.
+Связанные: gotcha-40 (`userEvent` vs `fireEvent`), gotcha-46.
+
+---
+
 ## Аудит «с нуля» — 2026-09-17…23 (ветка кода `s8r/audit` от `develop` `eb769cc`; ничего не чинилось, только доказательные тесты)
 
 Независимый аудит кода `moex-terminal` (`origin/develop` eb769cc, код b0fd756) и документации по аспектам A–T
