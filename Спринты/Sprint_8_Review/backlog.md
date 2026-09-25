@@ -156,6 +156,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
 
+### S8R-FIX-016 — `test_same_commission_and_net_pnl` зависит от реального времени запуска
+Аспект: Q | Severity: low | Объём: XS
+Где: `backend/tests/test_trading/test_sandbox_commission.py::TestSandboxMatchesPaper::test_same_commission_and_net_pnl`; проверка торговых часов при закрытии sandbox/real — `app/trading/engine.py` (~3936, с `5352671`, S8 W8g). Найдено ревьюером пакета HIGH 2026-09-25.
+Что не так: тест закрывает sandbox-сделку в реальном «сейчас»; вне окна 10:00–23:50 МСК закрытие отклоняется `ValidationError: Закрытие позиций возможно только в торговые часы MOEX`, тест красный. Ночной прогон гейта даёт ложное падение; CI днём (UTC) проходит.
+Как исправить: подменить проверку торговых часов (или время) в тесте через `monkeypatch`, как в соседних тестах ручного закрытия.
+Связанные: S8R-MANUAL-CLOSE-SANDBOX-REAL.
+
 ### S8R-FIX-015 — Направление сделки проверяется inline-копиями; paper-выручка по `volume_lots`; paper-просадка без нереализованного P&L
 Аспект: D/K | Severity: low | Объём: S
 Где: `in ("buy","long")` — `risk_monitor.py` 128/236/640/780, `unrealized.py` 120, `service.py` 479/714, `engine.py` ~3958 (эталон — `models.is_long_direction`, S8R-AUDIT-032); `engine._apply_close_and_settle` — paper `proceeds` по `volume_lots`, а не `RiskMonitor.position_lots`; CB paper max_drawdown без unrealized (найдено DEV-AUDIT-032, /code-review).
