@@ -33,7 +33,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-025 | HIGH | ✅ (+ контрольная правка `fdfbb5c`) | `filled_lots=6`; `P&L … 700.00`; `множитель … 7` | 14 тестов | «volume_lots в P&L», «выход из опроса на partially_filled» → red | 2927/16xf/0; ruff 0; mypy ok; bandit 0; tsc/lint/build 0; vitest 934 | `1bba46b` | — | миграция `e9e5c919fbbf`; /code-review 6 находок исправлены; DEV на Opus |
 | S8R-AUDIT-026 | HIGH | ✅ | `assert 1 == 0` (бюджет < лота); CB `размер 6000 > 5000`; `после resume нет уведомления` | test_position_sizing_budget + CB + 2 доказательных | «max(1)» → 7 failed | 2951/13xf/0; ruff 0; mypy ok; bandit 0; tsc/lint/build 0; vitest 937 | `cbd6541` | — | /code-review 4 находки; фронт-предупреждение убрано (S8R-FIX-014) |
 | S8R-AUDIT-080 | HIGH | ✅ | `assert 201 == 422`; `DID NOT RAISE ValueError`; live `Decimal('50') == Decimal('98')` (SL из generated_code) | 53 backend + 4 vitest | «снять gt=0», «без проверки диапазона при сохранении» → red | 2998/12xf/0 (wt B); ruff 0; mypy ok (180); bandit 0; tsc/lint/build 0; vitest 940 + флейк | `10c1504` | — | TP ≤ 100 % (решение DEV, принято); /code-review 3 находки |
-| S8R-AUDIT-032 | HIGH | ⬜ | | | | | | | |
+| S8R-AUDIT-032 | HIGH | ✅ | `assert <LiveTrade …> is None` (13 из 15) | 27 backend | «apply_close без ветки short» → `999900.00 == 1000100`; «снят HOLD-guard»; «гейт CB без exit_trades» → red | 3035/10xf/0; ruff 0; mypy ok (180); bandit 0; tsc/lint/build 0 (итерация 1); vitest — пакет | `c29aa23` | — | Q5=b; /code-review 3 прохода (5 + 6 находок исправлены); DEV на Opus |
 | S8R-AUDIT-068 | HIGH | ✅ | `CheckResult(blocked=False, …)` ×2; статус `Decimal('0') == Decimal('12')`; ревью: ложный `Drawdown 9.09%` по устаревшей цене, пик `1000000 == 1100000` | 9 тестов | «paper-only», «без свежести», «без commit», «pnl IS NOT NULL» → red | 2854/14xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `6fbe378` | — | миграция `f6a2c8e41d93` (down `e9e5c919fbbf`); /code-review: 3 находки исправлены |
 | S8R-AUDIT-069 | HIGH | ✅ | `DID NOT RAISE ValidationError` ×4; гонка ×4 | тесты 069/100/гонки 10/10 + фронт 3 | «снять проверку», «без лока», «аудит до лока» → red | 2845/15xf/0 (wt B); ruff 0; mypy ok; bandit 0; tsc/lint/build 0; vitest 937 | `25e95f9` | — | вместе со 100; stopped — вопрос заказчику |
 | S8R-AUDIT-100 | HIGH | ✅ в составе 069 (`25e95f9`) | `StaleDataError … 0 were matched` | см. 069 | «без лока и перехвата» → red | см. 069 | `25e95f9` | — | | | | | | | | |
@@ -169,7 +169,10 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 
 24. 080: предел тейк-профита 100 % вместо 500 % из рецепта — прежний предел редактора; для short (Q5-032=b) TP выше 100 % даёт цену ≤ 0. Принято.
 
+25. 032 (Q5=b): лог HOLD «сигнал против направления без позиции» — DEBUG, а не warning из рецепта: warning был для варианта «только long» (`short_not_supported`), при short-варианте выход без позиции — штатное состояние после каждого закрытия. Флаг CB `block_shorts` (есть только в API, в UI нет) оставлен без изменения схемы: при значении по умолчанию `True` он запретил бы все short, что противоречит Q5=b; проверка стала защитным инвариантом — **вопрос заказчику**: удалить флаг или сделать его запретом short для real-режима.
+
 ## Новые находки (заведены в backlog, не чинились)
+- S8R-FIX-015 — направление сделки: inline-копии `in ("buy","long")` в 8 местах; paper-выручка по `volume_lots`; paper-просадка без unrealized (low; DEV-032).
 - S8R-FIX-014 — нет эндпоинта корректного лота для формы запуска (low).
 - S8R-FIX-013 — CB: пик только на входах; `DailyStat.peak_equity` мёртвая; дневной лимит без проверки свежести цены (low).
 - S8R-FIX-012 — recovery частичного выхода: P&L на всю позицию при активном partially_filled; события после снятия слушателя теряются (low).
@@ -186,7 +189,6 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 - S8R-FIX-001 — `SOURCE=volume`: live-интерпретатор считает по close, backtrader по volume (low; найдено DEV-002).
 
 ## Следующий шаг
-Цикл идёт (возобновлён после паузы 24.09). Ветка `s8r/fix-high` запушена до `6fbe378` (гейт: 2960 passed / 12 xfailed / 0 failed, head `f6a2c8e41d93`). HIGH закрыто 23 из 25 (+ 028 попутно): остались 080 (DEV, wt B), 032.
-В работе: 080 (DEV Opus, wt B, база 2804eb4 → перенос). 032 стартует после переноса 080 (общие risk_monitor/SL-TP).
-Далее: 032 (Q5=b short). Затем процедура пакета HIGH (E2E, три оси, S-1/S-2/S-7 на счёте #3, vitest в тишине, PR). BLOCKER: PR #28 ждёт команды заказчика на мерж.
+Цикл идёт. Ветка `s8r/fix-high` запушена до `c29aa23`. **HIGH закрыто 25 из 25** (+ 028 попутно): последние 080 `10c1504`, 032 `c29aa23`.
+Далее: процедура пакета HIGH — гейт ветки с покрытием, E2E одним прогоном на своём стенде (`stand.sh up`), vitest в тишине, три оси ревью (req/recipe — `review_HIGH_*.md`, качество — продолжение ревьюера), гонки 10×, PR `s8r/fix-high` → develop; S-1/S-2/S-7 на счёте #3 — понедельник 28.09 с 10:00 МСК (торговые часы). BLOCKER: PR #28 ждёт команды заказчика на мерж.
 Шаблоны и скрипты — scratchpad текущей сессии и копия в `s8r-evidence/fixes/tools/` (при новой сессии — копия).

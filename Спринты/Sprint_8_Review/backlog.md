@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-032 — short: live открывал long, paper-баланс зеркалил P&L short | HIGH | `LiveTrade … is None` → сторона ордера из IR, выход без позиции — HOLD, paper short как в backtrader, сверка со знаком | `c29aa23` | Q5=b, ФТ §1.3/§12.4/§16; `block_shorts` — вопрос заказчику; /code-review 3 прохода |
 | S8R-AUDIT-080 — риск-параметры без типа и диапазона; SL/TP из generated_code | HIGH | `201 == 422`; live SL 50 % из кода → `RiskParams` на всех путях, SL/TP из IR | `10c1504` | TP ≤ 100 % (рецепт 500 %); /code-review 3 находки |
 | S8R-AUDIT-069 + S8R-AUDIT-100 — удаление стратегии с живой сессией; двойное удаление | HIGH | `DID NOT RAISE ValidationError` ×4; `StaleDataError` → 422 с перечнем, лок `strategy_delete`, 404 | `25e95f9` | stopped — вопрос заказчику; /code-review: инверсия лока исправлена |
 | S8R-AUDIT-089 — дивиденды/купоны без `lot_size` | HIGH | `100.00 == 1000.00` → штуки = лоты × lot_size | `6012089` | НКД на бумагу; семантика `nkd_*` → S8R-FIX-006 |
@@ -154,6 +155,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-015 — Направление сделки проверяется inline-копиями; paper-выручка по `volume_lots`; paper-просадка без нереализованного P&L
+Аспект: D/K | Severity: low | Объём: S
+Где: `in ("buy","long")` — `risk_monitor.py` 128/236/640/780, `unrealized.py` 120, `service.py` 479/714, `engine.py` ~3958 (эталон — `models.is_long_direction`, S8R-AUDIT-032); `engine._apply_close_and_settle` — paper `proceeds` по `volume_lots`, а не `RiskMonitor.position_lots`; CB paper max_drawdown без unrealized (найдено DEV-AUDIT-032, /code-review).
+Что не так: смена набора алиасов направления требует правки ~10 мест (одно — `get_positions` — уже расходилось, исправлено в 032); paper исполняется целиком, поэтому `volume_lots == filled_lots` и денежного дефекта сейчас нет, но формула расходится с sandbox/real; paper-просадка по реализованному P&L — одинаково для long и short.
+Как исправить: заменить копии на `is_long_direction`; paper-выручку считать по `position_lots`; unrealized в paper-просадке — той же ценой, что в 068.
+Связанные: S8R-AUDIT-032, S8R-AUDIT-025, S8R-AUDIT-068.
 
 ### S8R-FIX-014 — Нет эндпоинта корректного размера лота для формы запуска; предупреждение «бюджет меньше лота» невозможно
 Аспект: L/H | Severity: low | Объём: S
