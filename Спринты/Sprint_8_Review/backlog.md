@@ -22,8 +22,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-036 — traceback печатает токен брокера | HIGH | «локал api_key утёк» (12 failed) → `plain_traceback`, `mask_secrets` → `***`, `error=str(e)` в prefetch/auth | `2414d59` | Q12: `dev.log` проверен счётчиками — токена нет |
 | S8R-AUDIT-093 — календарь MOEX без ISS-клиента | HIGH | `no attribute 'set_calendar_service'` → ISS `dailytable`, единый экземпляр | `bca0cec` | ресурс ISS был неверный (gotcha-70); Сб/Вс неторговые — **вопрос заказчику** о торгах выходного дня |
 | S8R-AUDIT-007 — сбой опроса брокера помечает сделку `failed` | HIGH | `assert 'failed' == 'pending'` ×2 → сбой опроса/отмены = `still_pending` | `a5f5c5b` | NOT_FOUND входного ордера → решается в 024 (клиентский ключ) |
+| S8R-AUDIT-024 — «нет ответа» = «ордера нет» (вход/отмена/выход) | HIGH | `18 failed` (`AttributeError client_order_id`) → клиентский ключ ордера + единое правило разбора состояния | `9eb05c2` | миграция `d4f1a9c2b7e0`; 3 прохода /code-review (21 находка) исправлены; gotcha-71; частичное закрытие → 025 |
 | S8R-AUDIT-089 — дивиденды/купоны без `lot_size` | HIGH | `100.00 == 1000.00` → штуки = лоты × lot_size | `6012089` | НКД на бумагу; семантика `nkd_*` → S8R-FIX-006 |
-| S8R-AUDIT-090 — начисление до отсечки, нет rollback | HIGH | `assert True is False`; `1000.00 == 0.00` → дата реестра + ex-date по календарю, rollback | `6e5a6c2` (wt B, перенос после 024) | /code-review: уведомления после rollback, закрытая после ex-date позиция — исправлено |
+| S8R-AUDIT-090 — начисление до отсечки, нет rollback | HIGH | `assert True is False`; `1000.00 == 0.00` → дата реестра + ex-date по календарю, rollback | `04fb5cb` | /code-review: уведомления после rollback, закрытая после ex-date позиция — исправлено |
+| S8R-AUDIT-091 — сплиты и купоны не детектируются | HIGH | `ImportError corporate_action_warning`; `(1000, 1.5) == (10, 150)` → ISS splits/bondization, отсечка сплита по `opened_at`, предупреждение бэктеста | `d138ef1` | Q5-091=a, без back-adjust; /code-review: 3 находки исправлены |
+| S8R-AUDIT-092 — backup/restore не атомарен | HIGH | `restore не использует os.replace`; `DID NOT RAISE BackupError` → Backup API, temp+os.replace, flock, CLI-проверка сервера | `464b8cd` | /code-review: 4 находки (WAL, пустая БД, имена) — исправлены; gotcha-72 |
+| S8R-AUDIT-055 — прод-SPA зашивает localhost:8000 | HIGH | `expected 'http://localhost:8000/api/v1' to be '/api/v1'` → `baseUrl.ts`, dev-proxy, preflight CORS_ORIGINS, CI-smoke | `c93e1ad` | 2 `it.fails` сняты; vitest 934 |
+| S8R-AUDIT-078 — отмена grid не останавливает Pool | HIGH | `воркеры живы после cancel`; `4 > лимита 2` → Event + terminate, `GridWorkerSlots` | `a3bb857` | /code-review: 2 находки исправлены; gotcha-73 |
 
 ### Новые находки цикла (заведены, не чинились)
 
@@ -105,6 +110,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Что не так: пользователь видит неверную «дату отсечки» (на день позже ex-date); документы описывают другое расписание.
 Как исправить: в уведомлении — «дата закрытия реестра» или вычисленный ex-date (`accrual_ex_date`); ФТ/ТЗ — фактическое расписание; сплит — оценить, нужна ли отсечка по дате (решение по ФТ §6.4).
 Связанные: S8R-AUDIT-090, S8R-AUDIT-091.
+
+### S8R-FIX-009 — `BacktestJobManager.shutdown()` ждёт задачи без таймаута; второй grid при занятых слотах висит в `running/0%`
+Аспект: M/H | Severity: low | Объём: S
+Где: `backend/app/backtest/jobs.py::shutdown` (ожидание задач без предела — gotcha-48), `backend/app/backtest/grid.py::GridWorkerSlots` (ожидание слотов без события прогресса) — найдено DEV-AUDIT-078.
+Что не так: shutdown может затянуться до конца долгого job; пользователь не видит, что его grid ждёт свободных слотов.
+Как исправить: таймаут ожидания в shutdown с отменой; событие/статус `waiting` для прогресса grid.
+Связанные: S8R-AUDIT-078, S8R-AUDIT-074.
 
 ---
 
