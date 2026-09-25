@@ -73,8 +73,15 @@ cp .env.example backend/.env.production
 | `TINVEST_TOKEN` | Production T-Invest API token | Личный кабинет T-Invest |
 | `DATABASE_URL` | SQLite путь внутри контейнера | `sqlite+aiosqlite:////app/data/app.sqlite` (НЕ менять) |
 | `TZ` | Часовой пояс торговли | `Europe/Moscow` (НЕ менять) |
+| `TINVEST_UNARY_TIMEOUT_SEC` | (опционально) Дедлайн одного gRPC-вызова T-Invest, сек (S8R-AUDIT-030); стрим котировок не затрагивает | по умолчанию `10` |
+| `GRID_MAX_WORKERS_TOTAL` | (опционально) Общий предел процессов Grid Search на все параллельные job'ы (S8R-AUDIT-078); `0` — авто `cpu−1` | по умолчанию `0`; уменьшить, если live-торговля соседствует с гридами |
+| `CORS_ORIGINS` | Публичный origin SPA (что видит браузер за Tunnel), через запятую; без него WS отбиваются 403. Preflight: пусто при `DEBUG≠true` → контейнер не стартует, только localhost → предупреждение (S8R-AUDIT-055) | `https://moex.example.com` (+ `http://localhost` для local-only §5.5) |
 | `TELEGRAM_BOT_TOKEN` | (опционально) Telegram уведомления | `@BotFather` |
 | `TELEGRAM_CHAT_ID` | (опционально) ID чата для уведомлений | через bot /start, getUpdates API |
+
+> ℹ️ **SPA собирается с относительными адресами** (`/api/v1`, `wss://<host>`, S8R-AUDIT-055): `VITE_*` задавать не нужно, nginx проксирует `/api` и `/ws`. `ARG VITE_API_BASE_URL` в `frontend/Dockerfile` — только для нестандартной раскладки. Локально (`scripts/start.sh`) ту же роль играет dev-proxy Vite (`/api`, `/ws` → :8000).
+
+> ℹ️ **Остановка контейнера backend** (S8R-AUDIT-074): graceful shutdown рантайма укладывается в 45 с (дожидается записи id отправленного ордера, останавливает сессии, прогоняет recovery). Поэтому в `docker-compose.yml` для `backend` задан `stop_grace_period: 60s` — не уменьшайте его: при значении Docker по умолчанию (10 с) процесс получает SIGKILL посреди записи ответа брокера.
 
 > ⚠️ **`.env.production` НЕ коммитится в git!** Файл уже включён в `.gitignore` (`.env.*`). Перед `git commit` проверьте `git status` — никаких `.env*` в diff не должно быть.
 
@@ -244,7 +251,7 @@ sudo launchctl start com.cloudflare.cloudflared        # если не стар�
 
 ### 6.1 Автоматический backup_job
 
-В `app/scheduler/service.py` зарегистрирован `backup_job` (APScheduler, cron daily 03:00 МСК — см. S7 DEV-1). Пишет snapshot SQLite через `sqlite3 .backup` (WAL-safe, см. Gotcha 19) в `/app/backups/backup_YYYY-MM-DD_HHMMSS.sqlite`.
+В `app/scheduler/service.py` зарегистрирован `backup_job` (APScheduler, cron daily 03:00 МСК — см. S7 DEV-1). Пишет snapshot SQLite через `sqlite3.Connection.backup` (Online Backup API, WAL-safe, gotcha-19) с проверкой `PRAGMA integrity_check` сразу после создания (битый снимок удаляется) в `BACKUP_DIR/backup_YYYY-MM-DD_HHMMSS.sqlite` (при совпадении секунды — суффикс `_2`). `BACKUP_DIR` — настройка (по умолчанию `backups` относительно `backend/`, в контейнере `/app/backups`). Рядом лежит `.lock` — межпроцессная блокировка `flock` для создания и восстановления (планировщик и CLI не пересекаются); каталог должен быть на локальном томе (не NFS/SMB). S8R-AUDIT-092.
 
 Просмотр:
 ```bash
@@ -265,12 +272,21 @@ docker compose exec backend ls -la /app/backups
 
 ### 6.3 Restore
 
-```bash
-# 1. Скопировать нужный backup в место, доступное контейнеру:
-docker compose cp ~/path/to/backup.sqlite backend:/app/data/app.sqlite
+> ⚠️ **С 2026-09-24 (S8R-AUDIT-092)** — не копируйте файл поверх БД вручную (`docker compose cp … app.sqlite`):
+> при непустом `-wal` это теряет подтверждённые транзакции. Восстановление — только через CLI.
 
-# 2. Перезапустить backend (применит миграции если нужно):
-docker compose restart backend
+```bash
+# 1. Остановить backend (restore под живым сервером CLI отклонит, код 3):
+docker compose stop backend
+
+# 2. Положить снимок в BACKUP_DIR (CLI отказывает путям вне него) и восстановить:
+docker compose run --rm backend python -m app.cli.backup restore --path /app/backups/<файл>.sqlite --yes
+#    CLI: проверяет целостность снимка (под локом), снимает текущую БД в before_restore_*
+#    (с WAL), копирует снимок во временный файл и атомарно подменяет БД (os.replace).
+#    --server-stopped — только если порт 8000 занят ЧУЖИМ сервисом.
+
+# 3. Запустить backend (миграции применятся при старте):
+docker compose start backend
 ```
 
 ---
@@ -293,8 +309,32 @@ docker compose ps            # проверить healthy
 После апдейта сверьте, что миграции доехали до головы:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: c5e8b2a7f913 (head)
+docker compose exec backend alembic current   # ожидается: f6a2c8e41d93 (head)
 ```
+
+> **ℹ️ Обновление с версии старше `f6a2c8e41d93` (S8R-AUDIT-068, 2026-09-25).**
+> Ревизия добавляет nullable-колонку `trading_sessions.peak_equity` (пик капитала
+> sandbox/real-сессии для лимита просадки); у существующих сессий пик = стартовый
+> капитал. Обратима (пик теряется); SQLite пересоздаёт таблицу — снимите backup (§6.1).
+
+> **ℹ️ Обновление с версии старше `e9e5c919fbbf` (S8R-AUDIT-025, 2026-09-25).**
+> Ревизия добавляет nullable-колонку `live_trades.lot_size` (размер лота на момент
+> сделки). Старые сделки считаются по прежней деривации, действий не требуется;
+> SQLite пересоздаёт таблицу — перед обновлением снимите backup (§6.1).
+
+> **ℹ️ Обновление с версии старше `b8e4d17c9a52` (S8R-AUDIT-101, 2026-09-25).**
+> Ревизия добавляет `UNIQUE (user_id, broker_type, account_id)` на `broker_accounts`.
+> Перед этим дубли одного счёта сливаются: остаётся запись, на которую ссылаются
+> торговые сессии, при равенстве — активная, затем более ранняя; ссылки остальных
+> перевешиваются на неё, лишние удаляются; если среди удалённых была активная —
+> выжившая включается. Обратима по схеме; слитые дубли `downgrade` не восстанавливает.
+> SQLite пересоздаёт таблицу — перед обновлением снимите backup (§6.1).
+
+> **ℹ️ Обновление с версии старше `d4f1a9c2b7e0` (S8R-AUDIT-024, 2026-09-24).**
+> Ревизия добавляет в `live_trades` две nullable-колонки `client_order_id` и
+> `exit_client_order_id` (ключ ордера для выяснения его судьбы у брокера при
+> потерянном ответе). Существующие данные не меняются, миграция обратима; SQLite
+> пересоздаёт таблицу (`batch_alter_table`) — перед обновлением снимите backup (§6.1).
 
 > **ℹ️ Обновление с версии старше `c5e8b2a7f913` (S8R-AUDIT-035, 2026-09-24).**
 > Ревизия добавляет `users.token_version` (`INTEGER NOT NULL DEFAULT 0`). Смена пароля

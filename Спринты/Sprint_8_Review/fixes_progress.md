@@ -21,31 +21,31 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-033 | BLOCKER | ✅ | `assert 201 == 403`; гонка `[201, 201] == [201, 403]`; admin `404 == 422`; лимитер `'general' == 'auth'` | 3 новых файла тестов + доказательный | setup без гейта → 3 failed; setup-status→auth → 1 failed | 2633/24xf/0; ruff 0; mypy ok; bandit 0; tsc 0; lint 0; build ok; vitest 926 | `967fe10` | — / — / — (после пакета) | /code-review: setup-status попадал в лимит auth — исправлено |
 | S8R-AUDIT-002 | BLOCKER | ✅ | `DID NOT RAISE (ValidationError, ValueError)` ×2 | 2 доказательных + 15 новых + grid 422 | `_INDICATOR_COMMON = {}` → 12 failed; grid без проверки / OverflowError → red | 2662/23xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт без изменений | `47bf073` (cherry-pick `856d05f`) | — / — / — | /code-review: grid обходил проверку, int-переполнение → 500 — исправлено |
 | S8R-AUDIT-001 | BLOCKER | ✅ | `AnalysisResult(is_safe=True, issues=[])`; `ExecutionResult(success=True, output='S8R_AUDIT_001_CWD=…')`; `DID NOT RAISE` (engine, bt.sys); `assert 202 == 422` (D1-04) | escape 30 + no_legacy 3 + restore/resume + router 404 | «голый datetime в namespace» → граница красная; `kind` из сырого type → red | 2711/19xf/0; ruff 0; mypy ok (179); bandit 0; tsc 0; lint 0; build ok; vitest 926 | `c6bf111` | — | /code-review ×2 (9+3 находки) исправлены; 028 закрыта целиком, 019 частично; gotcha-61 |
-| S8R-AUDIT-034 | HIGH | ✅ (не запушено) | `DID NOT RAISE <class 'RuntimeError'>` (18 failed); lifespan без проверки ключа | 39 passed | `reason = None` → 13 failed | 2692/21xf/0; ruff 0; mypy ok; bandit 0; tsc 0; lint 0; build ok; vitest 926 | `d42d1c4` (wt B, для `s8r/fix-high`) | — | /code-review не требуется (config/main/scripts) |
-| S8R-AUDIT-035 | HIGH | ✅ (не запушено) | `DID NOT RAISE <class 'ValueError'>` ×2; `DID NOT RAISE AuthenticationError`; ws `TypeError … await`; ревизии нет (6 failed) | 6 passed + round-trip | «не инкрементировать версию» → 3 failed | 2698/21xf/0; ruff 0; mypy ok; bandit 0; tsc 0; lint 0; build ok; vitest 926 | `ab41b18` (wt B) | — | миграция `c5e8b2a7f913` (down `a7b8c9d0e1f2`); /code-review: 2 находки — риск рецепта, принят |
-| S8R-AUDIT-036 | HIGH | ✅ (не запушено) | «локал api_key утёк в traceback»; `api_key=SENTINEL…` в выводе (12 failed) | 13 passed | «убрать plain_traceback» → red | 2711/21xf/0; ruff 0; mypy ok; bandit 0; tsc 0; lint 0; build ok; vitest 926 | `b053904` (wt B) | — | /code-review: чисто; **gotcha-67** записан (INDEX v25) |
-| S8R-AUDIT-007 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-024 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-030 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-074 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-075 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-061 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-025 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-026 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-080 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-032 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-068 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-069 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-100 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-055 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-078 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-093 | HIGH | 🔄 DEV (wt B, от b053904) | | | | | | | |
-| S8R-AUDIT-089 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-090 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-091 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-092 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-101 | HIGH | ⬜ | | | | | | | |
-| S8R-AUDIT-099 | HIGH | ⬜ | | | | | | | |
+| S8R-AUDIT-034 | HIGH | ✅ | `DID NOT RAISE <class 'RuntimeError'>` (18 failed); lifespan без проверки ключа | 39 passed | `reason = None` → 13 failed | 2692/21xf/0; ruff 0; mypy ok; bandit 0; tsc 0; lint 0; build ok; vitest 926 | `b02f784` | — | /code-review не требуется (config/main/scripts) |
+| S8R-AUDIT-035 | HIGH | ✅ | `DID NOT RAISE <class 'ValueError'>` ×2; `DID NOT RAISE AuthenticationError`; ws `TypeError … await`; ревизии нет (6 failed) | 6 passed + round-trip | «не инкрементировать версию» → 3 failed | 2698/21xf/0; ruff 0; mypy ok; bandit 0; tsc 0; lint 0; build ok; vitest 926 | `c7c3775` | — | миграция `c5e8b2a7f913` (down `a7b8c9d0e1f2`); /code-review: 2 находки — риск рецепта, принят |
+| S8R-AUDIT-036 | HIGH | ✅ | «локал api_key утёк в traceback»; `api_key=SENTINEL…` в выводе (12 failed) | 13 passed | «убрать plain_traceback» → red | 2711/21xf/0; ruff 0; mypy ok; bandit 0; tsc 0; lint 0; build ok; vitest 926 | `2414d59` | — | /code-review: чисто; **gotcha-67** записан (INDEX v25) |
+| S8R-AUDIT-007 | HIGH | ✅ | `assert 'failed' == 'pending'` (×2) | 16 passed | «вернуть failed в except» → 3 failed | 2765/16xf/0; ruff 0; mypy ok; bandit 0; tsc/lint/build 0; vitest 925+1 флейк | `a5f5c5b` | — | /code-review чисто |
+| S8R-AUDIT-024 | HIGH | ✅ | `18 failed, 1 passed` (`AttributeError: client_order_id`); круги ревью: `17`/`11`/`2 failed` | 46 тестов `test_order_path_unknown_outcome.py` | «без запроса статуса», «без порога», «recovery без лока», «повтор внутри except» → red | 2820/16xf/0; ruff 0; mypy ok; bandit 0; tsc/lint/build 0; фронт не менялся | `9eb05c2` | — | миграция `d4f1a9c2b7e0` (down `c5e8b2a7f913`); /code-review ×3; gotcha-71 |
+| S8R-AUDIT-030 | HIGH | ✅ | `E TimeoutError` (9 failed / 1 passed); ревью: `DID NOT RAISE BrokerError` ×2, `__cause__ = None` | 14 + 119 смежных | «без scope», «проглотить таймаут», «return False» → red | 2871/16xf/0; ruff 0; mypy ok; bandit 0; tsc/lint/build 0; фронт не менялся | `c04379b` | — | Q5=10 с; /code-review: 3 находки исправлены; gotcha-74 |
+| S8R-AUDIT-074 | HIGH | ✅ | `assert None == 'sb-stop-1'` (broker_order_id потерян); `recovery не прогнан при shutdown … assert []`; ревью: `10.01s`, `3.24s` для 6 сессий | 5 тестов | «без shield», «без commit после отправки» → red | 2885/16xf/0; ruff 0; mypy ok; bandit 0; tsc/lint/build 0; фронт не менялся | `c4965e7` | — | + `stop_grace_period: 60s`; /code-review: 3 находки исправлены; gotcha-75 | | | | | | | |
+| S8R-AUDIT-075 | HIGH | ✅ | `ордер в полёте должен дойти до пользователя / assert 0 == 1`; гонка: лишнее «не выполнено»; ревью: `OperationalError` выходит из check_sl_tp; кэш не чистится | 7 тестов | «вернуть таймер», «raise вместо None», «без prune» → red | 2894/16xf/0; ruff 0; mypy ok; bandit 0; фронт не менялся | `698d0e7` | — | /code-review: 2 находки исправлены | | | | | | | |
+| S8R-AUDIT-061 | HIGH | ✅ | `assert 'FIGI-B' in ['FIGI-A']` (команда съедена); `unexpected keyword argument 'on_error'`; `singleton не снят`; `release 0 == 1` + 7 RED по кругам ревью | тесты reconnect/ack/терминала/держателей | «общая очередь», «игнорировать ack», «terminal=None», «без перепроверки listener» → red | 2834/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `54e88dc` | — | /code-review ×2 (4+3); gotcha-76 |
+| S8R-AUDIT-025 | HIGH | ✅ (+ контрольная правка `fdfbb5c`) | `filled_lots=6`; `P&L … 700.00`; `множитель … 7` | 14 тестов | «volume_lots в P&L», «выход из опроса на partially_filled» → red | 2927/16xf/0; ruff 0; mypy ok; bandit 0; tsc/lint/build 0; vitest 934 | `1bba46b` | — | миграция `e9e5c919fbbf`; /code-review 6 находок исправлены; DEV на Opus |
+| S8R-AUDIT-026 | HIGH | ✅ | `assert 1 == 0` (бюджет < лота); CB `размер 6000 > 5000`; `после resume нет уведомления` | test_position_sizing_budget + CB + 2 доказательных | «max(1)» → 7 failed | 2951/13xf/0; ruff 0; mypy ok; bandit 0; tsc/lint/build 0; vitest 937 | `cbd6541` | — | /code-review 4 находки; фронт-предупреждение убрано (S8R-FIX-014) |
+| S8R-AUDIT-080 | HIGH | ✅ | `assert 201 == 422`; `DID NOT RAISE ValueError`; live `Decimal('50') == Decimal('98')` (SL из generated_code) | 53 backend + 4 vitest | «снять gt=0», «без проверки диапазона при сохранении» → red | 2998/12xf/0 (wt B); ruff 0; mypy ok (180); bandit 0; tsc/lint/build 0; vitest 940 + флейк | `10c1504` | — | TP ≤ 100 % (решение DEV, принято); /code-review 3 находки |
+| S8R-AUDIT-032 | HIGH | ✅ | `assert <LiveTrade …> is None` (13 из 15) | 27 backend | «apply_close без ветки short» → `999900.00 == 1000100`; «снят HOLD-guard»; «гейт CB без exit_trades» → red | 3035/10xf/0; ruff 0; mypy ok (180); bandit 0; tsc/lint/build 0 (итерация 1); vitest — пакет | `c29aa23` | — | Q5=b; /code-review 3 прохода (5 + 6 находок исправлены); DEV на Opus |
+| S8R-AUDIT-068 | HIGH | ✅ | `CheckResult(blocked=False, …)` ×2; статус `Decimal('0') == Decimal('12')`; ревью: ложный `Drawdown 9.09%` по устаревшей цене, пик `1000000 == 1100000` | 9 тестов | «paper-only», «без свежести», «без commit», «pnl IS NOT NULL» → red | 2854/14xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `6fbe378` | — | миграция `f6a2c8e41d93` (down `e9e5c919fbbf`); /code-review: 3 находки исправлены |
+| S8R-AUDIT-069 | HIGH | ✅ | `DID NOT RAISE ValidationError` ×4; гонка ×4 | тесты 069/100/гонки 10/10 + фронт 3 | «снять проверку», «без лока», «аудит до лока» → red | 2845/15xf/0 (wt B); ruff 0; mypy ok; bandit 0; tsc/lint/build 0; vitest 937 | `25e95f9` | — | вместе со 100; stopped — вопрос заказчику |
+| S8R-AUDIT-100 | HIGH | ✅ в составе 069 (`25e95f9`) | `StaleDataError … 0 were matched` | см. 069 | «без лока и перехвата» → red | см. 069 | `25e95f9` | — | | | | | | | | |
+| S8R-AUDIT-055 | HIGH | ✅ | `expected 'http://localhost:8000/api/v1' to be '/api/v1'`; `'ws://localhost:8000' not to contain 'localhost:8000'`; preflight `'CORS_ORIGINS' in ''` | 8 vitest + 14 preflight | «абсолютный дефолт» → red | 2800/16xf/0; ruff 0; mypy ok; bandit 0; tsc 0; lint 0; build ok (0× localhost:8000); vitest 934 | `c93e1ad` | — | dev-proxy Vite добавлен (его не было) | | | | | | | |
+| S8R-AUDIT-078 | HIGH | ✅ | `воркеры живы после cancel: pids=[…]`; `4 > лимита 2`; `job осталась в реестре _tasks` | 6 passed ≈ 3 с | «terminate только при отмене» → red | 2806/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `a3bb857` | — | /code-review: 2 находки исправлены; gotcha-73 | | | | | | | |
+| S8R-AUDIT-093 | HIGH | ✅ | `AttributeError: … no attribute 'set_calendar_service'`; `assert None is True` (7 failed) | 7 passed | исключение ISS не применяется → `is_trading_day(2024-04-27)` False; без сброса календаря в conftest → 1 failed | 2718/21xf/0 (wt B); ruff 0; mypy ok; bandit 0 | `bca0cec` | — | ⏸→решение оркестратора: источник `engines/stock.json` dailytable; Сб/Вс неторговые (вопрос заказчику); /code-review: изоляция тестов исправлена; gotcha-70 |
+| S8R-AUDIT-089 | HIGH | ✅ | `Decimal('100.00') == Decimal('1000.00')`; купон `137.50 == 875.00` | 4 passed | «без множителя» → red | 2722/21xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `6012089` | — | /code-review чисто |
+| S8R-AUDIT-090 | HIGH | ✅ | `assert True is False` (processed); `Decimal('1000.00') == Decimal('0.00')` | 5 passed | «без фильтра даты», «rollback → pass» → red | 2774/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `04fb5cb` | — | /code-review: 2 находки исправлены |
+| S8R-AUDIT-091 | HIGH | ✅ | `ImportError: cannot import name 'corporate_action_warning'`; `(1000, Decimal('1.5')) == (10, Decimal('150'))`; `processed True is False` | 9 passed + 68 смежных | «ratio перепутан», «без фильтра opened_at» → red | 2784/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `d138ef1` | — | /code-review: 3 находки исправлены | | | | | | | |
+| S8R-AUDIT-092 | HIGH | ✅ | `restore не использует os.replace`; `DID NOT RAISE BackupError` ×2; `--server-port` не распознан; нет `BACKUP_DIR` | tests/test_backup 42 passed | «без файлового лока», «WAL до подмены» → red | 2794/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `464b8cd` | — | /code-review: 4 находки исправлены; gotcha-72, ретро gotcha-19 | | | | | | | |
+| S8R-AUDIT-101 | HIGH | ✅ | `AssertionError: вызовы вернули разные записи: 1 и 2`; topup `пополнений: 2, ожидалось 1`; выжившая `{1: False} == {2: True}` | 9 тестов, гонка 10/10 | «без лока и без UNIQUE» → red | 2815/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `2ee8f06` | — | миграция `b8e4d17c9a52` (down переставлен на `d4f1a9c2b7e0`); /code-review: 2 находки исправлены | | | | | | | |
+| S8R-AUDIT-099 | HIGH | ✅ | `активная сессия [1] ссылается на удалённый счёт №1: старт=TradingSession, удаление=NoneType` (10/10) | 2 теста, 10/10 подряд | «без лока в delete_account» → red | 2817/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `82b2a2a` | — | развилка DEV: перепроверка счёта в `_create_session_locked` (порядок «удаление первым»); /code-review чисто | | | | | | | |
 | S8R-AUDIT-008 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-009 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-010 | MEDIUM | ⬜ | | | | | | | |
@@ -123,8 +123,8 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 ## Пакеты
 | Пакет | Карточек ✅/⏸ | E2E | /code-review | Три оси | S-сценарии | PR | Мерж |
 |---|---|---|---|---|---|---|---|
-| BLOCKER | 3/0 из 3 | 171/1/0 (9,0 мин) | ✅ по карточкам (001 — два прохода) | треб. 0 / рецепт 0 / качество 1 low → `9f676aa` | — | [#28](https://github.com/SergoPipo/moex-terminal/pull/28), CI — ждём | по команде заказчика |
-| HIGH | 0/0 из 25 | | | | | | |
+| BLOCKER | 3/0 из 3 | 171/1/0 (9,0 мин) | ✅ по карточкам (001 — два прохода) | треб. 0 / рецепт 0 / качество 1 low → `9f676aa` | — | [#28](https://github.com/SergoPipo/moex-terminal/pull/28), CI ✅ (backend 2711/19xf = локально; frontend, security-scan) | ждёт команды заказчика |
+| HIGH | 25/0 из 25 (+ 028 в BLOCKER) | 172/0/0 (5,8 мин), свой стенд | ✅ по карточкам (024, 025, 032 — 3 прохода) | треб. 0 / рецепт 1 low (докстринг 080 → `3417a70`) / качество 0; гонки 10× по 46 — зелёные; pytest 3035/10xf/0, покрытие 88,46 %; vitest 941 | S-1/S-2/S-7 — 28.09 в торговые часы | [#29](https://github.com/SergoPipo/moex-terminal/pull/29) (база `s8r/fix-blocker`, стек) | ждёт команды заказчика |
 | MEDIUM | 0/0 из 52 | | | | — | | |
 | LOW | 0/0 из 21 | | | | — | | |
 
@@ -150,7 +150,39 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 
 13. 093: `get_trading_calendar` бил в `/iss/engines/stock/markets/shares/dates.json` — там нет календаря (DEV ⏸, проверено живым GET к ISS). Источник заменён на `/iss/engines/stock.json` `dailytable` (исключения `is_work_day`) — техническая часть рецепта. **Политика выходных не меняется** (Сб/Вс — неторговые): `timetable` ISS помечает все 7 дней рабочими из-за торгов выходного дня с 2025 — **вопрос заказчику** (ФТ §1.6/1.7, карточка 072).
 
+14. Vitest в карточке снимается только при изменении `frontend/`; иначе — один раз на уровне пакета на тихой машине. Причина: два DEV параллельно гоняют полный vitest при load 18–25 → 1–8 таймаутов (S8R-FIX-005). typecheck/lint/build — по-прежнему в каждой карточке.
+15. Находка DEV-007 «входной ордер с NOT_FOUND у брокера остаётся pending бессрочно» передана в карточку 024 (поиск ордера по клиентскому ключу, подтверждённое отсутствие → failed).
+
+16. /code-review 091: отсечка `process_split` по `opened_at` (была записана как находка S8R-FIX-008 от DEV-090) чинится в 091 — эта карточка впервые делает путь сплита рабочим, без отсечки позиции пересчитывались бы повторно.
+17. /code-review 024, п. 6: сделка, не ушедшая брокеру, при удалённом/деактивированном счёте → `failed` (брокерской правды больше не будет); при временной недоступности адаптера — остаётся `pending`.
+
+18. Передаётся в карточку 025: движок при частичном исполнении встречного ордера закрывает сделку целиком без `_flag_partial_exit` (runtime-recovery флаг ставит) — учёт частичного закрытия как такового не реализован (контрольный /code-review 024).
+19. 024: «ответ потерян» ≠ «ордера нет» подтверждается только спустя `UNKNOWN_OUTCOME_CONFIRM_AGE_SEC = 120 с` от последней отправки; детерминированный gRPC-отказ (INVALID_ARGUMENT и т. п.) = «не принят» сразу (иначе «недостаточно средств» занимал бы слот); активный частично исполненный ордер входа ждёт терминала, остаток отменяется recovery через 30 мин — решения DEV, приняты оркестратором.
+
+20. 24–25.09: DEV-024 и DEV-078 дважды обрывались на лимите сессии модели Fable (HTTP 429); возобновлены с сохранённым контекстом, потерь работы нет.
+
+21. 074: в `docker-compose.yml` добавлен `stop_grace_period: 60s` для backend — без него Docker убивает процесс через 10 с, и исправленный graceful shutdown (45 с) не успевает; Docker локально не запускался (как и раньше).
+
+22. 069: удаление стратегии при живых сессиях → 409; судьба ОСТАНОВЛЕННЫХ сессий при удалении стратегии (запрет или отвязка истории через SET NULL + PRAGMA foreign_keys, карточка 015) — **вопрос заказчику**, текущее поведение не меняется.
+
+23. 25.09: исчерпан лимит модели Fable для субагентов (HTTP 429 «You've reached your Fable limit»). Дальше DEV-субагенты — на **Opus 5.5**; футер коммитов таких карточек — только `Claude Opus 5.5`. Ревьюеры по-прежнему sonnet.
+
+24. 080: предел тейк-профита 100 % вместо 500 % из рецепта — прежний предел редактора; для short (Q5-032=b) TP выше 100 % даёт цену ≤ 0. Принято.
+
+25. 032 (Q5=b): лог HOLD «сигнал против направления без позиции» — DEBUG, а не warning из рецепта: warning был для варианта «только long» (`short_not_supported`), при short-варианте выход без позиции — штатное состояние после каждого закрытия. Флаг CB `block_shorts` (есть только в API, в UI нет) оставлен без изменения схемы: при значении по умолчанию `True` он запретил бы все short, что противоречит Q5=b; проверка стала защитным инвариантом — **вопрос заказчику**: удалить флаг или сделать его запретом short для real-режима.
+
 ## Новые находки (заведены в backlog, не чинились)
+- S8R-FIX-016 — `test_same_commission_and_net_pnl` падает после 23:50 МСК (реальное время vs проверка торговых часов закрытия; low; ревью HIGH).
+- S8R-FIX-015 — направление сделки: inline-копии `in ("buy","long")` в 8 местах; paper-выручка по `volume_lots`; paper-просадка без unrealized (low; DEV-032).
+- S8R-FIX-014 — нет эндпоинта корректного лота для формы запуска (low).
+- S8R-FIX-013 — CB: пик только на входах; `DailyStat.peak_equity` мёртвая; дневной лимит без проверки свежести цены (low).
+- S8R-FIX-012 — recovery частичного выхода: P&L на всю позицию при активном partially_filled; события после снятия слушателя теряются (low).
+- S8R-FIX-011 — фронт не повторяет REST-подписку графика после reconnect WS; ключ стрима без токена (low).
+- S8R-FIX-010 — лок `sandbox_recovery_user` вне «Порядка захвата»; `find_instrument` в `market_data` мимо дедлайна адаптера (low).
+- S8R-FIX-009 — `shutdown()` job-менеджера без таймаута; grid в ожидании слотов без статуса (low).
+- S8R-FIX-008 — корп. действия: «дата отсечки» = дата реестра в уведомлении; сплит без отсечки; расписание джобы ≠ ФТ (low).
+- S8R-FIX-007 — UI не подписывает `LiveTrade.status='pending'` (low).
+- S8R-FIX-006 — `nkd_entry/nkd_exit`: писателя нет, tax и корп. действия трактуют по-разному (low).
 - S8R-FIX-005 — vitest `StrategyEditPageDelete` таймаутит в полном прогоне под нагрузкой машины (low).
 - S8R-FIX-004 — Grid Search: имена параметров Bollinger `bollinger_*` vs `bb_*` (low; /code-review 001, было до фикса).
 - S8R-FIX-003 — ТЗ §8.4: JSON-логи с ротацией не существуют; `dev.log` без ротации и с правами 644 (low).
@@ -158,4 +190,8 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 - S8R-FIX-001 — `SOURCE=volume`: live-интерпретатор считает по close, backtrader по volume (low; найдено DEV-002).
 
 ## Следующий шаг
-BLOCKER: 033 ✅ `967fe10`, 002 ✅ `47bf073` (запушено). В работе: 001 (DEV, wt A) ∥ 034 (DEV, wt B, первая HIGH). После 001 — процедура пакета BLOCKER: E2E на своём стенде, три оси ревью, PR `s8r/fix-blocker` → develop.
+Цикл идёт. **Пакет HIGH закрыт по коду**: 25/25, PR [#29](https://github.com/SergoPipo/moex-terminal/pull/29) `s8r/fix-high` → `s8r/fix-blocker` (стек; после мержа #28 переключить базу на develop). Проверки пакета — в таблице «Пакеты».
+Осталось по HIGH: S-1/S-2/S-7 на счёте #3 — понедельник 28.09 с 10:00 МСК (копия рабочей БД через `Connection.backup`, временный симлинк `.env` — снять сразу).
+Далее: пакет MEDIUM (52 карточки), ветка `s8r/fix-medium` стеком от `s8r/fix-high`, worktree A/B, DEV на Opus ≤ 2 параллельно. Затем LOW (21), ревьюеры F/H1/I2 (Q11=b), финальный отчёт.
+Мерж: PR #28 (BLOCKER) и #29 (HIGH) — по команде заказчика.
+Шаблоны и скрипты — scratchpad текущей сессии и копия в `s8r-evidence/fixes/tools/` (при новой сессии — копия).
