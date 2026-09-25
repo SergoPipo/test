@@ -26,6 +26,11 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-030 — унарные gRPC без дедлайна | HIGH | `E TimeoutError` (9 failed) → `_unary` + `asyncio.timeout(10)`, `BrokerTimeoutError` | `c04379b` | Q5=10 с; /code-review: таймаут глушился в пробах — исправлено; gotcha-74 |
 | S8R-AUDIT-074 — отмена посреди `place_order`, порядок shutdown | HIGH | `assert None == 'sb-stop-1'`; recovery не прогнан → shield «отправка + commit id», параллельный shutdown под дедлайном | `c4965e7` | + `stop_grace_period: 60s` в compose (решение оркестратора); /code-review: 3 находки исправлены; gotcha-75 |
 | S8R-AUDIT-075 — SL/TP «в полёте» без уведомления, реестр TTL 15 мин | HIGH | `ордер в полёте должен дойти до пользователя (0 == 1)` → пометка на сделке — источник истины, уведомление раз на эпизод | `698d0e7` | /code-review: 2 находки исправлены |
+| S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
+| S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
+| S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-080 — риск-параметры без типа и диапазона; SL/TP из generated_code | HIGH | `201 == 422`; live SL 50 % из кода → `RiskParams` на всех путях, SL/TP из IR | `10c1504` | TP ≤ 100 % (рецепт 500 %); /code-review 3 находки |
+| S8R-AUDIT-069 + S8R-AUDIT-100 — удаление стратегии с живой сессией; двойное удаление | HIGH | `DID NOT RAISE ValidationError` ×4; `StaleDataError` → 422 с перечнем, лок `strategy_delete`, 404 | `25e95f9` | stopped — вопрос заказчику; /code-review: инверсия лока исправлена |
 | S8R-AUDIT-089 — дивиденды/купоны без `lot_size` | HIGH | `100.00 == 1000.00` → штуки = лоты × lot_size | `6012089` | НКД на бумагу; семантика `nkd_*` → S8R-FIX-006 |
 | S8R-AUDIT-090 — начисление до отсечки, нет rollback | HIGH | `assert True is False`; `1000.00 == 0.00` → дата реестра + ex-date по календарю, rollback | `04fb5cb` | /code-review: уведомления после rollback, закрытая после ex-date позиция — исправлено |
 | S8R-AUDIT-091 — сплиты и купоны не детектируются | HIGH | `ImportError corporate_action_warning`; `(1000, 1.5) == (10, 150)` → ISS splits/bondization, отсечка сплита по `opened_at`, предупреждение бэктеста | `d138ef1` | Q5-091=a, без back-adjust; /code-review: 3 находки исправлены |
@@ -137,6 +142,25 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Что не так: после S8R-AUDIT-061 стрим графика без держателей снимается через 60 с; разрыв WS дольше grace → держатель `ws:*` восстановлен, а gRPC-подписки нет — свечи графика не приходят до смены таймфрейма.
 Как исправить: повтор REST-подписки на `auth_ok`/reconnect во фронте (+ vitest); ключ стрима — с учётом счёта/токена (или явное правило «один токен на процесс» в ТЗ).
 Связанные: S8R-AUDIT-061, S8R-AUDIT-003.
+
+### S8R-FIX-012 — События сессии теряются после снятия слушателя (часть про recovery частичного выхода закрыта `fdfbb5c`)
+Аспект: G | Severity: low | Объём: S
+Где: `backend/app/trading/runtime.py` (exit-recovery: при активном `partially_filled` P&L считается на всю позицию); публикации событий сессии после `stop()` (слушатель снят — `position.mismatch`/`order.*` не доходит до уведомлений) — найдено DEV-AUDIT-025.
+Как исправить: recovery не закрывает сделку на активном частичном ордере (ждёт терминала, как движок); уведомления об инцидентах остановленной сессии — прямым `create_notification`, не через шину сессии.
+Связанные: S8R-AUDIT-025, S8R-AUDIT-075.
+
+### S8R-FIX-013 — CB: пик equity фиксируется только на проверках входа; `DailyStat.peak_equity` — мёртвая колонка; дневной лимит берёт unrealized без проверки свежести
+Аспект: G | Severity: low | Объём: S
+Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
+Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
+Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-014 — Нет эндпоинта корректного размера лота для формы запуска; предупреждение «бюджет меньше лота» невозможно
+Аспект: L/H | Severity: low | Объём: S
+Где: `GET /api/v1/market-data/instruments/{ticker}` и поиск берут данные ISS без LOTSIZE → лот = 1 (docstring S7R-LOT-SIZE-SYNC); `frontend/src/components/trading/LaunchSessionModal.tsx` (найдено DEV-AUDIT-026, /code-review).
+Что не так: форма запуска не может предупредить, что `fixed_sum` меньше стоимости лота (ловушка п. 5 карточки 026) — предупреждение по неверному лоту молчало бы именно там, где нужно, поэтому не добавлено.
+Как исправить: `lot_size` (через `ensure_lot_size_strict`, T-Invest) в ответе инструмента или отдельный `GET …/instruments/{t}/lot`; затем предупреждение в форме с учётом тарифа счёта; vitest + E2E.
+Связанные: S8R-AUDIT-026, S8R-AUDIT-027.
 
 ---
 

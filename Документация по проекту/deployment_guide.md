@@ -309,8 +309,18 @@ docker compose ps            # проверить healthy
 После апдейта сверьте, что миграции доехали до головы:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: b8e4d17c9a52 (head)
+docker compose exec backend alembic current   # ожидается: f6a2c8e41d93 (head)
 ```
+
+> **ℹ️ Обновление с версии старше `f6a2c8e41d93` (S8R-AUDIT-068, 2026-09-25).**
+> Ревизия добавляет nullable-колонку `trading_sessions.peak_equity` (пик капитала
+> sandbox/real-сессии для лимита просадки); у существующих сессий пик = стартовый
+> капитал. Обратима (пик теряется); SQLite пересоздаёт таблицу — снимите backup (§6.1).
+
+> **ℹ️ Обновление с версии старше `e9e5c919fbbf` (S8R-AUDIT-025, 2026-09-25).**
+> Ревизия добавляет nullable-колонку `live_trades.lot_size` (размер лота на момент
+> сделки). Старые сделки считаются по прежней деривации, действий не требуется;
+> SQLite пересоздаёт таблицу — перед обновлением снимите backup (§6.1).
 
 > **ℹ️ Обновление с версии старше `b8e4d17c9a52` (S8R-AUDIT-101, 2026-09-25).**
 > Ревизия добавляет `UNIQUE (user_id, broker_type, account_id)` на `broker_accounts`.
