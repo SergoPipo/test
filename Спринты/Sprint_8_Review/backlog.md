@@ -23,12 +23,18 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-093 — календарь MOEX без ISS-клиента | HIGH | `no attribute 'set_calendar_service'` → ISS `dailytable`, единый экземпляр | `bca0cec` | ресурс ISS был неверный (gotcha-70); Сб/Вс неторговые — **вопрос заказчику** о торгах выходного дня |
 | S8R-AUDIT-007 — сбой опроса брокера помечает сделку `failed` | HIGH | `assert 'failed' == 'pending'` ×2 → сбой опроса/отмены = `still_pending` | `a5f5c5b` | NOT_FOUND входного ордера → решается в 024 (клиентский ключ) |
 | S8R-AUDIT-024 — «нет ответа» = «ордера нет» (вход/отмена/выход) | HIGH | `18 failed` (`AttributeError client_order_id`) → клиентский ключ ордера + единое правило разбора состояния | `9eb05c2` | миграция `d4f1a9c2b7e0`; 3 прохода /code-review (21 находка) исправлены; gotcha-71; частичное закрытие → 025 |
+| S8R-AUDIT-030 — унарные gRPC без дедлайна | HIGH | `E TimeoutError` (9 failed) → `_unary` + `asyncio.timeout(10)`, `BrokerTimeoutError` | `c04379b` | Q5=10 с; /code-review: таймаут глушился в пробах — исправлено; gotcha-74 |
+| S8R-AUDIT-074 — отмена посреди `place_order`, порядок shutdown | HIGH | `assert None == 'sb-stop-1'`; recovery не прогнан → shield «отправка + commit id», параллельный shutdown под дедлайном | `c4965e7` | + `stop_grace_period: 60s` в compose (решение оркестратора); /code-review: 3 находки исправлены; gotcha-75 |
+| S8R-AUDIT-075 — SL/TP «в полёте» без уведомления, реестр TTL 15 мин | HIGH | `ордер в полёте должен дойти до пользователя (0 == 1)` → пометка на сделке — источник истины, уведомление раз на эпизод | `698d0e7` | /code-review: 2 находки исправлены |
 | S8R-AUDIT-089 — дивиденды/купоны без `lot_size` | HIGH | `100.00 == 1000.00` → штуки = лоты × lot_size | `6012089` | НКД на бумагу; семантика `nkd_*` → S8R-FIX-006 |
 | S8R-AUDIT-090 — начисление до отсечки, нет rollback | HIGH | `assert True is False`; `1000.00 == 0.00` → дата реестра + ex-date по календарю, rollback | `04fb5cb` | /code-review: уведомления после rollback, закрытая после ex-date позиция — исправлено |
 | S8R-AUDIT-091 — сплиты и купоны не детектируются | HIGH | `ImportError corporate_action_warning`; `(1000, 1.5) == (10, 150)` → ISS splits/bondization, отсечка сплита по `opened_at`, предупреждение бэктеста | `d138ef1` | Q5-091=a, без back-adjust; /code-review: 3 находки исправлены |
 | S8R-AUDIT-092 — backup/restore не атомарен | HIGH | `restore не использует os.replace`; `DID NOT RAISE BackupError` → Backup API, temp+os.replace, flock, CLI-проверка сервера | `464b8cd` | /code-review: 4 находки (WAL, пустая БД, имена) — исправлены; gotcha-72 |
 | S8R-AUDIT-055 — прод-SPA зашивает localhost:8000 | HIGH | `expected 'http://localhost:8000/api/v1' to be '/api/v1'` → `baseUrl.ts`, dev-proxy, preflight CORS_ORIGINS, CI-smoke | `c93e1ad` | 2 `it.fails` сняты; vitest 934 |
 | S8R-AUDIT-078 — отмена grid не останавливает Pool | HIGH | `воркеры живы после cancel`; `4 > лимита 2` → Event + terminate, `GridWorkerSlots` | `a3bb857` | /code-review: 2 находки исправлены; gotcha-73 |
+| S8R-AUDIT-101 — дубли `BrokerAccount` при параллельном `create_account` | HIGH | `вызовы вернули разные записи: 1 и 2` → лок + UNIQUE + слияние дублей | `2ee8f06` | миграция `b8e4d17c9a52`; гонка 10/10; /code-review: 2 находки исправлены |
+| S8R-AUDIT-099 — `delete_account` без лока | HIGH | `активная сессия [1] ссылается на удалённый счёт №1` (10/10) → лок `session_start_account` + перепроверка счёта под локом при старте | `82b2a2a` | гонка 10/10 в оба порядка; /code-review чисто |
+| S8R-AUDIT-061 — стрим теряет команды после reconnect | HIGH | `assert 'FIGI-B' in ['FIGI-A']` → очередь на стрим + sentinel, ack, терминал по токену, держатели стрима | `54e88dc` | 2 прохода /code-review (7 находок) исправлены; gotcha-76 |
 
 ### Новые находки цикла (заведены, не чинились)
 
@@ -117,6 +123,20 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Что не так: shutdown может затянуться до конца долгого job; пользователь не видит, что его grid ждёт свободных слотов.
 Как исправить: таймаут ожидания в shutdown с отменой; событие/статус `waiting` для прогресса grid.
 Связанные: S8R-AUDIT-078, S8R-AUDIT-074.
+
+### S8R-FIX-010 — Лок `sandbox_recovery_user` не описан в «Порядке захвата» `locks.py`; `find_instrument` в `market_data/service.py` в обход адаптера (без дедлайна)
+Аспект: J/G | Severity: low | Объём: S
+Где: `backend/app/broker/sandbox_recovery.py:~263` (`keyed_lock("sandbox_recovery_user")` — в разделе «Порядок захвата» `app/common/locks.py` отсутствует; найдено DEV-AUDIT-101); `backend/app/market_data/service.py` — два вызова `find_instrument` (размер лота, логотип) напрямую через SDK, мимо `TInvestAdapter._unary` (дедлайн S8R-AUDIT-030 их не покрывает; найдено /code-review 030).
+Что не так: правило «новый лок обязан встроиться в порядок» не выполнено для одного лока; два сетевых вызова остались без дедлайна.
+Как исправить: описать место `sandbox_recovery_user` в порядке (и проверить тестом отсутствие вложенного захвата); перевести `find_instrument` на адаптер или обернуть тем же `_unary`.
+Связанные: S8R-AUDIT-030, S8R-AUDIT-101, S8R-AUDIT-099.
+
+### S8R-FIX-011 — Фронт: после переподключения WS график не повторяет `POST /candles/subscribe`; ключ стрима `(ticker, timeframe)` без токена
+Аспект: L/G | Severity: low | Объём: S
+Где: `frontend/src/hooks/useWebSocket.ts` (при reconnect пересылает `subscribe` каналов, но REST-подписку `POST /api/v1/market-data/candles/subscribe` не повторяет); `backend/app/market_data/stream_manager.py` — ключ `(ticker, timeframe)` без токена: все подписчики едут на токене первого (найдено DEV-AUDIT-061).
+Что не так: после S8R-AUDIT-061 стрим графика без держателей снимается через 60 с; разрыв WS дольше grace → держатель `ws:*` восстановлен, а gRPC-подписки нет — свечи графика не приходят до смены таймфрейма.
+Как исправить: повтор REST-подписки на `auth_ok`/reconnect во фронте (+ vitest); ключ стрима — с учётом счёта/токена (или явное правило «один токен на процесс» в ТЗ).
+Связанные: S8R-AUDIT-061, S8R-AUDIT-003.
 
 ---
 

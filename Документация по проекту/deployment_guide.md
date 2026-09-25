@@ -73,12 +73,15 @@ cp .env.example backend/.env.production
 | `TINVEST_TOKEN` | Production T-Invest API token | Личный кабинет T-Invest |
 | `DATABASE_URL` | SQLite путь внутри контейнера | `sqlite+aiosqlite:////app/data/app.sqlite` (НЕ менять) |
 | `TZ` | Часовой пояс торговли | `Europe/Moscow` (НЕ менять) |
+| `TINVEST_UNARY_TIMEOUT_SEC` | (опционально) Дедлайн одного gRPC-вызова T-Invest, сек (S8R-AUDIT-030); стрим котировок не затрагивает | по умолчанию `10` |
 | `GRID_MAX_WORKERS_TOTAL` | (опционально) Общий предел процессов Grid Search на все параллельные job'ы (S8R-AUDIT-078); `0` — авто `cpu−1` | по умолчанию `0`; уменьшить, если live-торговля соседствует с гридами |
 | `CORS_ORIGINS` | Публичный origin SPA (что видит браузер за Tunnel), через запятую; без него WS отбиваются 403. Preflight: пусто при `DEBUG≠true` → контейнер не стартует, только localhost → предупреждение (S8R-AUDIT-055) | `https://moex.example.com` (+ `http://localhost` для local-only §5.5) |
 | `TELEGRAM_BOT_TOKEN` | (опционально) Telegram уведомления | `@BotFather` |
 | `TELEGRAM_CHAT_ID` | (опционально) ID чата для уведомлений | через bot /start, getUpdates API |
 
 > ℹ️ **SPA собирается с относительными адресами** (`/api/v1`, `wss://<host>`, S8R-AUDIT-055): `VITE_*` задавать не нужно, nginx проксирует `/api` и `/ws`. `ARG VITE_API_BASE_URL` в `frontend/Dockerfile` — только для нестандартной раскладки. Локально (`scripts/start.sh`) ту же роль играет dev-proxy Vite (`/api`, `/ws` → :8000).
+
+> ℹ️ **Остановка контейнера backend** (S8R-AUDIT-074): graceful shutdown рантайма укладывается в 45 с (дожидается записи id отправленного ордера, останавливает сессии, прогоняет recovery). Поэтому в `docker-compose.yml` для `backend` задан `stop_grace_period: 60s` — не уменьшайте его: при значении Docker по умолчанию (10 с) процесс получает SIGKILL посреди записи ответа брокера.
 
 > ⚠️ **`.env.production` НЕ коммитится в git!** Файл уже включён в `.gitignore` (`.env.*`). Перед `git commit` проверьте `git status` — никаких `.env*` в diff не должно быть.
 
@@ -306,8 +309,16 @@ docker compose ps            # проверить healthy
 После апдейта сверьте, что миграции доехали до головы:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: d4f1a9c2b7e0 (head)
+docker compose exec backend alembic current   # ожидается: b8e4d17c9a52 (head)
 ```
+
+> **ℹ️ Обновление с версии старше `b8e4d17c9a52` (S8R-AUDIT-101, 2026-09-25).**
+> Ревизия добавляет `UNIQUE (user_id, broker_type, account_id)` на `broker_accounts`.
+> Перед этим дубли одного счёта сливаются: остаётся запись, на которую ссылаются
+> торговые сессии, при равенстве — активная, затем более ранняя; ссылки остальных
+> перевешиваются на неё, лишние удаляются; если среди удалённых была активная —
+> выжившая включается. Обратима по схеме; слитые дубли `downgrade` не восстанавливает.
+> SQLite пересоздаёт таблицу — перед обновлением снимите backup (§6.1).
 
 > **ℹ️ Обновление с версии старше `d4f1a9c2b7e0` (S8R-AUDIT-024, 2026-09-24).**
 > Ревизия добавляет в `live_trades` две nullable-колонки `client_order_id` и
