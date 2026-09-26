@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-009 — сверка при старте без таймаута блокирует запуск | MEDIUM | `несверенную сессию подняли`; restore висит → параллельная предзагрузка портфелей под дедлайном 60 с, несверенные → paused + critical | `706c183` | молчание брокера после 030 давало «старт без сверки» — исправлено; /code-review 3 прохода; хвосты → S8R-FIX-019 |
 | S8R-AUDIT-037 — lockout выбивает живую сессию; лимитер auth по IP контейнера nginx | MEDIUM | `ValueError: Аккаунт заблокирован` (refresh); `429 == 200` → lockout только на login + сброс, реальный IP через uvicorn proxy-headers, ключи (IP, username)/(sub, IP) | `25143f8` (wt B) | nginx на 127.0.0.1:80; Docker не запускался — проверка источника cloudflared в гайде §5.3; /code-review 3 прохода |
 | S8R-AUDIT-008 — restore_all пишет active до старта listener'а | MEDIUM | `'active' in {'paused','suspended'}` → active после start(), временный сбой → suspended, постоянный → paused | `a374468` | /code-review 3 прохода; хвосты → S8R-FIX-018 |
 | S8R-AUDIT-013 — WS не проверяет отзыв токена и is_active; Telegram для деактивированного | MEDIUM | `DID NOT RAISE WebSocketDisconnect`; login `200 == 401` → единый предикат HTTP/WS/dash, Telegram и рассылка только активному | `e2ecb03` | разрыв открытых WS — ⏸ (S8R-FIX-017); /code-review 3 прохода |
@@ -158,6 +159,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-019 — Хвосты S8R-AUDIT-009: `start()` ходит в сеть до поднятия HTTP; фоновая сверка на `wait_for` поверх записей в БД
+Аспект: G/M | Severity: low | Объём: M
+Где: `app/main.py` lifespan (`restore_all` до `yield`), `SessionRuntime.start()` → `_preload_history`/`stream_manager.subscribe` (сеть, по ~10 с на унарный вызов, 030); `app/trading/runtime.py::_reconcile_active_sessions` — `asyncio.wait_for` + `except asyncio.TimeoutError` (gotcha-74: чужой TimeoutError выдаётся за свой бюджет) и бюджет поверх commit/уведомлений (gotcha-75); resume не снимает пометку «сверка не выполнена» (снимает фоновая сверка ≤ 15 мин) (найдено DEV-AUDIT-009, /code-review).
+Что не так: при молчащем брокере и многих сессиях без позиций старт HTTP всё ещё может превысить `start_period` healthcheck; фоновая сверка при зависшем счёте ждёт последовательно по каждой сессии.
+Как исправить: `restore_all` фоновой задачей после `yield` (с флагом «восстановление идёт» для /health и UI) или общий дедлайн на весь restore; фоновая сверка — на `_load_portfolio(deadline)` с кэшем счёта и записями вне бюджета.
+Связанные: S8R-AUDIT-009, S8R-AUDIT-030, S8R-AUDIT-074.
 
 ### S8R-FIX-018 — Хвосты S8R-AUDIT-008: доучёт частичного выхода на shutdown не ставит паузу; осиротевшая paused держит пару; три копии кода уведомлений
 Аспект: G/M | Severity: low | Объём: S
