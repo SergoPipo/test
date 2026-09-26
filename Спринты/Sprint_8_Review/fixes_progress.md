@@ -77,7 +77,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-056 | MEDIUM | ✅ | `_favicon.ico` → location статики (5 failed) | 13 (test_nginx_conf) | «убрать ^~» → red | 3448/8xf/0 (wt B) | `64f114b` (wt B) | — | правка в одну строку; /code-review не требовался (nginx вне списка), smoke после деплоя |
 | S8R-AUDIT-015 | MEDIUM | ✅ | `DID NOT RAISE IntegrityError`; `DROP TABLE trading_sessions — FOREIGN KEY constraint failed` | pragmas + delete FK + CB router | «убрать FK=ON», «убрать FK OFF в env», «удалять и running» → red | 3503/7xf/0 (wt B) | `f8bb8e5` (wt B) | — | консервативный 422 по stopped-истории (вопрос заказчика 069); gotcha-79; S8R-FIX-023 |
 | S8R-AUDIT-004 | MEDIUM | ⬜ | | | | | | | |
-| S8R-AUDIT-003 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-003 | MEDIUM | ✅ | `AssertionError: без контекста расшифрован чужой токен: [1]` | 16 backend | «снять фильтр по пользователю», «real принимает sandbox-лот» → red | 3548/7xf/0 (wt B) | `797b2de` (wt B) | — | модель «свой пользователь, prod-first, sandbox-лот не authoritative» — решение оркестратора после ревью; /code-review 3 прохода |
 | S8R-AUDIT-014 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-020 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-028 | MEDIUM | ✅ попутно с 001 (`c6bf111`): legacy-путь удалён | | | | | | | |
