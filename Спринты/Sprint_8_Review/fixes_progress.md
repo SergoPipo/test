@@ -56,7 +56,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-027 | MEDIUM | ✅ | `percent считается от initial_capital: 100 лотов вместо 50` | 29 backend | «база = initial_capital», «лимит CB от initial_capital», «без поколения», «без резерва», «без освобождения адаптера» → red | 3483/8xf/0; A после переноса 057: 3512/8xf/0 | `47a2ce6` | — | модель «капитал сессии ∧ RUB счёта» — решение оркестратора в рамках Q5=a; /code-review 3 прохода |
 | S8R-AUDIT-070 | MEDIUM | ✅ | `вердикты (большая, маленькая) = [False, True]` | 14 backend | «порог от капитала одной сессии», «override на класс» → red | 3526/8xf/0 | `b770a1e` | — | вопрос заказчику: sandbox+real одним классом; /code-review 2 прохода |
 | S8R-AUDIT-071 | MEDIUM | ✅ | `CheckResult(blocked=False…)` при лимите 1 000 и лоте 10×300 | 14 backend + vitest | «signal.price для неизвестного режима», «temporary вместо паузы» → red | 3540/8xf/0; vitest 965; A после переноса 015: 3560/7xf/0 | `908bdd5` | `6128b9c52d8a` | гайд §7; /code-review 2 прохода |
-| S8R-AUDIT-072 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-072 | MEDIUM | ✅ | `assert True is False` (`is_within_trading_hours(2026-11-04 12:00)`) | 435 в смежных наборах | «без календаря», «закрытия блокируются в выходные» → red | 3594/6xf/0 | `40e9c6e` | — | входы/закрытия разведены (решение оркестратора; вопрос заказчика 093 не решён в опасную сторону); /code-review 2 прохода |
 | S8R-AUDIT-044 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-045 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-046 | MEDIUM | ⬜ | | | | | | | |
@@ -76,7 +76,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-057 | MEDIUM | ✅ | `assert set() == {'content-sec…'}`; `tax_download None == 'no-store'` | backend + vitest | «add_header в location статики» → red | 3477/8xf/0; vitest 964/965 (флейк S8R-FIX-005); B после синхр.: 3483 | `dcbcc12` (wt B) | — | CI nginx-config; /code-review 2 прохода |
 | S8R-AUDIT-056 | MEDIUM | ✅ | `_favicon.ico` → location статики (5 failed) | 13 (test_nginx_conf) | «убрать ^~» → red | 3448/8xf/0 (wt B) | `64f114b` (wt B) | — | правка в одну строку; /code-review не требовался (nginx вне списка), smoke после деплоя |
 | S8R-AUDIT-015 | MEDIUM | ✅ | `DID NOT RAISE IntegrityError`; `DROP TABLE trading_sessions — FOREIGN KEY constraint failed` | pragmas + delete FK + CB router | «убрать FK=ON», «убрать FK OFF в env», «удалять и running» → red | 3503/7xf/0 (wt B) | `f8bb8e5` (wt B) | — | консервативный 422 по stopped-истории (вопрос заказчика 069); gotcha-79; S8R-FIX-023 |
-| S8R-AUDIT-004 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-004 | MEDIUM | ✅ | `alembic check → 255: removed table 'user_favorites' …` | 17 (+ процессный alembic check) | «env.py без user_favorites» → red | 3578/6xf/0 (wt B) | `112da39` (wt B) | — | новой ревизии нет; CI «Migrations drift» |
 | S8R-AUDIT-003 | MEDIUM | ✅ | `AssertionError: без контекста расшифрован чужой токен: [1]` | 16 backend | «снять фильтр по пользователю», «real принимает sandbox-лот» → red | 3548/7xf/0 (wt B) | `797b2de` (wt B) | — | модель «свой пользователь, prod-first, sandbox-лот не authoritative» — решение оркестратора после ревью; /code-review 3 прохода |
 | S8R-AUDIT-014 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-020 | MEDIUM | ⬜ | | | | | | | |
