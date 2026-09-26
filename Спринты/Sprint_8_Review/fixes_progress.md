@@ -69,7 +69,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-037 | MEDIUM | ✅ | `ValueError: Аккаунт заблокирован`; 5× `assert 429 == 200`; п.2 ревью `assert 6 == 1` | 2 + 18 backend | «lockout в refresh», «убрать IP-потолок», «не сбрасывать счётчик» → red | 3107/8xf/0 (wt B); ruff 0; mypy ok (181); bandit 0 | `25143f8` (wt B, перенос в A — позже) | — | 127.0.0.1:80:80, доверие только nginx 172.28.0.10; Docker не запускался; /code-review 3 прохода |
 | S8R-AUDIT-038 | MEDIUM | ✅ | `E assert 200 == 403` (8 failed) | 88 CSRF + 22 preflight | «fail-open», «Origin и без cookie», «refresh с double-submit» → red | 3174/8xf/0 (wt B); ruff 0; mypy ok (182); bandit 0; tsc/lint/build 0 | `16daf82` (wt B) | — | Dash-mount POST без X-CSRF-Token — проверить на стенде пакета; /code-review 3 прохода |
 | S8R-AUDIT-039 | MEDIUM | ✅ | `assert 401 == 204`; фронт `expected false to be 'unavailable'` | backend + vitest (session/client/aiStream) | «logout требует access», «повтор и на 5xx» → red | 3191/8xf/0 (wt B); ruff 0; mypy ok (182); bandit 0; tsc/lint/build 0; vitest 952 | `1247c46` (wt B) | — | path refresh-cookie /api/v1/auth; E2E auth-hardening — на уровне пакета; /code-review 2 прохода |
-| S8R-AUDIT-040 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-040 | MEDIUM | ✅ | `AttributeError: … 'COOKIE_SECURE'`; `{'access_token': {False}} != {True}` | 46 + 77 backend | «secure = not DEBUG», «дефолт auto в проде» → red | 3244/8xf/0 (wt B); ruff 0; mypy ok (183); bandit 0; tsc/lint/build 0 | `e914a72` (wt B) | — | fail-closed дефолт (решение оркестратора, см. 33); /code-review 2 прохода |
 | S8R-AUDIT-041 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-021 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-058 | MEDIUM | ⬜ | | | | | | | |

@@ -76,6 +76,7 @@ cp .env.example backend/.env.production
 | `TINVEST_UNARY_TIMEOUT_SEC` | (опционально) Дедлайн одного gRPC-вызова T-Invest, сек (S8R-AUDIT-030); стрим котировок не затрагивает | по умолчанию `10` |
 | `GRID_MAX_WORKERS_TOTAL` | (опционально) Общий предел процессов Grid Search на все параллельные job'ы (S8R-AUDIT-078); `0` — авто `cpu−1` | по умолчанию `0`; уменьшить, если live-торговля соседствует с гридами |
 | `CORS_ORIGINS` | Публичный origin SPA (что видит браузер за Tunnel), через запятую; без него WS отбиваются 403. Preflight: пусто при `DEBUG≠true` → контейнер не стартует, только localhost → предупреждение (S8R-AUDIT-055). Формат — только `http(s)://host[:port]`; регистр, завершающий `/` и порт по умолчанию не важны, `*` и записи без схемы игнорируются. С S8R-AUDIT-038 без верного значения 403 получают не только WS, но и вход и все изменяющие запросы. | `https://moex.example.com` (+ `http://localhost` для local-only §5.5) |
+| `COOKIE_SECURE` | (опционально) Флаг Secure у cookie сессии (S8R-AUDIT-040). Не задано — в production всегда Secure; `auto` — по схеме запроса; `true`/`false` — принудительно (алиасы 1/yes/on, 0/no/off). Доступ без TLS (local-only) — `false`, **не** `DEBUG=true`; preflight предупредит | по умолчанию не задано |
 | `POSITION_CHECK_RETRIES`, `POSITION_CHECK_RETRY_DELAY_SEC` | (опционально) Сколько раз и с какой паузой перепрашивать портфель песочницы, пришедший без бумаг (S8R-AUDIT-011). Диапазоны 3–5 и 5–10 с; значение вне диапазона приводится к границе, в лог — warning | по умолчанию `3` и `5` |
 | `TELEGRAM_BOT_TOKEN` | (опционально) Telegram уведомления | `@BotFather` |
 | `TELEGRAM_CHAT_ID` | (опционально) ID чата для уведомлений | через bot /start, getUpdates API |
@@ -110,7 +111,7 @@ curl -fsS http://localhost/                  # HTML с <div id="root">
 curl -fsS http://localhost/api/v1/health     # {"status":"ok", "cb_state":"closed", ...}
 ```
 
-**Реальный IP клиента (S8R-AUDIT-037).** Backend запускается командой `uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="$TRUSTED_PROXY_IPS"`. `TRUSTED_PROXY_IPS` — от кого backend принимает `X-Forwarded-For`; по умолчанию `172.28.0.10` — фиксированный адрес nginx в сети `moex-net` (`172.28.0.0/24`). Переопределяется в окружении или `.env` compose (IP/CIDR через запятую). При ошибке `Pool overlaps` сменить одновременно подсеть `networks.moex-net.ipam`, `ipv4_address` сервиса frontend, `TRUSTED_PROXY_IPS` и `set_real_ip_from` в `nginx.conf`.
+**Реальный IP клиента (S8R-AUDIT-037).** Backend запускается командой `uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="$TRUSTED_PROXY_IPS"`. `TRUSTED_PROXY_IPS` — от кого backend принимает `X-Forwarded-For`; по умолчанию `172.28.0.10` — фиксированный адрес nginx в сети `moex-net` (`172.28.0.0/24`). Переопределяется в окружении или `.env` compose (IP/CIDR через запятую). Та же пара `--proxy-headers`/`TRUSTED_PROXY_IPS` передаёт backend и схему запроса (`X-Forwarded-Proto`, S8R-AUDIT-040). При ошибке `Pool overlaps` сменить одновременно подсеть `networks.moex-net.ipam`, `ipv4_address` сервиса frontend, `TRUSTED_PROXY_IPS` и `set_real_ip_from` в `nginx.conf`.
 
 #### Проверка миграций на чистой установке
 
@@ -238,6 +239,8 @@ ingress:
 nginx опубликован только на `127.0.0.1:80` (S8R-AUDIT-037): извне к нему ходит только cloudflared с этого же Mac mini. Доступ из локальной сети (`"80:80"`) — осознанное изменение: придётся править тест `test_compose_trusts_forwarded_for_only_from_nginx` и доверие `CF-Connecting-IP`, иначе любой клиент сети подделает свой IP для лимитера входа.
 
 **Проверка при первом запуске.** Открыть сайт через Tunnel и выполнить `docker compose logs frontend | tail`. Первое поле строки запроса — публичный IP клиента. Если там `172.x`/`192.168.x` — это адрес cloudflared, которому nginx не поверил: добавить его в `set_real_ip_from` (`nginx.conf`) и выполнить `docker compose restart frontend`. Иначе все пользователи делят один ключ лимитера входа.
+
+**Проверка Secure (S8R-AUDIT-040).** После входа через `https://<домен>` открыть DevTools → Application → Cookies: у `access_token`, `refresh_token`, `csrf_token` стоит ✓ Secure. В Cloudflare включить *Always Use HTTPS*. nginx пропускает `X-Forwarded-Proto: https` только от адресов cloudflared (те же, что `set_real_ip_from`).
 
 ### 5.4 Запуск как macOS service
 
