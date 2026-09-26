@@ -55,7 +55,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-076 | MEDIUM | ✅ | `blocked_amount 0.00 ≠ стоимость открытых позиций 9000.00` | 6 backend (5 прогонов без флейка) | «снять лок» по 4 путям, «лок после flush» → red | 3413/8xf/0; A после переноса 058/056: 3454/8xf/0 | `3e27737` | — | CB: commit паузы до закрытий (решение оркестратора); gotcha-78 `a799b52`; /code-review 2 прохода |
 | S8R-AUDIT-027 | MEDIUM | ✅ | `percent считается от initial_capital: 100 лотов вместо 50` | 29 backend | «база = initial_capital», «лимит CB от initial_capital», «без поколения», «без резерва», «без освобождения адаптера» → red | 3483/8xf/0; A после переноса 057: 3512/8xf/0 | `47a2ce6` | — | модель «капитал сессии ∧ RUB счёта» — решение оркестратора в рамках Q5=a; /code-review 3 прохода |
 | S8R-AUDIT-070 | MEDIUM | ✅ | `вердикты (большая, маленькая) = [False, True]` | 14 backend | «порог от капитала одной сессии», «override на класс» → red | 3526/8xf/0 | `b770a1e` | — | вопрос заказчику: sandbox+real одним классом; /code-review 2 прохода |
-| S8R-AUDIT-071 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-071 | MEDIUM | ✅ | `CheckResult(blocked=False…)` при лимите 1 000 и лоте 10×300 | 14 backend + vitest | «signal.price для неизвестного режима», «temporary вместо паузы» → red | 3540/8xf/0; vitest 965; A после переноса 015: 3560/7xf/0 | `908bdd5` | `6128b9c52d8a` | гайд §7; /code-review 2 прохода |
 | S8R-AUDIT-072 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-044 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-045 | MEDIUM | ⬜ | | | | | | | |
