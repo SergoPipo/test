@@ -241,6 +241,8 @@ nginx опубликован только на `127.0.0.1:80` (S8R-AUDIT-037): �
 
 **Проверка при первом запуске.** Открыть сайт через Tunnel и выполнить `docker compose logs frontend | tail`. Первое поле строки запроса — публичный IP клиента. Если там `172.x`/`192.168.x` — это адрес cloudflared, которому nginx не поверил: добавить его в `set_real_ip_from` (`nginx.conf`) и выполнить `docker compose restart frontend`. Иначе все пользователи делят один ключ лимитера входа.
 
+**Проверка заголовков (S8R-AUDIT-057).** `curl -sI https://<домен>/ | grep -i -E 'content-security|x-frame|strict-transport|cache-control'` — все есть, по одному; то же для `/assets/<файл>.js` (`immutable`). В конструкторе стратегий — кнопки масштаба на месте, в консоли нет `Refused to…`.
+
 **Проверка Secure (S8R-AUDIT-040).** После входа через `https://<домен>` открыть DevTools → Application → Cookies: у `access_token`, `refresh_token`, `csrf_token` стоит ✓ Secure. В Cloudflare включить *Always Use HTTPS*. nginx пропускает `X-Forwarded-Proto: https` только от адресов cloudflared (те же, что `set_real_ip_from`).
 
 ### 5.4 Запуск как macOS service

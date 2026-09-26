@@ -73,7 +73,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-041 | MEDIUM | ✅ | `ImportError: cannot import name 'secrets_rotation'` | 46 backend | «не перешифровывать AI», «is_current → False», «без _weak_secret_reason», «роль при импорте» → red | 3290/8xf/0 (wt B); ruff 0; mypy ok (186); bandit 0 | `5fc4fa9` (wt B) | — | гайд §6а «Ротация секретов»; /code-review 3 прохода |
 | S8R-AUDIT-021 | MEDIUM | ✅ | `AssertionError: ✅ Telegram привязан…` (6-я попытка) | 16 backend | «снять лимит», «сброс при успехе» → red | 3306/8xf/0; B после синхронизации с A: 3394/8xf/0 | `b24e1ab` (wt B) | — | /code-review 2 прохода |
 | S8R-AUDIT-058 | MEDIUM | ✅ | `DID NOT RAISE WebSocketDisconnect`; `'subscribed' == 'forbidden'`; AI `[200,200,200,200,403]` | backend + vitest | «снять лимит», «close_user вместо close_session», «без проверки отзыва» → red | 3426/8xf/0; vitest 964; B после синхронизации: 3439/8xf/0 | `35c3ba8` (wt B) | — | nginx `^~ /ws` чинит мультиплексор в проде; /code-review 3 прохода |
-| S8R-AUDIT-057 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-057 | MEDIUM | ✅ | `assert set() == {'content-sec…'}`; `tax_download None == 'no-store'` | backend + vitest | «add_header в location статики» → red | 3477/8xf/0; vitest 964/965 (флейк S8R-FIX-005); B после синхр.: 3483 | `dcbcc12` (wt B) | — | CI nginx-config; /code-review 2 прохода |
 | S8R-AUDIT-056 | MEDIUM | ✅ | `_favicon.ico` → location статики (5 failed) | 13 (test_nginx_conf) | «убрать ^~» → red | 3448/8xf/0 (wt B) | `64f114b` (wt B) | — | правка в одну строку; /code-review не требовался (nginx вне списка), smoke после деплоя |
 | S8R-AUDIT-015 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-004 | MEDIUM | ⬜ | | | | | | | |
