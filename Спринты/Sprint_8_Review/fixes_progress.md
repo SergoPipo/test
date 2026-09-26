@@ -75,7 +75,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-058 | MEDIUM | ✅ | `DID NOT RAISE WebSocketDisconnect`; `'subscribed' == 'forbidden'`; AI `[200,200,200,200,403]` | backend + vitest | «снять лимит», «close_user вместо close_session», «без проверки отзыва» → red | 3426/8xf/0; vitest 964; B после синхронизации: 3439/8xf/0 | `35c3ba8` (wt B) | — | nginx `^~ /ws` чинит мультиплексор в проде; /code-review 3 прохода |
 | S8R-AUDIT-057 | MEDIUM | ✅ | `assert set() == {'content-sec…'}`; `tax_download None == 'no-store'` | backend + vitest | «add_header в location статики» → red | 3477/8xf/0; vitest 964/965 (флейк S8R-FIX-005); B после синхр.: 3483 | `dcbcc12` (wt B) | — | CI nginx-config; /code-review 2 прохода |
 | S8R-AUDIT-056 | MEDIUM | ✅ | `_favicon.ico` → location статики (5 failed) | 13 (test_nginx_conf) | «убрать ^~» → red | 3448/8xf/0 (wt B) | `64f114b` (wt B) | — | правка в одну строку; /code-review не требовался (nginx вне списка), smoke после деплоя |
-| S8R-AUDIT-015 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-015 | MEDIUM | ✅ | `DID NOT RAISE IntegrityError`; `DROP TABLE trading_sessions — FOREIGN KEY constraint failed` | pragmas + delete FK + CB router | «убрать FK=ON», «убрать FK OFF в env», «удалять и running» → red | 3503/7xf/0 (wt B) | `f8bb8e5` (wt B) | — | консервативный 422 по stopped-истории (вопрос заказчика 069); gotcha-79; S8R-FIX-023 |
 | S8R-AUDIT-004 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-003 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-014 | MEDIUM | ⬜ | | | | | | | |
@@ -189,6 +189,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 35. Перенос коммитов между потоками: B (auth) → A cherry-pick; конфликты `config.py` (011 ↔ 040 ↔ 041) — «обе стороны», гейт A после переноса 3378/8xf/0. Дальше B синхронизируется с вершиной A перед каждой новой карточкой.
 
 ## Новые находки (заведены в backlog, не чинились)
+- S8R-FIX-023 — хвосты 015: тесты без FK (162 падения при включении), audit_log SET NULL vs append-only (low).
 - S8R-FIX-022 — хвосты 012: график не исправляет не-последний бар, бары в обрыве не публикуются (low).
 - S8R-FIX-021 — хвосты 041: AAD без привязки к строке, alembic-путь от cwd, живой сервер по двум адресам (low).
 - S8R-FIX-020 — фоновая сверка счетов последовательно, держит watchdog (medium, не регресс).

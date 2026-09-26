@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-015 — PRAGMA foreign_keys не включается | MEDIUM | `DID NOT RAISE IntegrityError` → FK=ON, миграции с FK OFF, удаление стратегии с историей → 422, IDOR CB-конфига закрыт | `f8bb8e5` (wt B) | gotcha-79; stopped-сессии при удалении стратегии — вопрос заказчика (до ответа — запрет); /code-review 2 прохода; хвосты → S8R-FIX-023 |
 | S8R-AUDIT-027 — percent от initial_capital, бэктест — от кэша | MEDIUM | `100 лотов вместо 50` → свободный капитал сессии (+ RUB счёта для брокерских), CB без сети, резерв кэша | `47a2ce6` | Q5-027=a; модель переделана по ревью (весь счёт → капитал сессии); /code-review 3 прохода |
 | S8R-AUDIT-057 — security-заголовки только на JSON; файлы без no-store | MEDIUM | `/ — assert set() == {content-security…}`; `tax_download None == 'no-store'` → заголовки nginx на все ответы, кэш-политика, Blockly media локально, CI nginx -t | `dcbcc12` (wt B) | живой nginx — CI job nginx-config; /code-review 2 прохода |
 | S8R-AUDIT-076 — lost update баланса paper-портфеля | MEDIUM | `blocked_amount 0.00 ≠ 9000.00` → лок paper_portfolio до первой записи, свежее чтение, корп. действия под тем же локом | `3e27737` | gotcha-78 (дедлок asyncio-лок ↔ SQLite); /code-review 2 прохода |
@@ -173,6 +174,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-023 — Хвосты S8R-AUDIT-015: тесты идут без FK; audit_log SET NULL конфликтует с append-only триггером
+Аспект: J | Severity: low | Объём: M
+Где: `backend/tests/conftest.py` (тестовые БД без `PRAGMA foreign_keys=ON` — при включении падает 162 теста: фиктивные `user_id`, `drop_all` при цикле strategies↔strategy_versions); `app/common/models.py` (`audit_log.user_id` ON DELETE SET NULL) + триггер `prevent_audit_log_update` (найдено DEV-AUDIT-015, /code-review).
+Что не так: регресс-тесты не видят нарушений FK, которые получит прод; удаление пользователя с записями аудита абортится триггером (пути удаления пользователя в приложении нет — риск для ручных операций и будущего эндпоинта); удаление `backtest_jobs` уменьшает счётчики `admin/metrics` за прошлые периоды.
+Как исправить: включить FK в фикстурах и починить 162 теста (реальные пользователи, порядок teardown); для audit_log — ondelete NO ACTION + запрет удаления пользователя с аудитом (или анонимизация через специальный путь).
+Связанные: S8R-AUDIT-015.
 
 ### S8R-FIX-022 — Хвосты S8R-AUDIT-012: график не исправляет не-последний бар; бары целиком в обрыве не публикуются; выходные — REST на каждые сутки
 Аспект: H | Severity: low | Объём: S
