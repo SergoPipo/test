@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-011 — неполный портфель песочницы → ложная пауза | MEDIUM | `неполный ответ песочницы принят за расхождение` → сигнатура «только деньги», перезапрос, пауза после 3 подряд проходов, real без повторов | `abb6e07` | ФТ v3.6 п.(2) сохранён с задержкой (решение оркестратора); /code-review 3 прохода; последовательная фоновая сверка → S8R-FIX-020 |
 | S8R-AUDIT-039 — logout при истёкшем access не стирает refresh; 429/сеть = выход | MEDIUM | `assert 401 == 204`; `expected false to be 'unavailable'` → logout всегда 204 + отзыв, refresh-cookie path /api/v1/auth, повтор refresh только на 429 | `1247c46` (wt B) | /code-review 2 прохода |
 | S8R-AUDIT-038 — CSRF fail-open без cookie; login без проверки Origin | MEDIUM | `assert 200 == 403` → double-submit при cookie-сессии, Origin/Referer из нормализованного allowlist, login-CSRF | `16daf82` (wt B) | гонка переиздания csrf и Dash-mount POST — находки; /code-review 3 прохода |
 | S8R-AUDIT-010 — suspended проигрывает пару paused после рестарта | MEDIUM | `поднято: [] / [] == [2]` → тиры active → suspended → paused, проигравший — после исхода победителя | `025f929` | UI-чеклист S8.30 обновлён; /code-review 2 прохода |
@@ -162,6 +163,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-020 — Фоновая сверка счетов идёт последовательно
+Аспект: G/M | Severity: medium | Объём: M
+Где: `app/trading/runtime.py::_reconcile_active_sessions` в `_periodic_recovery_loop` (найдено DEV-AUDIT-011, /code-review).
+Что не так: при устойчиво неполном sandbox-портфеле или молчащем брокере каждый счёт тратит до ~55 с; N счетов — N × 55 с на проход, всё это время стоят watchdog стримов (BUG-27) и доучёт осиротевших pending/exit-ордеров. Не регресс (до S8R-AUDIT-011 было N × 60 с).
+Как исправить: параллельная предзагрузка портфелей счетов под общим бюджетом, как `_prefetch_restore_portfolios` (S8R-AUDIT-009), либо вынести сверку в отдельную задачу, не блокирующую watchdog; ~80–120 строк и ~8 тестов с последовательными фейками.
+Связанные: S8R-AUDIT-009, S8R-AUDIT-011, S8R-FIX-019.
 
 ### S8R-FIX-019 — Хвосты S8R-AUDIT-009: `start()` ходит в сеть до поднятия HTTP; фоновая сверка на `wait_for` поверх записей в БД
 Аспект: G/M | Severity: low | Объём: M
