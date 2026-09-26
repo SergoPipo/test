@@ -46,7 +46,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-092 | HIGH | ✅ | `restore не использует os.replace`; `DID NOT RAISE BackupError` ×2; `--server-port` не распознан; нет `BACKUP_DIR` | tests/test_backup 42 passed | «без файлового лока», «WAL до подмены» → red | 2794/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `464b8cd` | — | /code-review: 4 находки исправлены; gotcha-72, ретро gotcha-19 | | | | | | | |
 | S8R-AUDIT-101 | HIGH | ✅ | `AssertionError: вызовы вернули разные записи: 1 и 2`; topup `пополнений: 2, ожидалось 1`; выжившая `{1: False} == {2: True}` | 9 тестов, гонка 10/10 | «без лока и без UNIQUE» → red | 2815/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `2ee8f06` | — | миграция `b8e4d17c9a52` (down переставлен на `d4f1a9c2b7e0`); /code-review: 2 находки исправлены | | | | | | | |
 | S8R-AUDIT-099 | HIGH | ✅ | `активная сессия [1] ссылается на удалённый счёт №1: старт=TradingSession, удаление=NoneType` (10/10) | 2 теста, 10/10 подряд | «без лока в delete_account» → red | 2817/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `82b2a2a` | — | развилка DEV: перепроверка счёта в `_create_session_locked` (порядок «удаление первым»); /code-review чисто | | | | | | | |
-| S8R-AUDIT-008 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-008 | MEDIUM | ✅ | `assert 'active' in {'paused','suspended'}`; `DID NOT RAISE NotFoundError`; `['active'] == ['suspended']` | 14 + 2 backend | «ранний commit active», «временный сбой → paused», «освобождать пару» → red | 3050/10xf/1 (FIX-016); ветка после переноса 013: 3104/8xf/0; ruff 0; mypy ok (180); bandit 0 | `a374468` | — | временный сбой → suspended (развилка рецепта, решение оркестратора); /code-review 3 прохода; хвосты → S8R-FIX-018 |
 | S8R-AUDIT-009 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-010 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-011 | MEDIUM | ⬜ | | | | | | | |
@@ -65,7 +65,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-063 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-006 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-077 | MEDIUM | ⬜ | | | | | | | |
-| S8R-AUDIT-013 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-013 | MEDIUM | ✅ | `DID NOT RAISE WebSocketDisconnect`; `assert 200 == 401` (login); `['telegram','email'] == []` | 18 + 21 backend | «проверку jti → pass» → 6 red | 3087/8xf/1 (FIX-016, wt B); ruff 0; mypy ok (180); bandit 0; tsc/lint/build 0 | `e2ecb03` | — | разрыв открытых WS ⏸ → S8R-FIX-017; /code-review 3 прохода |
 | S8R-AUDIT-037 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-038 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-039 | MEDIUM | ⬜ | | | | | | | |
@@ -171,8 +171,16 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 
 25. 032 (Q5=b): лог HOLD «сигнал против направления без позиции» — DEBUG, а не warning из рецепта: warning был для варианта «только long» (`short_not_supported`), при short-варианте выход без позиции — штатное состояние после каждого закрытия. Флаг CB `block_shorts` (есть только в API, в UI нет) оставлен без изменения схемы: при значении по умолчанию `True` он запретил бы все short, что противоречит Q5=b; проверка стала защитным инвариантом — **вопрос заказчику**: удалить флаг или сделать его запретом short для real-режима.
 
+26. Пакет HIGH, отступления от процедуры: (а) три оси ревью запущены одновременно (процедура — ≤ 2), ревьюеры сами дробили работу на под-агентов — нагрузка на машину в пределах, тесты под ревью не флейкали; (б) ось качества — новый ревьюер вместо продолжения прежнего (контекст прежнего устарел после 20+ карточек); с MEDIUM — продолжать ревьюера качества HIGH через SendMessage; (в) PR #29 открыт в `s8r/fix-blocker`, а не в `develop`: ветка стоит стеком на неcмёрженном #28, PR в develop показал бы и BLOCKER — после мержа #28 базу переключить.
+
+27. CI PR #29 красный (DEBUG=false, прогон в 00:15 МСК): S8R-FIX-016 и 2 теста гонок 101 (sandbox без `DEBUG=True`). Блокирует гейт «CI зелёный» → исправлено `03398cf` во временном worktree `wt-s8r-fixes-c` на `s8r/fix-high` (A и B заняты DEV); в `s8r/fix-medium` — cherry-pick после DEV-008. Локальный прогон в режиме CI (фиктивные ключи из `ci.yml` в окружении) отклонён правилами разрешений — режим DEBUG=false проверяет только CI; впредь сверять CI до объявления пакета закрытым.
+
+28. 008: развилка рецепта «статус при сбое start()» — временный сбой → `suspended` (пара сохраняется, повтор при следующем старте), постоянная причина (`NotFoundError`) → `paused`; внутри restore `suspended` считается торговавшей. MEDIUM идёт двумя потоками: A (`s8r/fix-medium`) — рантайм/CB, B (detached) — auth/периметр; коммиты B переносятся cherry-pick в A.
+
 ## Новые находки (заведены в backlog, не чинились)
-- S8R-FIX-016 — `test_same_commission_and_net_pnl` падает после 23:50 МСК (реальное время vs проверка торговых часов закрытия; low; ревью HIGH).
+- S8R-FIX-018 — хвосты 008: shutdown-доучёт частичного выхода без паузы, осиротевшая paused держит пару, три копии кода уведомлений (low).
+- S8R-FIX-017 — хвосты 013: открытые WS не рвутся при logout, «Аккаунт деактивирован» не виден на экране входа, дубли кода аутентификации (low).
+- S8R-FIX-016 — ✅ `03398cf` — `test_same_commission_and_net_pnl` падает после 23:50 МСК (реальное время vs проверка торговых часов закрытия; low; ревью HIGH).
 - S8R-FIX-015 — направление сделки: inline-копии `in ("buy","long")` в 8 местах; paper-выручка по `volume_lots`; paper-просадка без unrealized (low; DEV-032).
 - S8R-FIX-014 — нет эндпоинта корректного лота для формы запуска (low).
 - S8R-FIX-013 — CB: пик только на входах; `DailyStat.peak_equity` мёртвая; дневной лимит без проверки свежести цены (low).

@@ -29,6 +29,8 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-008 — restore_all пишет active до старта listener'а | MEDIUM | `'active' in {'paused','suspended'}` → active после start(), временный сбой → suspended, постоянный → paused | `a374468` | /code-review 3 прохода; хвосты → S8R-FIX-018 |
+| S8R-AUDIT-013 — WS не проверяет отзыв токена и is_active; Telegram для деактивированного | MEDIUM | `DID NOT RAISE WebSocketDisconnect`; login `200 == 401` → единый предикат HTTP/WS/dash, Telegram и рассылка только активному | `e2ecb03` | разрыв открытых WS — ⏸ (S8R-FIX-017); /code-review 3 прохода |
 | S8R-AUDIT-032 — short: live открывал long, paper-баланс зеркалил P&L short | HIGH | `LiveTrade … is None` → сторона ордера из IR, выход без позиции — HOLD, paper short как в backtrader, сверка со знаком | `c29aa23` | Q5=b, ФТ §1.3/§12.4/§16; `block_shorts` — вопрос заказчику; /code-review 3 прохода |
 | S8R-AUDIT-080 — риск-параметры без типа и диапазона; SL/TP из generated_code | HIGH | `201 == 422`; live SL 50 % из кода → `RiskParams` на всех путях, SL/TP из IR | `10c1504` | TP ≤ 100 % (рецепт 500 %); /code-review 3 находки |
 | S8R-AUDIT-069 + S8R-AUDIT-100 — удаление стратегии с живой сессией; двойное удаление | HIGH | `DID NOT RAISE ValidationError` ×4; `StaleDataError` → 422 с перечнем, лок `strategy_delete`, 404 | `25e95f9` | stopped — вопрос заказчику; /code-review: инверсия лока исправлена |
@@ -156,12 +158,26 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
 
-### S8R-FIX-016 — `test_same_commission_and_net_pnl` зависит от реального времени запуска
+### S8R-FIX-018 — Хвосты S8R-AUDIT-008: доучёт частичного выхода на shutdown не ставит паузу; осиротевшая paused держит пару; три копии кода уведомлений
+Аспект: G/M | Severity: low | Объём: S
+Где: `app/trading/runtime.py` — `_run_shutdown_recovery` вызывает `_recover_orphan_exit_orders` после перевода сессий в `suspended` (пауза только для `active`) → частичный выход, доученный на shutdown, сессию не паузит, к старту сделка закрыта, сессия поднимется (было и до карточки); `NotFoundError` в restore → `paused`, но владелец неизвестен — сессию никто не видит и не остановит, а `paused` входит в `BLOCKING_SESSION_STATUSES` (пара заблокирована); `_notify_not_restored`, `_notify_position_mismatch` и блок «Сессия восстановлена» — три копии резолва владельца и `create_notification` с разной обработкой ошибок; ветка дубликатов в `restore_all` не на `_set_status_if` (рецепт 008 запрещал трогать) (найдено DEV-AUDIT-008, /code-review).
+Как исправить: на shutdown-recovery передавать `RESTORE_PAUSE_FROM`; постоянную причину — `stopped` вместо `paused` (или не блокировать пару осиротевшей сессией); общий помощник уведомления о сессии.
+Связанные: S8R-AUDIT-008, S8R-AUDIT-025.
+
+### S8R-FIX-017 — Хвосты S8R-AUDIT-013: открытые WS не рвутся при logout; текст «Аккаунт деактивирован» не доходит до экрана входа; дубли кода аутентификации
+Аспект: A/B | Severity: low | Объём: S
+Где: `app/common/ws_auth.py`, `app/api/ws.py`, `app/trading/ws_sessions.py`, `app/backtest/ws_backtest.py` (нет реестра соединений); `frontend/src/pages/LoginPage.tsx` (любой ответ, кроме 423, → «Неверный логин или пароль»); `jwt.decode`+`type` в трёх местах (`get_current_user`, `ws_authenticate`, `AdminAuthASGIMiddleware`); мёртвый `notification/dispatchers.dispatch_external` с копиями `_get_telegram_link/_get_user`; восемь копий `if not user: reply(_denied_text…)` в `telegram_webhook.py`; предикат — два запроса вместо одного; уже существующие дубли активных `TelegramLink` на один chat_id не чистятся; ТЗ §4.12/§7.4 описывают устаревший WS-протокол `{action:"auth"}` (найдено DEV-AUDIT-013, /code-review).
+Что не так: уже открытое WS-соединение живёт после logout/деактивации до переподключения; отключённый пользователь видит на входе «Неверный пароль»; правка декодирования токена требует трёх мест.
+Как исправить: реестр `user_id → set[WebSocket]` и `close_user(uid, 4401)` из logout и деактивации; `LoginPage` показывает `detail` для 401 «Аккаунт деактивирован»; `authenticate_access_token(db, token)` (decode + type + предикат); удалить `dispatch_external` или свести к одному хелперу; миграция-чистка дублей привязок; ТЗ §4.12/§7.4 — cookie на upgrade.
+Связанные: S8R-AUDIT-013, S8R-AUDIT-035.
+
+### S8R-FIX-016 — ✅ закрыта `03398cf` (2026-09-26) — `test_same_commission_and_net_pnl` зависит от реального времени запуска
 Аспект: Q | Severity: low | Объём: XS
 Где: `backend/tests/test_trading/test_sandbox_commission.py::TestSandboxMatchesPaper::test_same_commission_and_net_pnl`; проверка торговых часов при закрытии sandbox/real — `app/trading/engine.py` (~3936, с `5352671`, S8 W8g). Найдено ревьюером пакета HIGH 2026-09-25.
 Что не так: тест закрывает sandbox-сделку в реальном «сейчас»; вне окна 10:00–23:50 МСК закрытие отклоняется `ValidationError: Закрытие позиций возможно только в торговые часы MOEX`, тест красный. Ночной прогон гейта даёт ложное падение; CI днём (UTC) проходит.
 Как исправить: подменить проверку торговых часов (или время) в тесте через `monkeypatch`, как в соседних тестах ручного закрытия.
 Связанные: S8R-MANUAL-CLOSE-SANDBOX-REAL.
+Закрытие: CI PR #29 (DEBUG=false, 00:15 МСК) — 3 failed: этот тест и 2 теста гонок 101 (`sandbox_topup_spy` без `DEBUG=True` — sandbox-токен вне режима разработки отклоняется). Блокировало зелёный CI пакета → исправлено в `s8r/fix-high`: подмена `is_within_trading_hours` и `settings.DEBUG` в фикстуре.
 
 ### S8R-FIX-015 — Направление сделки проверяется inline-копиями; paper-выручка по `volume_lots`; paper-просадка без нереализованного P&L
 Аспект: D/K | Severity: low | Объём: S
