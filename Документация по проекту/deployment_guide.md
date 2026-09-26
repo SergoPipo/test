@@ -582,6 +582,8 @@ Plotly Dash панель — только для admin role (см. C-S8-9 DEV-4 
 - Графики: signal→order latency, оценка стратегии на свече, dashboard LCP,
   Telegram webhook latency, backtest jobs throughput.
 
+**Проверка за nginx (S8R-AUDIT-056).** Раньше regex-локация статики nginx перехватывала JS-ассеты Dash под `/api/`, страница висела на «Loading…»; теперь `location ^~ /api/`. После деплоя: в DevTools → Network все `_dash-component-suites/…js` и `_favicon.ico` → 200, без `Cache-Control: public, immutable` (иначе запрос забрала локация статики).
+
 **Источник данных и его ограничения (S8R, 2026-07-30).** До этой версии все
 графики рисовали зашитые в код mock-массивы. Теперь четыре из пяти питаются
 живыми замерами `@timed_event` из кольцевого буфера

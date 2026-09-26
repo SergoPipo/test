@@ -128,6 +128,13 @@ Backend требует оба поля через `model_validator` (`schemas.py
 - визуальный resize фигур на графике — воспроизводится только руками;
 - `S8R-TINVEST-SANDBOX-FLAKY-70001` — поведение песочницы T-Invest, от нас
   не зависит; движок ведёт себя корректно.
+- **Проверки после первого деплоя (фиксы аудита 2026-09, nginx/Docker локально не запускались):**
+  - `docker compose exec frontend nginx -t` — конфигурация валидна (037/040/056/058/057);
+  - источник cloudflared совпадает с `set_real_ip_from` (гайд §5.3, S8R-AUDIT-037);
+  - после входа через Tunnel у `access_token`/`refresh_token`/`csrf_token` стоит Secure (S8R-AUDIT-040);
+  - мультиплексор `wss://<host>/ws` подключается (S8R-AUDIT-058: раньше уходил в SPA-fallback);
+  - страница метрик за nginx: `https://<host>/api/v1/admin/metrics/` под admin — все `_dash-component-suites/…js` и `_favicon.ico` → 200, без `Cache-Control: public, immutable` (S8R-AUDIT-056);
+  - ротация секретов по гайду §6а — пробный прогон на копии БД (S8R-AUDIT-041).
 
 ---
 
