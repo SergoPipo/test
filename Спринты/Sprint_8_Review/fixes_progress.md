@@ -66,7 +66,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-006 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-077 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-013 | MEDIUM | ✅ | `DID NOT RAISE WebSocketDisconnect`; `assert 200 == 401` (login); `['telegram','email'] == []` | 18 + 21 backend | «проверку jti → pass» → 6 red | 3087/8xf/1 (FIX-016, wt B); ruff 0; mypy ok (180); bandit 0; tsc/lint/build 0 | `e2ecb03` | — | разрыв открытых WS ⏸ → S8R-FIX-017; /code-review 3 прохода |
-| S8R-AUDIT-037 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-037 | MEDIUM | ✅ | `ValueError: Аккаунт заблокирован`; 5× `assert 429 == 200`; п.2 ревью `assert 6 == 1` | 2 + 18 backend | «lockout в refresh», «убрать IP-потолок», «не сбрасывать счётчик» → red | 3107/8xf/0 (wt B); ruff 0; mypy ok (181); bandit 0 | `25143f8` (wt B, перенос в A — позже) | — | 127.0.0.1:80:80, доверие только nginx 172.28.0.10; Docker не запускался; /code-review 3 прохода |
 | S8R-AUDIT-038 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-039 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-040 | MEDIUM | ⬜ | | | | | | | |
@@ -176,6 +176,9 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 27. CI PR #29 красный (DEBUG=false, прогон в 00:15 МСК): S8R-FIX-016 и 2 теста гонок 101 (sandbox без `DEBUG=True`). Блокирует гейт «CI зелёный» → исправлено `03398cf` во временном worktree `wt-s8r-fixes-c` на `s8r/fix-high` (A и B заняты DEV); в `s8r/fix-medium` — cherry-pick после DEV-008. Локальный прогон в режиме CI (фиктивные ключи из `ci.yml` в окружении) отклонён правилами разрешений — режим DEBUG=false проверяет только CI; впредь сверять CI до объявления пакета закрытым.
 
 28. 008: развилка рецепта «статус при сбое start()» — временный сбой → `suspended` (пара сохраняется, повтор при следующем старте), постоянная причина (`NotFoundError`) → `paused`; внутри restore `suspended` считается торговавшей. MEDIUM идёт двумя потоками: A (`s8r/fix-medium`) — рантайм/CB, B (detached) — auth/периметр; коммиты B переносятся cherry-pick в A.
+
+29. Паттерн: 008, 009, 013, 037 — по три раунда /code-review, находки одних классов (сбой записи в БД и инвариант active⇔listener, лишние/потерянные уведомления и их severity, тест в обход реального пути `_unary`, таймаут поверх commit, ресурсы от клиента без предела). Системная мера: в шаблон DEV (`dev_base.md`) добавлена обязательная «Самопроверка по типовым находкам код-ревью» (6 пунктов) — действует с 010/038. Сообщено заказчику в отчёте.
+30. 037: nginx опубликован на `127.0.0.1:80:80` (cloudflared на хосте ходит в localhost по гайду §5.3; LAN-доступа гайд не предусматривает) — иначе клиент LAN подделывает `CF-Connecting-IP`. В гайде `service: http://127.0.0.1:80`.
 
 ## Новые находки (заведены в backlog, не чинились)
 - S8R-FIX-018 — хвосты 008: shutdown-доучёт частичного выхода без паузы, осиротевшая paused держит пару, три копии кода уведомлений (low).

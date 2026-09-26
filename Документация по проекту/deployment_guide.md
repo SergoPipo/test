@@ -1,6 +1,6 @@
 # Deployment Guide — MOEX Trading Terminal
 
-> **Версия:** v1.1 (2026-09-24 — правки по фиксам аудита `S8R-AUDIT-NNN`; v1.0 — 2026-05-13, Sprint 8 W3, M4 Production-ready).
+> **Версия:** v1.1 (2026-09-24…26 — правки по фиксам аудита `S8R-AUDIT-NNN`, последняя — 037: реальный IP за прокси, nginx на 127.0.0.1; v1.0 — 2026-05-13, Sprint 8 W3, M4 Production-ready).
 > **Целевая платформа:** Mac mini + Docker compose + launchd + Cloudflare Tunnel.
 > Утверждено заказчиком 2026-05-12 (arch_design_s8 §7.2, batch 3 п.10).
 
@@ -99,7 +99,7 @@ docker compose ps            # должно показать оба сервис
 ```
 NAME            STATUS                      PORTS
 moex-backend    Up 2 minutes (healthy)
-moex-frontend   Up 1 minute  (healthy)      0.0.0.0:80->80/tcp
+moex-frontend   Up 1 minute  (healthy)      127.0.0.1:80->80/tcp
 ```
 
 Проверка эндпоинтов:
@@ -108,6 +108,8 @@ moex-frontend   Up 1 minute  (healthy)      0.0.0.0:80->80/tcp
 curl -fsS http://localhost/                  # HTML с <div id="root">
 curl -fsS http://localhost/api/v1/health     # {"status":"ok", "cb_state":"closed", ...}
 ```
+
+**Реальный IP клиента (S8R-AUDIT-037).** Backend запускается командой `uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="$TRUSTED_PROXY_IPS"`. `TRUSTED_PROXY_IPS` — от кого backend принимает `X-Forwarded-For`; по умолчанию `172.28.0.10` — фиксированный адрес nginx в сети `moex-net` (`172.28.0.0/24`). Переопределяется в окружении или `.env` compose (IP/CIDR через запятую). При ошибке `Pool overlaps` сменить одновременно подсеть `networks.moex-net.ipam`, `ipv4_address` сервиса frontend, `TRUSTED_PROXY_IPS` и `set_real_ip_from` в `nginx.conf`.
 
 #### Проверка миграций на чистой установке
 
@@ -228,9 +230,13 @@ credentials-file: /Users/<USER>/.cloudflared/<TUNNEL_UUID>.json
 
 ingress:
   - hostname: moex.example.com
-    service: http://localhost:80
+    service: http://127.0.0.1:80   # не localhost: на macOS он сначала резолвится в ::1, а nginx слушает только IPv4
   - service: http_status:404      # fallback для прочих hostnames
 ```
+
+nginx опубликован только на `127.0.0.1:80` (S8R-AUDIT-037): извне к нему ходит только cloudflared с этого же Mac mini. Доступ из локальной сети (`"80:80"`) — осознанное изменение: придётся править тест `test_compose_trusts_forwarded_for_only_from_nginx` и доверие `CF-Connecting-IP`, иначе любой клиент сети подделает свой IP для лимитера входа.
+
+**Проверка при первом запуске.** Открыть сайт через Tunnel и выполнить `docker compose logs frontend | tail`. Первое поле строки запроса — публичный IP клиента. Если там `172.x`/`192.168.x` — это адрес cloudflared, которому nginx не поверил: добавить его в `set_real_ip_from` (`nginx.conf`) и выполнить `docker compose restart frontend`. Иначе все пользователи делят один ключ лимитера входа.
 
 ### 5.4 Запуск как macOS service
 
