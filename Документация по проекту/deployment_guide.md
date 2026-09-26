@@ -75,7 +75,7 @@ cp .env.example backend/.env.production
 | `TZ` | Часовой пояс торговли | `Europe/Moscow` (НЕ менять) |
 | `TINVEST_UNARY_TIMEOUT_SEC` | (опционально) Дедлайн одного gRPC-вызова T-Invest, сек (S8R-AUDIT-030); стрим котировок не затрагивает | по умолчанию `10` |
 | `GRID_MAX_WORKERS_TOTAL` | (опционально) Общий предел процессов Grid Search на все параллельные job'ы (S8R-AUDIT-078); `0` — авто `cpu−1` | по умолчанию `0`; уменьшить, если live-торговля соседствует с гридами |
-| `CORS_ORIGINS` | Публичный origin SPA (что видит браузер за Tunnel), через запятую; без него WS отбиваются 403. Preflight: пусто при `DEBUG≠true` → контейнер не стартует, только localhost → предупреждение (S8R-AUDIT-055) | `https://moex.example.com` (+ `http://localhost` для local-only §5.5) |
+| `CORS_ORIGINS` | Публичный origin SPA (что видит браузер за Tunnel), через запятую; без него WS отбиваются 403. Preflight: пусто при `DEBUG≠true` → контейнер не стартует, только localhost → предупреждение (S8R-AUDIT-055). Формат — только `http(s)://host[:port]`; регистр, завершающий `/` и порт по умолчанию не важны, `*` и записи без схемы игнорируются. С S8R-AUDIT-038 без верного значения 403 получают не только WS, но и вход и все изменяющие запросы. | `https://moex.example.com` (+ `http://localhost` для local-only §5.5) |
 | `TELEGRAM_BOT_TOKEN` | (опционально) Telegram уведомления | `@BotFather` |
 | `TELEGRAM_CHAT_ID` | (опционально) ID чата для уведомлений | через bot /start, getUpdates API |
 

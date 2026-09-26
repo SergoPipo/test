@@ -67,7 +67,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-077 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-013 | MEDIUM | ✅ | `DID NOT RAISE WebSocketDisconnect`; `assert 200 == 401` (login); `['telegram','email'] == []` | 18 + 21 backend | «проверку jti → pass» → 6 red | 3087/8xf/1 (FIX-016, wt B); ruff 0; mypy ok (180); bandit 0; tsc/lint/build 0 | `e2ecb03` | — | разрыв открытых WS ⏸ → S8R-FIX-017; /code-review 3 прохода |
 | S8R-AUDIT-037 | MEDIUM | ✅ | `ValueError: Аккаунт заблокирован`; 5× `assert 429 == 200`; п.2 ревью `assert 6 == 1` | 2 + 18 backend | «lockout в refresh», «убрать IP-потолок», «не сбрасывать счётчик» → red | 3107/8xf/0 (wt B); ruff 0; mypy ok (181); bandit 0 | `25143f8` (wt B, перенос в A — позже) | — | 127.0.0.1:80:80, доверие только nginx 172.28.0.10; Docker не запускался; /code-review 3 прохода |
-| S8R-AUDIT-038 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-038 | MEDIUM | ✅ | `E assert 200 == 403` (8 failed) | 88 CSRF + 22 preflight | «fail-open», «Origin и без cookie», «refresh с double-submit» → red | 3174/8xf/0 (wt B); ruff 0; mypy ok (182); bandit 0; tsc/lint/build 0 | `16daf82` (wt B) | — | Dash-mount POST без X-CSRF-Token — проверить на стенде пакета; /code-review 3 прохода |
 | S8R-AUDIT-039 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-040 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-041 | MEDIUM | ⬜ | | | | | | | |
