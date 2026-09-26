@@ -301,6 +301,33 @@ docker compose start backend
 
 ---
 
+## 6а. Ротация секретов (S8R-AUDIT-041)
+
+При утечке `.env` или по регламенту ключи меняются без повторного ввода токенов брокеров и AI.
+
+```bash
+cd ~/Apps/moex-terminal/Develop
+# 1. Остановить backend (CLI откажется работать под живым сервером, код 3):
+docker compose stop backend
+
+# 2. Сгенерировать новый ключ:
+python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
+
+# 3. Перешифровать данные (снимок БД делается автоматически перед изменениями):
+docker compose run --rm -e OLD_ENCRYPTION_KEY='<старый>' -e NEW_ENCRYPTION_KEY='<новый>' \
+  backend python -m app.cli rotate-encryption-key
+
+# 4. Записать новый ENCRYPTION_KEY в backend/.env.production и запустить:
+docker compose start backend
+docker compose logs backend | grep encryption_key_mismatch   # должно быть пусто
+```
+
+- Снимок до ротации и все старые бэкапы зашифрованы старым ключом: при утечке — увести офлайн или удалить.
+- Смена `SECRET_KEY` (JWT): `docker compose run --rm backend python -m app.cli rotate-jwt-secret`, затем новый `SECRET_KEY` в `.env.production` и `docker compose restart backend`; все пользователи входят заново.
+- **Откат кода после деплоя версии с S8R-AUDIT-041 = повторный ввод ключей брокеров и AI**: новый формат шифртекста старой версией не читается.
+
+---
+
 ## 7. Обновление до новой версии
 
 ```bash

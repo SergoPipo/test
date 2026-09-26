@@ -70,7 +70,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-038 | MEDIUM | ✅ | `E assert 200 == 403` (8 failed) | 88 CSRF + 22 preflight | «fail-open», «Origin и без cookie», «refresh с double-submit» → red | 3174/8xf/0 (wt B); ruff 0; mypy ok (182); bandit 0; tsc/lint/build 0 | `16daf82` (wt B) | — | Dash-mount POST без X-CSRF-Token — проверить на стенде пакета; /code-review 3 прохода |
 | S8R-AUDIT-039 | MEDIUM | ✅ | `assert 401 == 204`; фронт `expected false to be 'unavailable'` | backend + vitest (session/client/aiStream) | «logout требует access», «повтор и на 5xx» → red | 3191/8xf/0 (wt B); ruff 0; mypy ok (182); bandit 0; tsc/lint/build 0; vitest 952 | `1247c46` (wt B) | — | path refresh-cookie /api/v1/auth; E2E auth-hardening — на уровне пакета; /code-review 2 прохода |
 | S8R-AUDIT-040 | MEDIUM | ✅ | `AttributeError: … 'COOKIE_SECURE'`; `{'access_token': {False}} != {True}` | 46 + 77 backend | «secure = not DEBUG», «дефолт auto в проде» → red | 3244/8xf/0 (wt B); ruff 0; mypy ok (183); bandit 0; tsc/lint/build 0 | `e914a72` (wt B) | — | fail-closed дефолт (решение оркестратора, см. 33); /code-review 2 прохода |
-| S8R-AUDIT-041 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-041 | MEDIUM | ✅ | `ImportError: cannot import name 'secrets_rotation'` | 46 backend | «не перешифровывать AI», «is_current → False», «без _weak_secret_reason», «роль при импорте» → red | 3290/8xf/0 (wt B); ruff 0; mypy ok (186); bandit 0 | `5fc4fa9` (wt B) | — | гайд §6а «Ротация секретов»; /code-review 3 прохода |
 | S8R-AUDIT-021 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-058 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-057 | MEDIUM | ⬜ | | | | | | | |
