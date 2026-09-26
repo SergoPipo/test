@@ -72,7 +72,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-040 | MEDIUM | ✅ | `AttributeError: … 'COOKIE_SECURE'`; `{'access_token': {False}} != {True}` | 46 + 77 backend | «secure = not DEBUG», «дефолт auto в проде» → red | 3244/8xf/0 (wt B); ruff 0; mypy ok (183); bandit 0; tsc/lint/build 0 | `e914a72` (wt B) | — | fail-closed дефолт (решение оркестратора, см. 33); /code-review 2 прохода |
 | S8R-AUDIT-041 | MEDIUM | ✅ | `ImportError: cannot import name 'secrets_rotation'` | 46 backend | «не перешифровывать AI», «is_current → False», «без _weak_secret_reason», «роль при импорте» → red | 3290/8xf/0 (wt B); ruff 0; mypy ok (186); bandit 0 | `5fc4fa9` (wt B) | — | гайд §6а «Ротация секретов»; /code-review 3 прохода |
 | S8R-AUDIT-021 | MEDIUM | ✅ | `AssertionError: ✅ Telegram привязан…` (6-я попытка) | 16 backend | «снять лимит», «сброс при успехе» → red | 3306/8xf/0; B после синхронизации с A: 3394/8xf/0 | `b24e1ab` (wt B) | — | /code-review 2 прохода |
-| S8R-AUDIT-058 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-058 | MEDIUM | ✅ | `DID NOT RAISE WebSocketDisconnect`; `'subscribed' == 'forbidden'`; AI `[200,200,200,200,403]` | backend + vitest | «снять лимит», «close_user вместо close_session», «без проверки отзыва» → red | 3426/8xf/0; vitest 964; B после синхронизации: 3439/8xf/0 | `35c3ba8` (wt B) | — | nginx `^~ /ws` чинит мультиплексор в проде; /code-review 3 прохода |
 | S8R-AUDIT-057 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-056 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-015 | MEDIUM | ⬜ | | | | | | | |
