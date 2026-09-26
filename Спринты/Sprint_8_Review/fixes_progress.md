@@ -48,7 +48,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-099 | HIGH | ✅ | `активная сессия [1] ссылается на удалённый счёт №1: старт=TradingSession, удаление=NoneType` (10/10) | 2 теста, 10/10 подряд | «без лока в delete_account» → red | 2817/16xf/0 (wt B); ruff 0; mypy ok; bandit 0; фронт не менялся | `82b2a2a` | — | развилка DEV: перепроверка счёта в `_create_session_locked` (порядок «удаление первым»); /code-review чисто | | | | | | | |
 | S8R-AUDIT-008 | MEDIUM | ✅ | `assert 'active' in {'paused','suspended'}`; `DID NOT RAISE NotFoundError`; `['active'] == ['suspended']` | 14 + 2 backend | «ранний commit active», «временный сбой → paused», «освобождать пару» → red | 3050/10xf/1 (FIX-016); ветка после переноса 013: 3104/8xf/0; ruff 0; mypy ok (180); bandit 0 | `a374468` | — | временный сбой → suspended (развилка рецепта, решение оркестратора); /code-review 3 прохода; хвосты → S8R-FIX-018 |
 | S8R-AUDIT-009 | MEDIUM | ✅ | `AssertionError: несверенную сессию подняли`; `TimeoutError` (restore висит) | 11 backend | «без повтора при BrokerTimeoutError» → red | 3115/8xf/0; ветка после переноса 037: 3134/8xf/0; ruff 0; mypy ok (181); bandit 0 | `706c183` | — | молчание брокера (030) → paused, а не старт без сверки (решение оркестратора); /code-review 3 прохода; хвосты → S8R-FIX-019 |
-| S8R-AUDIT-010 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-010 | MEDIUM | ✅ | `поднято: [] / assert [] == [2]` | 11 backend | «убрать suspended из тира 1», «проигравший в paused до исхода победителя» → red | 3145/8xf/0; ruff 0; mypy ok (181); bandit 0 | `025f929` | — | UI-чеклист S8.30; /code-review 2 прохода |
 | S8R-AUDIT-011 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-012 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-029 | MEDIUM | ⬜ | | | | | | | |
