@@ -176,6 +176,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
 
+### S8R-FIX-024 — Флейки полного прогона: SIGABRT при fork с живыми потоками gRPC; разовое зависание гейта
+Аспект: Q | Severity: medium | Объём: S
+Где: `backend/tests/unit/test_config.py::test_preflight_*` (подпроцесс `scripts/check_production_env.sh` через fork, пока в процессе тестов живы потоки gRPC: `fork_posix.cc: Other threads are currently calling into gRPC` → SIGABRT, разные параметры в разных прогонах; найдено DEV-AUDIT-071); 2026-09-26 полный прогон в wt B (после S8R-AUDIT-015) завис на 30 мин без роста CPU, повтор с `-o faulthandler_timeout=300` прошёл за 3 мин — причина не установлена (вероятно тот же класс).
+Что не так: полный pytest на машине/в CI может случайно падать или зависать; зависание без таймаута блокирует гейт.
+Как исправить: для тестов с подпроцессами — `GRPC_ENABLE_FORK_SUPPORT=0`/`posix_spawn` или запуск preflight без fork из процесса с gRPC (отдельный процесс-запускатель); в CI и в гейте — `faulthandler_timeout` (и/или `pytest-timeout`), чтобы зависание давало стек, а не вечное ожидание.
+Связанные: S8R-FIX-005, S8R-AUDIT-038, S8R-AUDIT-040.
+
 ### S8R-FIX-023 — Хвосты S8R-AUDIT-015: тесты идут без FK; audit_log SET NULL конфликтует с append-only триггером
 Аспект: J | Severity: low | Объём: M
 Где: `backend/tests/conftest.py` (тестовые БД без `PRAGMA foreign_keys=ON` — при включении падает 162 теста: фиктивные `user_id`, `drop_all` при цикле strategies↔strategy_versions); `app/common/models.py` (`audit_log.user_id` ON DELETE SET NULL) + триггер `prevent_audit_log_update` (найдено DEV-AUDIT-015, /code-review).
