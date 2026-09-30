@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-073 — CB: событие вне EVENT_MAP, значения 0, мёртвая ветка, лок вне locks.py | MEDIUM | `0.00 != -60000.00`; `circuit_breaker.triggered != cb.triggered` → одно cb.triggered, значения, перечитывание статуса, условный UPDATE, session.paused | `1322329` (wt B) | /code-review 2 прохода; точность/NULL — S8R-FIX-039 |
 | S8R-AUDIT-062 — смена токена невозможна; проверка подключения создаёт sandbox-счёт | MEDIUM | discover → `[SB-NEW] != []`; старый токен в реестре → ротация ключа, retire_token, read-only discover | `41b7949` | /code-review 2 прохода; ФТ §7.7; `has_withdrawal_rights` не вычисляется — в отчёте |
 | S8R-AUDIT-082 — ошибки сохранения стратегии не видны; Режим B глотает неизвестную секцию | MEDIUM | vitest `shows server detail on 422` (уведомление не вызвано); pytest `[]` → уведомление с detail, проброс из store, предупреждения парсера | `def57dd` (wt B) | «СТОП-ЛОСС:» распознаётся; ФТ §3.3, Режим B; хвосты — S8R-FIX-038 |
 | S8R-AUDIT-047 — направление по умолчанию SELL, LIMIT без цены, unspecified → placed | MEDIUM | `DID NOT RAISE BrokerError`; `KeyError 'price'`; `'placed' == 'unknown'` → строгие buy/sell, цена по шагу, unknown → опрос, OrderNotSentError | `9914d88` | /code-review 2 прохода; ТЗ (история) |
@@ -193,6 +194,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-039 — Журнал CB: `trigger_value/limit_value` — `Numeric(18,2) NOT NULL`
+Аспект: G | Severity: low | Объём: S
+Где: `app/circuit_breaker/models.py` (`CircuitBreakerEvent.trigger_value/limit_value`) (код-ревью 073).
+Что не так: проценты и счётчики округляются до 0.01 (порог просадки 12.345 % пишется как 12.35); у проверок без числа (дубликат инструмента, ошибка настройки сайзинга) пишется 0 — неотличимо от реального нуля.
+Как исправить: миграция — `Numeric(18,4)` (или отдельная колонка единиц) и `nullable`; `None` в БД и `null` в payload для проверок без числа.
+Связанные: S8R-AUDIT-073.
 
 ### S8R-FIX-038 — Хвосты редактора стратегии (DEV-082)
 Аспект: I | Severity: low | Объём: S
