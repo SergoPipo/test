@@ -17,6 +17,9 @@ Q1=d (всё подряд до исчерпания ресурса, остано
 - **PR #28/#29** — мержить оба сейчас: #28 → develop, база #29 → develop, зелёный CI, мерж #29, CI на develop.
 - **S-1/S-2/S-7 на счёте #3** — сейчас, первым шагом, на коде `s8r/fix-high`.
 
+### Уточнение Q6-081 (2026-09-30)
+Статуса `active` в модели нет (6 значений). Решение заказчика: запуск сессии — из **tested / paper / live** (как фильтр «Активные»); draft, paused, archived — отказ с подсказкой. Автоперевод при запуске: paper-сессия → `paper`, sandbox/real → `live` (live старше paper); при остановке **последней** живой сессии стратегии → `tested`.
+
 ### Новый блокер — TLS T-Invest (2026-09-30, обнаружен при подготовке S-1/S-2/S-7)
 Уточнение: проблема известна с 2026-08-05 — **gotcha-55** (обход `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`), но в гайд/compose/Dockerfile не попала; утверждение «стенд заказчика тоже не подключится» — не проверено (зависит от окружения заказчика). T-Bank перевёл gRPC API (`*.tinkoff.ru`, `*.tbank.ru`, sandbox и prod) на сертификаты НУЦ Минцифры (Russian Trusted Root CA). gRPC терминала (grpc 1.80, встроенные корни) не доверяет корню → **терминал не подключается к T-Invest вообще**. Диагностика без токена: стандартные корни → `Tls handshake failed`/DEADLINE; + корень Минцифры → `UNAUTHENTICATED 40003` (TLS проходит). Отпечаток корня, отданного сервером: SHA-256 `D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31`. Это же — причина `CERTIFICATE_VERIFY_FAILED` в тестах.
 Решения заказчика: (1) **корень встраивается в код, только для gRPC** (стандартные корни + Минцифры, PEM в репо, отпечаток закреплён тестом) → карточка S8R-FIX-029 (BLOCKER, первой в `develop`); (2) PEM скачивает заказчик с gosuslugi.ru/crt в `s8r-evidence/fixes/russian_trusted_root_ca.pem`, исполнитель сверяет отпечаток с отданным сервером; (3) S-1/S-2/S-7 — сегодня на коде HIGH с временным корнем (переменная окружения только для процесса стенда), затем мерж #29.
@@ -100,7 +103,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-053 | MEDIUM | ✅ | «обход прошёл анализатор: s = getattr(datetime, 'sys')» (удалён getattr) | 292 теста | exit/vars/pickle/__spec__/allow-list +sys → red | 3995/4xf/0 (разовый SIGABRT preflight[dash], S8R-FIX-024); ruff/mypy/bandit/typecheck/lint/build 0 | `f173824` (wt B) | — | только тесты; находка S8R-FIX-034 |
 | S8R-AUDIT-065 | MEDIUM | ✅ | `DID NOT RAISE ValidationError` (×36); xlsx `assert 'f' == 's'` | 125 тестов + vitest | «без префикса ' в CSV» → 11 failed | 4120/3xf/0; vitest 974; ruff/mypy/bandit/typecheck/lint/build 0 | `c7ab8b4` (wt B) | — | gotcha-81; «_» в формате (CNYRUB_TOM); находка S8R-FIX-035 |
 | S8R-AUDIT-066 | MEDIUM | ✅ | `'&lt;b&gt;x…' in '✅ Telegram привязан к аккаунту <b><b>x</b> & <a href=…>'` (6 из 7) | 7 тестов | «_safe_format_event_text без escape» → red | 4127/3xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `6703261` (wt B) | — | п.5 рецепта (экранировать подписи кнопок) не применён — решение оркестратора по Bot API (text кнопки не HTML); `P&L` с голым `&` в шаблонах /positions — Telegram принимает, не правилось |
-| S8R-AUDIT-097 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-097 | MEDIUM | ✅ | `AssertionError: AsyncAdaptedQueuePool`; `OperationalError: database is locked [SQL: COMMIT]` | тесты карточки | «tax без повтора», «повтор без отката», «без processed» → red | 4143/3xf/0; ruff/mypy/bandit 0; бенчмарки N без деградации (заглушки без БД), прямой замер +0,65 мс/сессия | `3f85fac` (wt B) | — | NullPool (вложенные сессии); /code-review 2 прохода; S8R-FIX-036; ⚠️ E2E пакета — с новым пулом |
 | S8R-AUDIT-094 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-096 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-095 | MEDIUM | ⬜ | | | | | | | |
