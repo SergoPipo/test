@@ -89,6 +89,8 @@ cp .env.example backend/.env.production
 > ⚠️ **`.env.production` НЕ коммитится в git!** Файл уже включён в `.gitignore` (`.env.*`). Перед `git commit` проверьте `git status` — никаких `.env*` в diff не должно быть.
 
 ### 3.3 Сборка и запуск Docker compose
+> ℹ️ На старте backend повторно доставляет необработанные критические события прошлого запуска (`pending_events`, окно 1 ч, S8R-AUDIT-086); при остановке дожидается фоновых записей outbox (≤ 6 с).
+
 
 ```bash
 cd ~/Apps/moex-terminal/Develop
