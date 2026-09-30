@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-083 — доставка уведомлений без повторов, каналы не изолированы, EventBus теряет молча | MEDIUM | `RuntimeError: smtp exploded` ронял Telegram; повтора нет → gather-изоляция, повторы с таймаутами, error-лог + метрика | `bc50928` (wt B) | gotcha-82; ТЗ §5.7; pending_events — S8R-FIX-040 |
 | S8R-AUDIT-073 — CB: событие вне EVENT_MAP, значения 0, мёртвая ветка, лок вне locks.py | MEDIUM | `0.00 != -60000.00`; `circuit_breaker.triggered != cb.triggered` → одно cb.triggered, значения, перечитывание статуса, условный UPDATE, session.paused | `1322329` (wt B) | /code-review 2 прохода; точность/NULL — S8R-FIX-039 |
 | S8R-AUDIT-062 — смена токена невозможна; проверка подключения создаёт sandbox-счёт | MEDIUM | discover → `[SB-NEW] != []`; старый токен в реестре → ротация ключа, retire_token, read-only discover | `41b7949` | /code-review 2 прохода; ФТ §7.7; `has_withdrawal_rights` не вычисляется — в отчёте |
 | S8R-AUDIT-082 — ошибки сохранения стратегии не видны; Режим B глотает неизвестную секцию | MEDIUM | vitest `shows server detail on 422` (уведомление не вызвано); pytest `[]` → уведомление с detail, проброс из store, предупреждения парсера | `def57dd` (wt B) | «СТОП-ЛОСС:» распознаётся; ФТ §3.3, Режим B; хвосты — S8R-FIX-038 |
@@ -194,6 +195,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-040 — Гарантированная доставка критических событий (`pending_events`) не реализована; мёртвый `dispatchers.py`
+Аспект: K | Severity: medium | Объём: M
+Где: таблица `pending_events` (ТЗ §2.4/§3.20) — есть, но никто не пишет `processed_at` и не переобрабатывает при старте; `app/notification/dispatchers.py` — мёртвый дубль `dispatch_external` (только тесты) (найдено DEV-AUDIT-083).
+Что не так: ТЗ обещает гарантию доставки `order.placed`/`order.filled`/`cb.triggered`/`connection.lost` через outbox; при переполнении очереди EventBus или падении процесса событие теряется (с 083 — хотя бы видно в логе и метрике).
+Как исправить: outbox — запись перед publish, потребитель с отметкой `processed_at`, переобработка при старте; или убрать обещание из ТЗ (решение заказчика). Удалить `dispatchers.py`.
+Связанные: S8R-AUDIT-083, S8R-AUDIT-073.
 
 ### S8R-FIX-039 — Журнал CB: `trigger_value/limit_value` — `Numeric(18,2) NOT NULL`
 Аспект: G | Severity: low | Объём: S
