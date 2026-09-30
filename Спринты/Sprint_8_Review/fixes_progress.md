@@ -75,7 +75,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-071 | MEDIUM | ✅ | `CheckResult(blocked=False…)` при лимите 1 000 и лоте 10×300 | 14 backend + vitest | «signal.price для неизвестного режима», «temporary вместо паузы» → red | 3540/8xf/0; vitest 965; A после переноса 015: 3560/7xf/0 | `908bdd5` | `6128b9c52d8a` | гайд §7; /code-review 2 прохода |
 | S8R-AUDIT-072 | MEDIUM | ✅ | `assert True is False` (`is_within_trading_hours(2026-11-04 12:00)`) | 435 в смежных наборах | «без календаря», «закрытия блокируются в выходные» → red | 3594/6xf/0 | `40e9c6e` | — | входы/закрытия разведены (решение оркестратора; вопрос заказчика 093 не решён в опасную сторону); /code-review 2 прохода |
 | S8R-AUDIT-044 | MEDIUM | ✅ | «сетевой сбой выдан за отказ ключа: API-ключ отклонён T-Invest» | 58 тестов карточки | «исход неизвестен» в тексте ордера → 4 failed | 3671/5xf/0; ruff/mypy/bandit 0 | `63480e8` | — | /code-review 3 прохода (10 + 8 находок); находки S8R-FIX-030, 032 |
-| S8R-AUDIT-045 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-045 | MEDIUM | ✅ | `TypeError: place_order() got an unexpected keyword argument 'figi'`; `NotFoundBrokerError … TMOS` | 29 тестов | 4 мутации → red | 3725/4xf/0; ruff/mypy/bandit 0 | `6fc6b94` | — | /code-review 3 прохода; выход старых сделок — чек-лист A6 |
 | S8R-AUDIT-046 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-047 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-062 | MEDIUM | ⬜ | | | | | | | |
