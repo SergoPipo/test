@@ -78,8 +78,8 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-045 | MEDIUM | ✅ | `TypeError: place_order() got an unexpected keyword argument 'figi'`; `NotFoundBrokerError … TMOS` | 29 тестов | 4 мутации → red | 3725/4xf/0; ruff/mypy/bandit 0 | `6fc6b94` | — | /code-review 3 прохода; выход старых сделок — чек-лист A6 |
 | S8R-AUDIT-046 | MEDIUM | ✅ | `assert Decimal('1000000') == Decimal('100000')`; `('total', 12345678.12345679)` float | 10 + 2 + vitest 30 | «available=total», «баланс из кэша с резервом» → red | 4189/3xf/1 (тайминг-флейк под нагрузкой, отдельно зелёный); ruff/mypy/bandit/typecheck/lint/build 0 | `4b30058` | — | /code-review 2 прохода; e2e s5-account testid → balance-in-positions |
 | S8R-AUDIT-047 | MEDIUM | ✅ | `DID NOT RAISE BrokerError` (direction=long); `KeyError: 'price'`; `'placed' == 'unknown'` | 55 тестов | «BUY if buy else SELL», «BrokerError вместо OrderNotSentError» → red | 4250/3xf/0; ruff/mypy/bandit 0 | `9914d88` | — | /code-review 2 прохода; поведение для пользователя не меняется (ФТ без правок) |
-| S8R-AUDIT-062 | MEDIUM | ⬜ | | | | | | | |
-| S8R-AUDIT-063 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-062 | MEDIUM | ✅ | discover `assert [DiscoveredAccount('SB-NEW')] == []`; `accounts_seen 1 == 0`; старый токен в `_singletons` | 17 + vitest 19 | «skip existing», «только свой пользователь» → red | 4267/3xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `41b7949` | — | /code-review 2 прохода (9 находок) |
+| S8R-AUDIT-063 | MEDIUM | 🔄 | | | | | | | живой GET ISS 2026-09-30: время ISS — MSK (первая 1h-свеча 06:00, последняя 20:00 при 18:30 UTC) |
 | S8R-AUDIT-006 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-077 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-013 | MEDIUM | ✅ | `DID NOT RAISE WebSocketDisconnect`; `assert 200 == 401` (login); `['telegram','email'] == []` | 18 + 21 backend | «проверку jti → pass» → 6 red | 3087/8xf/1 (FIX-016, wt B); ruff 0; mypy ok (180); bandit 0; tsc/lint/build 0 | `e2ecb03` | — | разрыв открытых WS ⏸ → S8R-FIX-017; /code-review 3 прохода |
