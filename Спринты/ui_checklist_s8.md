@@ -62,11 +62,10 @@
 
 ## S8.6 Wizard Telegram test button (контракт C-S8-4)
 
-- [ ] На шаге 4 wizard есть раскрываемый блок «Свой бот» (`Collapse`).
-- [ ] При expanded — `PasswordInput` для `bot_token` (`data-testid="wizard-telegram-bot-token-input"`).
-- [ ] `TextInput` для `chat_id` (`data-testid="wizard-telegram-chat-id-input"`).
-- [ ] Кнопка «Отправить тестовое сообщение» (`data-testid="wizard-telegram-test-button"`) — disabled пока оба поля не заполнены.
-- [ ] При клике — `POST /notifications/telegram/test` (C-S8-4) с body `{bot_token, chat_id}`.
+- [ ] ~~Блок «Свой бот» (bot_token + chat_id)~~ — снят (S8R-AUDIT-084, 2026-09-30): на шаге 4 блока «Свой бот» нет, полей Bot token / Chat ID нет.
+- [ ] Кнопка «Отправить тестовое сообщение» (`data-testid="wizard-telegram-test-button"`) — в блоке привязанного чата; до привязки недоступна или объясняет «сначала привяжите Telegram».
+- [ ] При клике — `POST /notifications/telegram/test` **без тела** (S8R-AUDIT-084): сообщение приходит серверным ботом в привязанный чат; при `DEV_MODE` — «DEV_MODE — не отправлено».
+- [ ] Четвёртый тест за минуту — отказ по лимиту (3/мин).
 - [ ] Toast «✅ Сообщение отправлено» при 200 или «❌ Ошибка: <detail>» при 4xx/5xx.
 - [ ] При завершении wizard (`handleFinish`) — telegram_enabled автовключается для критичных event_types через `notificationApi.bulkUpdate()` (правило `project_wizard_notifications_save`).
 
@@ -294,7 +293,7 @@ MOEX) занижал величину ровно в 10 раз.
 | S8.3 ErrorBoundary | 7 | S7R-ERROR-BOUNDARY |
 | S8.4 Strategy status menu | 7 | S7R-STRATEGY-STATUS |
 | S8.5 Dashboard widgets | 9 | C-S8-1/2/3 |
-| S8.6 Wizard Telegram test | 7 | C-S8-4 |
+| S8.6 Wizard Telegram test | 6 | C-S8-4, S8R-AUDIT-084 |
 | S8.7 Event sync 17 типов | 6 | C-S8-9 |
 | S8.8 Drawing editing | 7 | S7R-DRAWING-* |
 | S8.9 AIChat apply | 6 | S8 mock |
@@ -583,6 +582,6 @@ Q4=a, Q6=a) и `S8R-RECONCILE-NO-ACCOUNT-DEDUP`.
 | S8.42 Статус стратегии и запуск сессии | 5 | S8R-AUDIT-081 |
 | S8.43 Баланс счёта: доступно / в позициях | 3 | S8R-AUDIT-046 |
 | S8.44 Виджет «Состояние систем» при сбое | 2 | S8R-AUDIT-054 |
-| **Итого S8 (новых пунктов)** | **288** | |
+| **Итого S8 (новых пунктов)** | **287** | |
 
 **Расширение S7 базы:** 136 новых пунктов > требуемых 50. Можно дополнить дополнительными edge-cases по факту QA-прогона в 8.R.
