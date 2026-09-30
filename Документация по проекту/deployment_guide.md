@@ -122,7 +122,7 @@ curl -fsS http://localhost/api/v1/health     # {"status":"ok", "cb_state":"ok", 
 с моделями (forward model drift) уже приводило к неработающему входу:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: 2c7bd0443aa6 (head)
+docker compose exec backend alembic current   # ожидается: 6f3a063d1c2e (head)
 docker compose exec backend alembic heads     # та же ревизия — расхождений нет
 ```
 
@@ -353,8 +353,10 @@ docker compose ps            # проверить healthy
 После апдейта сверьте, что миграции доехали до головы:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: 2c7bd0443aa6 (head)
+docker compose exec backend alembic current   # ожидается: 6f3a063d1c2e (head)
 ```
+
+> **ℹ️ Обновление с версии старше `6f3a063d1c2e` (S8R-AUDIT-063, 2026-09-30).** Удаляет из `ohlcv_cache` свечи MOEX ISS (`source` = `moex_iss`, `tinvest+iss`), записанные со сдвигом +3 ч (время ISS — московское, раньше помечалось как UTC). Кэш производный — перезагрузится при первом запросе графика; `downgrade` — no-op.
 
 > **ℹ️ Обновление с версии старше `2c7bd0443aa6` (S8R-AUDIT-081, 2026-09-30).** Миграция данных, схема не меняется: «Черновик» с завершённым бэктестом → «Протестирована»; «Протестирована/Бумажная/Боевая» пересчитываются по живым сессиям (sandbox/real → «Боевая», иначе paper → «Бумажная», иначе «Протестирована»); «Пауза»/«Архив» не меняются. **Необратима** (`downgrade` ничего не восстанавливает) — снимите бэкап БД до `upgrade` (gotcha-19). После обновления запуск сессии возможен только из «Протестирована/Бумажная/Боевая».
 
