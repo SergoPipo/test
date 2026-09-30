@@ -99,7 +99,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-051 | MEDIUM | ✅ | «настройки config.py не описаны в docs/env_vars.md: [AI_ALLOW_PRIVATE_PROVIDER_URLS, …]» | 13 тестов | новое поле Settings → red | 3644/4xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `63edfb0` (wt B) | — | `.env.example` не трогали; drain 10 с (gotcha-80); находка S8R-FIX-033 |
 | S8R-AUDIT-053 | MEDIUM | ✅ | «обход прошёл анализатор: s = getattr(datetime, 'sys')» (удалён getattr) | 292 теста | exit/vars/pickle/__spec__/allow-list +sys → red | 3995/4xf/0 (разовый SIGABRT preflight[dash], S8R-FIX-024); ruff/mypy/bandit/typecheck/lint/build 0 | `f173824` (wt B) | — | только тесты; находка S8R-FIX-034 |
 | S8R-AUDIT-065 | MEDIUM | ✅ | `DID NOT RAISE ValidationError` (×36); xlsx `assert 'f' == 's'` | 125 тестов + vitest | «без префикса ' в CSV» → 11 failed | 4120/3xf/0; vitest 974; ruff/mypy/bandit/typecheck/lint/build 0 | `c7ab8b4` (wt B) | — | gotcha-81; «_» в формате (CNYRUB_TOM); находка S8R-FIX-035 |
-| S8R-AUDIT-066 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-066 | MEDIUM | ✅ | `'&lt;b&gt;x…' in '✅ Telegram привязан к аккаунту <b><b>x</b> & <a href=…>'` (6 из 7) | 7 тестов | «_safe_format_event_text без escape» → red | 4127/3xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `6703261` (wt B) | — | п.5 рецепта (экранировать подписи кнопок) не применён — решение оркестратора по Bot API (text кнопки не HTML); `P&L` с голым `&` в шаблонах /positions — Telegram принимает, не правилось |
 | S8R-AUDIT-097 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-094 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-096 | MEDIUM | ⬜ | | | | | | | |
