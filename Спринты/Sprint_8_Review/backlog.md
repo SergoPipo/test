@@ -298,7 +298,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Как исправить (решение заказчика 2026-09-30): три класса paper / sandbox / real — у каждого свой порог и своя пауза; `get_status` — поля по трём классам; ФТ §12.4.
 Связанные: S8R-AUDIT-070.
 
-### S8R-FIX-027 — Удалить флаг CB `block_shorts`
+### S8R-FIX-027 — ✅ `28770ee` — Удалить флаг CB `block_shorts`
 Аспект: G | Severity: low | Объём: S
 Где: `app/circuit_breaker/{models,schemas,service,engine}.py` (`block_shorts`, `_check_short_block`).
 Что не так: после S8R-AUDIT-032 (short поддерживается, Q5=b) флаг штатно недостижим; в API есть, в UI нет, дефолт True вводит в заблуждение.
@@ -324,7 +324,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/tests/unit/test_config.py::test_preflight_*` (подпроцесс `scripts/check_production_env.sh` через fork, пока в процессе тестов живы потоки gRPC: `fork_posix.cc: Other threads are currently calling into gRPC` → SIGABRT, разные параметры в разных прогонах; найдено DEV-AUDIT-071); 2026-09-26 полный прогон в wt B (после S8R-AUDIT-015) завис на 30 мин без роста CPU, повтор с `-o faulthandler_timeout=300` прошёл за 3 мин — причина не установлена (вероятно тот же класс).
 Что не так: полный pytest на машине/в CI может случайно падать или зависать; зависание без таймаута блокирует гейт.
 Как исправить: для тестов с подпроцессами — `GRPC_ENABLE_FORK_SUPPORT=0`/`posix_spawn` или запуск preflight без fork из процесса с gRPC (отдельный процесс-запускатель); в CI и в гейте — `faulthandler_timeout` (и/или `pytest-timeout`), чтобы зависание давало стек, а не вечное ожидание.
-Наблюдение 2026-09-26: оба зависания полного прогона (wt B и wt A, каждое ~30+ мин без роста CPU) случились при **одновременных** прогонах pytest на машине, в случае A — в том же worktree, где работал DEV; изолированные повторы с `-o faulthandler_timeout` проходят за 3 мин. Вероятная причина — общий ресурс файловой системы/локов между параллельными прогонами (проверить фиксированные пути в тестах: BACKUP_DIR/flock, файлы в `backend/data/`, `/tmp/<fixed>`). Правило оркестратора: полный гейт — только когда в этом worktree не идёт прогон DEV. 2026-09-30: под нагрузкой параллельных прогонов падает тайминг-тест `test_runtime.py::TestSignalToOrderFullMetric::test_existing_metric_is_blind_to_cb_wait` (301 мс > 150), отдельно 3×3 зелёный.
+Наблюдение 2026-09-26: оба зависания полного прогона (wt B и wt A, каждое ~30+ мин без роста CPU) случились при **одновременных** прогонах pytest на машине, в случае A — в том же worktree, где работал DEV; изолированные повторы с `-o faulthandler_timeout` проходят за 3 мин. Вероятная причина — общий ресурс файловой системы/локов между параллельными прогонами (проверить фиксированные пути в тестах: BACKUP_DIR/flock, файлы в `backend/data/`, `/tmp/<fixed>`). Правило оркестратора: полный гейт — только когда в этом worktree не идёт прогон DEV. 2026-09-30: также `test_stream_figi_from_ensure_figi.py::test_silent_source_one_network_wait_per_session_start` (0.406 < 0.4) под нагрузкой; под нагрузкой параллельных прогонов падает тайминг-тест `test_runtime.py::TestSignalToOrderFullMetric::test_existing_metric_is_blind_to_cb_wait` (301 мс > 150), отдельно 3×3 зелёный.
 Связанные: S8R-FIX-005, S8R-AUDIT-038, S8R-AUDIT-040.
 
 ### S8R-FIX-023 — Хвосты S8R-AUDIT-015: тесты идут без FK; audit_log SET NULL конфликтует с append-only триггером
