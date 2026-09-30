@@ -112,7 +112,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-073 | MEDIUM | ✅ | `assert Decimal('0.00') == Decimal('-60000.00')`; `'circuit_breaker.triggered' != 'cb.triggered'` | 13 тестов | «trigger_value=0», «commit→flush», «без перечитывания» → red | 4237/3xf/0; ruff/mypy/bandit 0 | `1322329` (wt B) | — | /code-review 2 прохода; S8R-FIX-039 |
 | S8R-AUDIT-083 | MEDIUM | ✅ | `RuntimeError: smtp exploded`; `'in_app' == 'in_app,telegram'`; `'warning' == 'error'` | 23 теста | «return_exceptions=False» → red | 4388/3xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `bc50928` (wt B) | — | gotcha-82; S8R-FIX-040 |
 | S8R-AUDIT-084 | MEDIUM | ✅ | `assert 400 == 409`; `assert 400 == 200`; `assert 503 == 429` | 3 + переписанные | «extra=ignore» → red | 4393/3xf/0; vitest 1004; ruff/mypy/bandit/typecheck/lint/build 0 | `f25a772` (wt B) | — | CLAUDE.md кода: категория лимитера notifications_test — добавить в инварианты при сведении |
-| S8R-AUDIT-085 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-085 | MEDIUM | ✅ | vitest: telegram_enabled включён без привязки; стор не откатывает; «Очистить все» без вопроса; backend `'sent' == 'failed'` | vitest + 3 backend | «готовность по тесту», «retry=True» → red | 4396/3xf/0; vitest 1012; ruff/mypy/bandit/typecheck/lint/build 0 | `d4222dc` (wt B) | — | тот же DEV, что 084 |
 | S8R-AUDIT-086 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-087 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-005 | LOW | ⬜ | | | | | | | |
