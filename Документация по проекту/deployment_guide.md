@@ -66,13 +66,13 @@ cp .env.example backend/.env.production
 # Откройте `backend/.env.production` и заполните:
 ```
 
+> **Полный перечень настроек** с дефолтами — `docs/env_vars.md` в репозитории кода (S8R-AUDIT-051; тест сверяет его с `app/config.py` в обе стороны). Ниже — то, что оператор задаёт при установке. Ключ T-Invest в `.env` **не задаётся** — каждый пользователь подключает свой в UI (Настройки → Брокер); часовой пояс и чат Telegram тоже не настраиваются через env.
+
 | Переменная | Назначение | Как получить |
 |------------|-----------|--------------|
 | `SECRET_KEY` | JWT signing key (**≥ 32 байт**, ≥ 8 различных символов, без `dev-` и без `change-me`/`CHANGE_ME` — плейсхолдер шаблона отбраковывают preflight и валидатор настроек, S8R-AUDIT-034) | `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `ENCRYPTION_KEY` | AES-256-GCM master key для шифрования broker token'ов (**≥ 32 байт**, те же правила, что у `SECRET_KEY`; проверяется **на старте** backend, а не при первом запросе) | `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `TINVEST_TOKEN` | Production T-Invest API token | Личный кабинет T-Invest |
 | `DATABASE_URL` | SQLite путь внутри контейнера | `sqlite+aiosqlite:////app/data/app.sqlite` (НЕ менять) |
-| `TZ` | Часовой пояс торговли | `Europe/Moscow` (НЕ менять) |
 | `TINVEST_UNARY_TIMEOUT_SEC` | (опционально) Дедлайн одного gRPC-вызова T-Invest, сек (S8R-AUDIT-030); стрим котировок не затрагивает | по умолчанию `10` |
 | `GRID_MAX_WORKERS_TOTAL` | (опционально) Общий предел процессов Grid Search на все параллельные job'ы (S8R-AUDIT-078); `0` — авто `cpu−1` | по умолчанию `0`; уменьшить, если live-торговля соседствует с гридами |
 | `CORS_ORIGINS` | Публичный origin SPA (что видит браузер за Tunnel), через запятую; без него WS отбиваются 403. Preflight: пусто при `DEBUG≠true` → контейнер не стартует, только localhost → предупреждение (S8R-AUDIT-055). Формат — только `http(s)://host[:port]`; регистр, завершающий `/` и порт по умолчанию не важны, `*` и записи без схемы игнорируются. С S8R-AUDIT-038 без верного значения 403 получают не только WS, но и вход и все изменяющие запросы. | `https://moex.example.com` (+ `http://localhost` для local-only §5.5) |
@@ -81,7 +81,6 @@ cp .env.example backend/.env.production
 | `COOKIE_SECURE` | (опционально) Флаг Secure у cookie сессии (S8R-AUDIT-040). Не задано — в production всегда Secure; `auto` — по схеме запроса; `true`/`false` — принудительно (алиасы 1/yes/on, 0/no/off). Доступ без TLS (local-only) — `false`, **не** `DEBUG=true`; preflight предупредит | по умолчанию не задано |
 | `POSITION_CHECK_RETRIES`, `POSITION_CHECK_RETRY_DELAY_SEC` | (опционально) Сколько раз и с какой паузой перепрашивать портфель песочницы, пришедший без бумаг (S8R-AUDIT-011). Диапазоны 3–5 и 5–10 с; значение вне диапазона приводится к границе, в лог — warning | по умолчанию `3` и `5` |
 | `TELEGRAM_BOT_TOKEN` | (опционально) Telegram уведомления | `@BotFather` |
-| `TELEGRAM_CHAT_ID` | (опционально) ID чата для уведомлений | через bot /start, getUpdates API |
 
 > ℹ️ **SPA собирается с относительными адресами** (`/api/v1`, `wss://<host>`, S8R-AUDIT-055): `VITE_*` задавать не нужно, nginx проксирует `/api` и `/ws`. `ARG VITE_API_BASE_URL` в `frontend/Dockerfile` — только для нестандартной раскладки. Локально (`scripts/start.sh`) ту же роль играет dev-proxy Vite (`/api`, `/ws` → :8000).
 
@@ -123,7 +122,7 @@ curl -fsS http://localhost/api/v1/health     # {"status":"ok", "cb_state":"ok", 
 с моделями (forward model drift) уже приводило к неработающему входу:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: d1e2f3a4b5c6 (head)
+docker compose exec backend alembic current   # ожидается: 1d92db59f28d (head)
 docker compose exec backend alembic heads     # та же ревизия — расхождений нет
 ```
 
@@ -621,6 +620,10 @@ docker compose logs -f frontend        # tail nginx
 docker compose logs --since 1h         # за последний час, оба сервиса
 ```
 
+Логи контейнеров — драйвер `json-file` с ротацией **10 МБ × 5 файлов** на сервис (S8R-AUDIT-051, `docker-compose.yml`). Нативный запуск `scripts/start.sh`: при `DEBUG≠true` сначала preflight production-настроек (`scripts/check_production_env.sh`, значения из `.env`), `backend/logs/dev.log` ротируется copytruncate по 50 МБ × 5 (при старте и раз в минуту).
+
+**Остановка backend** (S8R-AUDIT-051, gotcha-80): uvicorn запущен с `--timeout-graceful-shutdown 10` — сначала до 10 с на закрытие соединений, **затем** graceful shutdown торговли (до 45 с); сумма обязана быть меньше `stop_grace_period: 60s`.
+
 ### 8.4 Метрики Performance baseline (Sprint 8 W2)
 
 | Метрика | Цель | Фактический baseline |
@@ -663,7 +666,7 @@ docker compose ps                          # frontend должен быть Up h
 ### 9.3 T-Invest connection_lost спамит уведомления
 
 См. C-S8-7 DEV-2 W2 (S7R-CONNECTION-EVENTS-MARKET-CLOSED): фильтр `_is_moex_open_now()` уже подавляет уведомления вне торговой сессии. Если они приходят в рабочее время:
-- Проверить `TINVEST_TOKEN` валидность через UI Settings → Broker.
+- Проверить валидность API-ключа T-Invest пользователя через UI Settings → Broker.
 - После Sandbox/Production токен switch: `docker compose restart backend` (singleton multiplexer кэширует token, см. C-S8-6).
 
 ### 9.4 Frontend lint падает локально (для разработчика)

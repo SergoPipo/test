@@ -96,7 +96,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-020 | MEDIUM | ✅ | `TimeoutError` ожидания события новой сессии | 2 backend + 5 vitest | «убрать publish» → red | 3625/5xf/0; vitest 969/970 (флейк S8R-FIX-005) | `e25b8ef` (wt B) | — | /code-review не выполнен (пауза) — в ревью пакета |
 | S8R-AUDIT-028 | MEDIUM | ✅ попутно с 001 (`c6bf111`): legacy-путь удалён | | | | | | | |
 | S8R-AUDIT-054 | MEDIUM | ✅ | `assert 200 == 503` (health при disconnected БД); `/health/live` 404 | 15 backend + 11 vitest | `ready=True` → 4 failed | 3631/4xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `774bbb0` (wt B) | — | регресс HealthWidget при 503 найден DEV, исправлен в карточке; находка S8R-FIX-031 |
-| S8R-AUDIT-051 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-051 | MEDIUM | ✅ | «настройки config.py не описаны в docs/env_vars.md: [AI_ALLOW_PRIVATE_PROVIDER_URLS, …]» | 13 тестов | новое поле Settings → red | 3644/4xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `63edfb0` (wt B) | — | `.env.example` не трогали; drain 10 с (gotcha-80); находка S8R-FIX-033 |
 | S8R-AUDIT-053 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-065 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-066 | MEDIUM | ⬜ | | | | | | | |
