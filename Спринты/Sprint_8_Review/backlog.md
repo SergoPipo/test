@@ -29,6 +29,8 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-044 — сетевой сбой = «ключ отклонён», чтения не ретраятся | MEDIUM | «сетевой сбой выдан за отказ ключа» → `errors.classify` (Transient/Auth/NotFound/LINK/LOCAL), ретраи только чтений, тексты ордеров «ответ не получен» | `63480e8` | ФТ §7.8, ТЗ §5.5.5; /code-review — 3 прохода (10 + 8 находок) |
+| S8R-AUDIT-054 — /health всегда ok, tinvest_connected по флагу | MEDIUM | `(200, "database":"disconnected")`, `/health/live` 404 → readiness 503 degraded, liveness, живость `_stream_task`, HealthWidget при 503 | `774bbb0` (wt B) | ФТ §19.5, ТЗ §8.5, гайд §8.1 |
 | S8R-AUDIT-014 — общий AI-ключ без лимита и учёта | MEDIUM | `[200,200,200,200] == [...,429]` → ai_usage_daily, глобальный потолок, учёт /explain | `9afbcb4` (wt B) | миграция `1d92db59f28d`; квота пользователя внутри серверного ключа — находка |
 | S8R-AUDIT-072 — часы торгов без календаря MOEX | MEDIUM | `is_within_trading_hours(праздник 12:00) is True` → календарь для входов sandbox/real, закрытия не блокируются в выходные/перерыв | `40e9c6e` | торги выходного дня — вопрос заказчика; /code-review 2 прохода |
 | S8R-AUDIT-004 — alembic check красный | MEDIUM | `Detected removed table 'user_favorites'` → metadata из app.main, колонки AI в модель, CI alembic check | `112da39` (wt B) | новой ревизии нет |
@@ -180,6 +182,63 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-032 — Оценка худшего случая чтения позиций не учитывает вложенные вызовы инструмента
+Аспект: G | Severity: low | Объём: S
+Где: `app/broker/tinvest/adapter.py::get_real_positions` → `_fetch_instrument_info_by_figi` (свои унарные вызовы), `read_worst_case_sec()` (найдено DEV-AUDIT-044).
+Что не так: `_position_attempt_estimate` рантайма считает попытку сверки по одному чтению портфеля; вложенные запросы инструмента по FIGI могут удлинить попытку сверх оценки → обрыв по `timeout_at` вместо чистого `_PortfolioIncomplete`.
+Как исправить: учитывать вложенные вызовы в оценке (или кэшировать инструмент до попытки).
+Связанные: S8R-AUDIT-044, S8R-AUDIT-009, S8R-AUDIT-011.
+
+### S8R-FIX-031 — Health: нет таймаута `SELECT 1`, нет проверок AI-провайдера и Telegram (обещано ТЗ §8.5)
+Аспект: N | Severity: low | Объём: S
+Где: `backend/app/main.py::health_check` (найдено DEV-AUDIT-054).
+Что не так: зависшая БД держит readiness-запрос без предела (healthcheck контейнера отвалится по своему таймауту без диагностики); проверки AI/Telegram из прежнего ТЗ не реализованы.
+Как исправить: `asyncio.wait_for(SELECT 1, 5)` → `database: timeout`; AI/Telegram — решить, нужны ли в readiness (скорее отдельные поля без влияния на статус).
+Связанные: S8R-AUDIT-054.
+
+### S8R-FIX-030 — Классификация gRPC-кодов в трёх местах (errors.classify, sandbox_recovery, multiplexer)
+Аспект: Q | Severity: low | Объём: S
+Где: `app/broker/tinvest/errors.py::classify`, `app/broker/sandbox_recovery.py` (`is_sandbox_internal_error`, `is_definitive_rejection`), `app/broker/tinvest/multiplexer.py:~57` (`_TERMINAL_GRPC_STATUSES`) (код-ревью 044).
+Что не так: извлечение кода и наборы кодов живут в 2–3 местах; при изменении одного решение о повторе (адаптер) и решение движка (исход ордера) разойдутся. В 044 общий разбор кода вынесен для адаптера и sandbox_recovery; multiplexer — не тронут.
+Как исправить: multiplexer — на общий разбор кода; наборы кодов — одна таблица категорий.
+Связанные: S8R-AUDIT-044, S8R-AUDIT-061.
+
+### S8R-FIX-029 — T-Invest перешёл на TLS-сертификаты НУЦ Минцифры: терминал не подключается к брокеру
+Аспект: G | Severity: **blocker** | Объём: S
+Где: `app/broker/tinvest/*` — каналы gRPC SDK создаются со встроенными корнями grpc (`grpc/_cython/_credentials/roots.pem`); найдено оркестратором 2026-09-30 при подготовке живых сценариев S-1/S-2/S-7.
+Что не так: все эндпоинты T-Invest (`*.tinkoff.ru`, `*.tbank.ru`, sandbox и prod) отдают цепочку до «Russian Trusted Root CA» (Минцифры), которой нет во встроенных корнях → `Tls handshake failed` / DEADLINE_EXCEEDED на любом вызове. Доказательство (без токена): стандартные корни → `UNAVAILABLE Tls handshake failed (TSI_PROTOCOL_FAILURE)`; + корень Минцифры → `UNAUTHENTICATED 40003` (TLS проходит). Причина `CERTIFICATE_VERIFY_FAILED` в конце `tests/test_trading`.
+Чем грозит: без ручной настройки sandbox и real не работают вообще (ордера, сверка, стрим котировок, пробы ключа). Проблема известна с 2026-08-05 (**gotcha-55**), но обход — переменная `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH` — записан только в gotcha: его нет в `deployment_guide.md`, `docker-compose.yml`, `Dockerfile.backend` и `pre_deploy_checklist.md` → Docker-образ и любая новая машина к брокеру не подключатся. Локальный стенд заказчика работает, только если переменная задана в его окружении (исполнителем не проверялось). Отпечаток корня совпадает с записанным в gotcha-55 (независимый источник от 2026-08-05).
+Как исправить (решение заказчика 2026-09-30 — «в код, только для gRPC»): PEM корня (с gosuslugi.ru/crt, заказчик) в репозитории, отпечаток SHA-256 `D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31` закреплён тестом; gRPC-каналы T-Invest доверяют встроенным корням grpc + корню Минцифры (HTTPS/ОС не затрагиваются); гайд — раздел про сертификат и срок его действия. Отдельный PR в `develop`.
+Связанные: S8R-AUDIT-030, S8R-AUDIT-044, S8R-AUDIT-061.
+
+### S8R-FIX-028 — Дневной лимит CB: sandbox и real — раздельные классы денег
+Аспект: G | Severity: medium | Объём: S
+Где: `app/circuit_breaker/engine.py::money_class` (S8R-AUDIT-070: paper / broker = sandbox+real).
+Что не так: виртуальный капитал песочницы входит в базу порога реального счёта и раздувает допустимый убыток real; убыток песочницы паузит real.
+Как исправить (решение заказчика 2026-09-30): три класса paper / sandbox / real — у каждого свой порог и своя пауза; `get_status` — поля по трём классам; ФТ §12.4.
+Связанные: S8R-AUDIT-070.
+
+### S8R-FIX-027 — Удалить флаг CB `block_shorts`
+Аспект: G | Severity: low | Объём: S
+Где: `app/circuit_breaker/{models,schemas,service,engine}.py` (`block_shorts`, `_check_short_block`).
+Что не так: после S8R-AUDIT-032 (short поддерживается, Q5=b) флаг штатно недостижим; в API есть, в UI нет, дефолт True вводит в заблуждение.
+Как исправить (решение заказчика 2026-09-30 — «удалить»): колонка (миграция, `batch_alter_table`), поля схем, проверка `_check_short_block`, событие `short_block`; ФТ/ТЗ.
+Связанные: S8R-AUDIT-032.
+
+### S8R-FIX-026 — Удаление стратегии с историей сессий → архивирование
+Аспект: B | Severity: medium | Объём: S
+Где: `app/strategy/service.py::delete` (S8R-AUDIT-015: история сессий → 422 `strategy_delete_blocked_history`), фронт — список стратегий и кнопка «Удалить».
+Что не так: стратегию, по которой хоть раз торговали, удалить нельзя никогда — список засоряется.
+Как исправить (решение заказчика 2026-09-30 — «архивировать»): при истории сессий «Удалить» переводит стратегию в `archived` (статус уже есть в модели) и скрывает из списка; история и налоговые данные целы; без истории — физическое удаление; живые сессии — по-прежнему отказ (069). Архивная стратегия не запускается (081). ФТ/ТЗ, UI-чеклист.
+Связанные: S8R-AUDIT-015, S8R-AUDIT-069, S8R-AUDIT-081.
+
+### S8R-FIX-025 — Торги выходного дня MOEX: входы sandbox/real в Сб/Вс по расписанию ISS
+Аспект: G | Severity: medium | Объём: M
+Где: `app/common/trading_hours.py`, `app/market_data/calendar*` (S8R-AUDIT-093/072: Сб/Вс неторговые).
+Что не так: с 2025 MOEX проводит торги выходного дня по части инструментов; терминал запрещает в Сб/Вс все входы sandbox/real.
+Как исправить (решение заказчика 2026-09-30 — «разрешить по расписанию ISS»): торговые дни и часы выходного дня — из ISS (расписание/`dailytable`, признак инструмента, торгуемого в выходные); вход разрешён только для таких инструментов в часы сессии выходного дня; защитные закрытия — как сейчас; ФТ §1.6/1.7, ТЗ §5.9.
+Связанные: S8R-AUDIT-072, S8R-AUDIT-093.
 
 ### S8R-FIX-024 — Флейки полного прогона: SIGABRT при fork с живыми потоками gRPC; разовое зависание гейта
 Аспект: Q | Severity: medium | Объём: S

@@ -110,7 +110,7 @@ moex-frontend   Up 1 minute  (healthy)      127.0.0.1:80->80/tcp
 
 ```bash
 curl -fsS http://localhost/                  # HTML с <div id="root">
-curl -fsS http://localhost/api/v1/health     # {"status":"ok", "cb_state":"closed", ...}
+curl -fsS http://localhost/api/v1/health     # {"status":"ok", "cb_state":"ok", ...}; 503 — degraded
 ```
 
 **Реальный IP клиента (S8R-AUDIT-037).** Backend запускается командой `uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="$TRUSTED_PROXY_IPS"`. `TRUSTED_PROXY_IPS` — от кого backend принимает `X-Forwarded-For`; по умолчанию `172.28.0.10` — фиксированный адрес nginx в сети `moex-net` (`172.28.0.0/24`). Переопределяется в окружении или `.env` compose (IP/CIDR через запятую). Та же пара `--proxy-headers`/`TRUSTED_PROXY_IPS` передаёт backend и схему запроса (`X-Forwarded-Proto`, S8R-AUDIT-040). При ошибке `Pool overlaps` сменить одновременно подсеть `networks.moex-net.ipam`, `ipv4_address` сервиса frontend, `TRUSTED_PROXY_IPS` и `set_real_ip_from` в `nginx.conf`.
@@ -571,17 +571,11 @@ docker compose exec backend alembic downgrade -1
 curl http://localhost/api/v1/health
 ```
 
-Возвращает (см. C-S8-1 DEV-2 W2):
+Возвращает (S8R-AUDIT-054):
 ```json
-{
-  "status": "ok",
-  "version": "1.0",
-  "cb_state": "closed",
-  "tinvest_connected": true,
-  "scheduler_running": true,
-  "scheduler_jobs": ["backup_job", "moex_calendar_refresh_job", ...]
-}
+{"status":"ok","version":"0.1.0","database":"connected","cb_state":"ok","tinvest_connected":true,"scheduler_running":true,"scheduler_jobs":6}
 ```
+`status`: `ok` (200) или `degraded` (**503**, если БД недоступна или планировщик остановлен); тело при 503 то же — видно, что отказало. `tinvest_connected` на статус не влияет. Liveness: `GET /api/v1/health/live` → 200 всегда. Healthcheck контейнера — readiness; `restart: unless-stopped` не перезапускает unhealthy-контейнер (только вышедший процесс), при unhealthy backend frontend не поднимется (`depends_on: service_healthy`). Число `scheduler_jobs` — ориентировочное.
 
 ### 8.2 Admin metrics (`/api/v1/admin/metrics`)
 
