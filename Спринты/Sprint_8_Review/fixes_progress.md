@@ -77,7 +77,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-044 | MEDIUM | ✅ | «сетевой сбой выдан за отказ ключа: API-ключ отклонён T-Invest» | 58 тестов карточки | «исход неизвестен» в тексте ордера → 4 failed | 3671/5xf/0; ruff/mypy/bandit 0 | `63480e8` | — | /code-review 3 прохода (10 + 8 находок); находки S8R-FIX-030, 032 |
 | S8R-AUDIT-045 | MEDIUM | ✅ | `TypeError: place_order() got an unexpected keyword argument 'figi'`; `NotFoundBrokerError … TMOS` | 29 тестов | 4 мутации → red | 3725/4xf/0; ruff/mypy/bandit 0 | `6fc6b94` | — | /code-review 3 прохода; выход старых сделок — чек-лист A6 |
 | S8R-AUDIT-046 | MEDIUM | ✅ | `assert Decimal('1000000') == Decimal('100000')`; `('total', 12345678.12345679)` float | 10 + 2 + vitest 30 | «available=total», «баланс из кэша с резервом» → red | 4189/3xf/1 (тайминг-флейк под нагрузкой, отдельно зелёный); ruff/mypy/bandit/typecheck/lint/build 0 | `4b30058` | — | /code-review 2 прохода; e2e s5-account testid → balance-in-positions |
-| S8R-AUDIT-047 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-047 | MEDIUM | ✅ | `DID NOT RAISE BrokerError` (direction=long); `KeyError: 'price'`; `'placed' == 'unknown'` | 55 тестов | «BUY if buy else SELL», «BrokerError вместо OrderNotSentError» → red | 4250/3xf/0; ruff/mypy/bandit 0 | `9914d88` | — | /code-review 2 прохода; поведение для пользователя не меняется (ФТ без правок) |
 | S8R-AUDIT-062 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-063 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-006 | MEDIUM | ⬜ | | | | | | | |
