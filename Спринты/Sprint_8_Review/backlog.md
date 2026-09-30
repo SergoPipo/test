@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-065 — ticker без формата: формулы в CSV/XLSX, подмена имени файла | MEDIUM | `DID NOT RAISE ValidationError` (×36), xlsx `'f' == 's'` → `Ticker` во всех схемах, `export_safety` (CSV/XLSX/RFC 5987) | `c7ab8b4` (wt B) | «_» в regex (валютные пары); gotcha-81; ФТ §14.1, ТЗ §4.11/§5.13 |
 | S8R-AUDIT-053 — тесты денилиста песочницы выборочны | MEDIUM | «обход прошёл анализатор: s = getattr(datetime, 'sys')» (мутация) → 292 параметризованных теста по спискам модуля, 41 «золотой» обход, храповик | `f173824` (wt B) | только тесты; мёртвая запись `object.__subclasses__`, ФТ §12.5 отстаёт — S8R-FIX-034 |
 | S8R-AUDIT-051 — .env.example/гайд неполны, compose без ротации логов и drain | MEDIUM | «настройки config.py не описаны в docs/env_vars.md: [...]» → перечень + тест сверки, logging 10m×5, `--timeout-graceful-shutdown 10`, preflight и ротация в start.sh | `63edfb0` (wt B) | `.env.example` ⏸ (решение заказчика); drain 10 вместо 30 (gotcha-80); гайд §3.2/§3.3/§8.3, ТЗ §8.2 |
 | S8R-AUDIT-044 — сетевой сбой = «ключ отклонён», чтения не ретраятся | MEDIUM | «сетевой сбой выдан за отказ ключа» → `errors.classify` (Transient/Auth/NotFound/LINK/LOCAL), ретраи только чтений, тексты ордеров «ответ не получен» | `63480e8` | ФТ §7.8, ТЗ §5.5.5; /code-review — 3 прохода (10 + 8 находок) |
@@ -184,6 +185,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-035 — Rerun бэктеста с legacy-тикером, не проходящим новый формат: 500 и запись в `running`
+Аспект: D | Severity: low | Объём: S
+Где: `app/backtest/router.py:~698` (rerun собирает `BacktestCreate` из тикера старой записи) (найдено DEV-AUDIT-065).
+Что не так: после S8R-AUDIT-065 legacy-тикер в БД, не проходящий `Ticker`, даёт `ValidationError` вне обработчика → 500, новая запись остаётся `running`.
+Как исправить: валидировать до создания записи → 422 с понятным текстом; или нормализовать legacy-тикеры миграцией данных.
+Связанные: S8R-AUDIT-065.
 
 ### S8R-FIX-034 — Денилист песочницы: мёртвая запись `object.__subclasses__`; ФТ §12.5 отстаёт от белого списка
 Аспект: C | Severity: low | Объём: S
