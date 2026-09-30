@@ -108,7 +108,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-096 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-095 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-081 | MEDIUM | ✅ | `assert 200 == 409`; `DID NOT RAISE StrategyStatusConflictError`; `'tested' == 'live'` | тесты карточки + vitest 84 | «refusal=None», «без promote_draft», «без защиты parking» → red | 4213/3xf/1 (preflight[sh] под нагрузкой, S8R-FIX-024); alembic round-trip ok | `81aa3f7` (wt B) | — | решения заказчика 2026-09-30; миграция `2c7bd0443aa6`; ⚠️ E2E с запуском draft-стратегий → 409 |
-| S8R-AUDIT-082 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-082 | MEDIUM | ✅ | vitest `expected "vi.fn()" to be called with…` (тишина при 422); pytest `AssertionError: []` | 5 парсер + 5 хук + store/CodePanel | 3 мутации → red | 4223/3xf/0; vitest 999; ruff/mypy/bandit/typecheck/lint/build 0 | `def57dd` (wt B) | — | S8R-FIX-038 |
 | S8R-AUDIT-073 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-083 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-084 | MEDIUM | ⬜ | | | | | | | |
