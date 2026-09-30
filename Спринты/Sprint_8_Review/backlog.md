@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-053 — тесты денилиста песочницы выборочны | MEDIUM | «обход прошёл анализатор: s = getattr(datetime, 'sys')» (мутация) → 292 параметризованных теста по спискам модуля, 41 «золотой» обход, храповик | `f173824` (wt B) | только тесты; мёртвая запись `object.__subclasses__`, ФТ §12.5 отстаёт — S8R-FIX-034 |
 | S8R-AUDIT-051 — .env.example/гайд неполны, compose без ротации логов и drain | MEDIUM | «настройки config.py не описаны в docs/env_vars.md: [...]» → перечень + тест сверки, logging 10m×5, `--timeout-graceful-shutdown 10`, preflight и ротация в start.sh | `63edfb0` (wt B) | `.env.example` ⏸ (решение заказчика); drain 10 вместо 30 (gotcha-80); гайд §3.2/§3.3/§8.3, ТЗ §8.2 |
 | S8R-AUDIT-044 — сетевой сбой = «ключ отклонён», чтения не ретраятся | MEDIUM | «сетевой сбой выдан за отказ ключа» → `errors.classify` (Transient/Auth/NotFound/LINK/LOCAL), ретраи только чтений, тексты ордеров «ответ не получен» | `63480e8` | ФТ §7.8, ТЗ §5.5.5; /code-review — 3 прохода (10 + 8 находок) |
 | S8R-AUDIT-054 — /health всегда ok, tinvest_connected по флагу | MEDIUM | `(200, "database":"disconnected")`, `/health/live` 404 → readiness 503 degraded, liveness, живость `_stream_task`, HealthWidget при 503 | `774bbb0` (wt B) | ФТ §19.5, ТЗ §8.5, гайд §8.1 |
@@ -183,6 +184,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-034 — Денилист песочницы: мёртвая запись `object.__subclasses__`; ФТ §12.5 отстаёт от белого списка
+Аспект: C | Severity: low | Объём: S
+Где: `app/sandbox/ast_analyzer.py` (`FORBIDDEN_NAMES` содержит `"object.__subclasses__"` — имя с точкой не совпадает ни с `Name`, ни с `attr`; конструкцию на деле блокирует правило dunder); ФТ §12.5 (нет `math`, `decimal`, allow-list атрибутов) (найдено DEV-AUDIT-053).
+Что не так: запись создаёт ложное ощущение защиты; ФТ описывает не тот белый список.
+Как исправить: убрать запись (храповик 053 обновить сознательно) или заменить на `__subclasses__`; актуализировать ФТ §12.5.
+Связанные: S8R-AUDIT-053, S8R-AUDIT-001.
 
 ### S8R-FIX-033 — Хвосты настроек: мёртвые AI_DAILY/MONTHLY_LIMIT, несуществующий дефолт AI_MODEL, --reload в start.sh при DEBUG=false
 Аспект: N | Severity: low | Объём: S

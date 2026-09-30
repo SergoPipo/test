@@ -97,7 +97,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-028 | MEDIUM | ✅ попутно с 001 (`c6bf111`): legacy-путь удалён | | | | | | | |
 | S8R-AUDIT-054 | MEDIUM | ✅ | `assert 200 == 503` (health при disconnected БД); `/health/live` 404 | 15 backend + 11 vitest | `ready=True` → 4 failed | 3631/4xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `774bbb0` (wt B) | — | регресс HealthWidget при 503 найден DEV, исправлен в карточке; находка S8R-FIX-031 |
 | S8R-AUDIT-051 | MEDIUM | ✅ | «настройки config.py не описаны в docs/env_vars.md: [AI_ALLOW_PRIVATE_PROVIDER_URLS, …]» | 13 тестов | новое поле Settings → red | 3644/4xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `63edfb0` (wt B) | — | `.env.example` не трогали; drain 10 с (gotcha-80); находка S8R-FIX-033 |
-| S8R-AUDIT-053 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-053 | MEDIUM | ✅ | «обход прошёл анализатор: s = getattr(datetime, 'sys')» (удалён getattr) | 292 теста | exit/vars/pickle/__spec__/allow-list +sys → red | 3995/4xf/0 (разовый SIGABRT preflight[dash], S8R-FIX-024); ruff/mypy/bandit/typecheck/lint/build 0 | `f173824` (wt B) | — | только тесты; находка S8R-FIX-034 |
 | S8R-AUDIT-065 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-066 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-097 | MEDIUM | ⬜ | | | | | | | |
