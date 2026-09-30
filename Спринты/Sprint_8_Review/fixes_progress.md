@@ -18,7 +18,7 @@ Q1=d (всё подряд до исчерпания ресурса, остано
 - **S-1/S-2/S-7 на счёте #3** — сейчас, первым шагом, на коде `s8r/fix-high`.
 
 ### Уточнение Q6-081 (2026-09-30)
-Статуса `active` в модели нет (6 значений). Решение заказчика: запуск сессии — из **tested / paper / live** (как фильтр «Активные»); draft, paused, archived — отказ с подсказкой. Автоперевод при запуске: paper-сессия → `paper`, sandbox/real → `live` (live старше paper); при остановке **последней** живой сессии стратегии → `tested`.
+Статуса `active` в модели нет (6 значений). Решение заказчика: запуск сессии — из **tested / paper / live** (как фильтр «Активные»); draft, paused, archived — отказ с подсказкой. Автоперевод при запуске: paper-сессия → `paper`, sandbox/real → `live` (live старше paper); при остановке **последней** живой сессии стратегии → `tested`. Дополнение (2026-09-30): после **успешного бэктеста** стратегия `draft` → `tested` автоматически (прочие статусы бэктест не меняет).
 
 ### Новый блокер — TLS T-Invest (2026-09-30, обнаружен при подготовке S-1/S-2/S-7)
 Уточнение: проблема известна с 2026-08-05 — **gotcha-55** (обход `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`), но в гайд/compose/Dockerfile не попала; утверждение «стенд заказчика тоже не подключится» — не проверено (зависит от окружения заказчика). T-Bank перевёл gRPC API (`*.tinkoff.ru`, `*.tbank.ru`, sandbox и prod) на сертификаты НУЦ Минцифры (Russian Trusted Root CA). gRPC терминала (grpc 1.80, встроенные корни) не доверяет корню → **терминал не подключается к T-Invest вообще**. Диагностика без токена: стандартные корни → `Tls handshake failed`/DEADLINE; + корень Минцифры → `UNAUTHENTICATED 40003` (TLS проходит). Отпечаток корня, отданного сервером: SHA-256 `D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31`. Это же — причина `CERTIFICATE_VERIFY_FAILED` в тестах.
@@ -76,7 +76,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-072 | MEDIUM | ✅ | `assert True is False` (`is_within_trading_hours(2026-11-04 12:00)`) | 435 в смежных наборах | «без календаря», «закрытия блокируются в выходные» → red | 3594/6xf/0 | `40e9c6e` | — | входы/закрытия разведены (решение оркестратора; вопрос заказчика 093 не решён в опасную сторону); /code-review 2 прохода |
 | S8R-AUDIT-044 | MEDIUM | ✅ | «сетевой сбой выдан за отказ ключа: API-ключ отклонён T-Invest» | 58 тестов карточки | «исход неизвестен» в тексте ордера → 4 failed | 3671/5xf/0; ruff/mypy/bandit 0 | `63480e8` | — | /code-review 3 прохода (10 + 8 находок); находки S8R-FIX-030, 032 |
 | S8R-AUDIT-045 | MEDIUM | ✅ | `TypeError: place_order() got an unexpected keyword argument 'figi'`; `NotFoundBrokerError … TMOS` | 29 тестов | 4 мутации → red | 3725/4xf/0; ruff/mypy/bandit 0 | `6fc6b94` | — | /code-review 3 прохода; выход старых сделок — чек-лист A6 |
-| S8R-AUDIT-046 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-046 | MEDIUM | ✅ | `assert Decimal('1000000') == Decimal('100000')`; `('total', 12345678.12345679)` float | 10 + 2 + vitest 30 | «available=total», «баланс из кэша с резервом» → red | 4189/3xf/1 (тайминг-флейк под нагрузкой, отдельно зелёный); ruff/mypy/bandit/typecheck/lint/build 0 | `4b30058` | — | /code-review 2 прохода; e2e s5-account testid → balance-in-positions |
 | S8R-AUDIT-047 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-062 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-063 | MEDIUM | ⬜ | | | | | | | |
