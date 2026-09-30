@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-081 — статус стратегии не связан с сессиями | MEDIUM | `assert 200 == 409`; `'tested' == 'live'` → запуск из tested/paper/live, автоперевод, граф на бэкенде, draft→tested после бэктеста | `81aa3f7` (wt B) | миграция данных `2c7bd0443aa6`; /code-review 2 прохода; ФТ §3.1/§6.1, ТЗ §4.2, гайд §7, UI S8.42; единый setter — S8R-FIX-037 |
 | S8R-AUDIT-046 — available = total | MEDIUM | `Decimal('1000000') == Decimal('100000')`; float в JSON → свободные рубли (общий разбор с 027, без кэша), in_positions, Decimal-строки | `4b30058` | /code-review 2 прохода; ФТ §7.3; blocked отдельной карточкой не показан (вопрос UI, в отчёт) |
 | S8R-AUDIT-045 — FIGI ордера мимо ensure_figi, межтокенный кэш | MEDIUM | `place_order() got an unexpected keyword argument 'figi'`; NotFound для TMOS → figi= из сделки/ensure_figi во всех путях, FIGI до отправки, приоритет режимов MOEX | `6fc6b94` | /code-review 3 прохода (9+8+8); ТЗ §5.6; чек-лист A6 |
 | S8R-AUDIT-097 — пул до 15 соединений; persist_with_retry только в бэктесте | MEDIUM | `AsyncAdaptedQueuePool`; `database is locked [SQL: COMMIT]` → NullPool, повтор единицы работы в tax/corporate_actions/favorites | `3f85fac` (wt B) | /code-review 2 прохода (двойная выплата при повторе — закрыта); ТЗ §8.9; ручные циклы бэктеста — S8R-FIX-036 |
@@ -189,6 +190,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-037 — Производный статус стратегии пересчитывается вручную в местах смены статуса сессии
+Аспект: Q | Severity: low | Объём: S
+Где: `app/strategy/status.py::sync_strategy_status_with_sessions` — вызовы в `engine._finish_stop_locked`, старте, `_delete_session_locked` (код-ревью 081).
+Что не так: новый путь, переводящий сессию в `stopped` (авто-стоп CB, kill switch, пометка сироты), может забыть пересчёт — стратегия останется «Боевая» без сессий.
+Как исправить: единый setter статуса сессии, вызывающий пересчёт, или вычисление «активного» статуса при чтении.
+Связанные: S8R-AUDIT-081.
 
 ### S8R-FIX-036 — Ручные циклы повтора при «locked» в бэктесте дублируют `persist_with_retry`
 Аспект: Q | Severity: low | Объём: S

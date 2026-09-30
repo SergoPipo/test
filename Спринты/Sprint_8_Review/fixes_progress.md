@@ -107,7 +107,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-094 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-096 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-095 | MEDIUM | ⬜ | | | | | | | |
-| S8R-AUDIT-081 | MEDIUM | ⬜ | | | | | | | |
+| S8R-AUDIT-081 | MEDIUM | ✅ | `assert 200 == 409`; `DID NOT RAISE StrategyStatusConflictError`; `'tested' == 'live'` | тесты карточки + vitest 84 | «refusal=None», «без promote_draft», «без защиты parking» → red | 4213/3xf/1 (preflight[sh] под нагрузкой, S8R-FIX-024); alembic round-trip ok | `81aa3f7` (wt B) | — | решения заказчика 2026-09-30; миграция `2c7bd0443aa6`; ⚠️ E2E с запуском draft-стратегий → 409 |
 | S8R-AUDIT-082 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-073 | MEDIUM | ⬜ | | | | | | | |
 | S8R-AUDIT-083 | MEDIUM | ⬜ | | | | | | | |
