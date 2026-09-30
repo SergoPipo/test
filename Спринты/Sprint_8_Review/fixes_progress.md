@@ -114,7 +114,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-084 | MEDIUM | ✅ | `assert 400 == 409`; `assert 400 == 200`; `assert 503 == 429` | 3 + переписанные | «extra=ignore» → red | 4393/3xf/0; vitest 1004; ruff/mypy/bandit/typecheck/lint/build 0 | `f25a772` (wt B) | — | CLAUDE.md кода: категория лимитера notifications_test — добавить в инварианты при сведении |
 | S8R-AUDIT-085 | MEDIUM | ✅ | vitest: telegram_enabled включён без привязки; стор не откатывает; «Очистить все» без вопроса; backend `'sent' == 'failed'` | vitest + 3 backend | «готовность по тесту», «retry=True» → red | 4396/3xf/0; vitest 1012; ruff/mypy/bandit/typecheck/lint/build 0 | `d4222dc` (wt B) | — | тот же DEV, что 084 |
 | S8R-AUDIT-086 | MEDIUM | ✅ | `KeyError: 'auth.login'`; `cb.triggered опубликован до записи pending_events` | 15 + р.2 | 3 мутации → red | 4419/3xf/0; ruff/mypy/bandit 0 | `2f84469` (wt B) | — | /code-review 2 прохода |
-| S8R-AUDIT-087 | MEDIUM | 🔄 | | | | | | | (а) делистинг → Could, (д) §12.8, (е) §4.2 — ФТ внесены оркестратором; (б) OHLCV, (в) автопауза N отказов, (г) частичное исполнение — DEV |
+| S8R-AUDIT-087 | MEDIUM | ✅ | `ImportError: validate_ohlcv`; `no attribute consecutive_broker_rejections`; `assert 5 == 8` (остаток через 5 с) | 16 + 23 + 14 | 4 мутации → red | 4494/3xf/0; ruff/mypy/bandit 0; alembic round-trip | `f0243da` (wt B) | — | Q6: (а)/(д)/(е) — ФТ; /code-review 3 прохода; S8R-FIX-042 |
 | S8R-AUDIT-005 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-016 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-017 | LOW | ⬜ | | | | | | | |

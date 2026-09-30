@@ -126,7 +126,7 @@ curl -fsS http://localhost/api/v1/health     # {"status":"ok", "cb_state":"ok", 
 с моделями (forward model drift) уже приводило к неработающему входу:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: bbb9a0908e89 (head)
+docker compose exec backend alembic current   # ожидается: c7d2e5a19f84 (head)
 docker compose exec backend alembic heads     # та же ревизия — расхождений нет
 ```
 
@@ -357,8 +357,10 @@ docker compose ps            # проверить healthy
 После апдейта сверьте, что миграции доехали до головы:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: bbb9a0908e89 (head)
+docker compose exec backend alembic current   # ожидается: c7d2e5a19f84 (head)
 ```
+
+> **ℹ️ Обновление с версии старше `c7d2e5a19f84` (S8R-AUDIT-087, 2026-09-30).** Добавляет `trading_sessions.consecutive_broker_rejections` (серия отказов брокера для автопаузы); обратима; существующие сессии получают 0. Открытые сделки, записанные до обновления как частично исполненные, будут урегулированы первым проходом recovery (одно чтение ордера у брокера и одно уведомление на сделку).
 
 > **ℹ️ Обновление с версии старше `bbb9a0908e89` (S8R-FIX-027, 2026-09-30).** Снимает колонку `circuit_breaker_configs.block_shorts` (флаг запрета шорта; после S8R-AUDIT-032 штатно не действовал). Строки конфигов сохраняются; `downgrade` возвращает колонку со значением `1`.
 
