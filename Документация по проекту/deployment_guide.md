@@ -278,6 +278,8 @@ docker compose exec backend ls -la /app/backups
 
 Файлы переживают `docker compose down` (хранятся в named volume `moex-sqlite-backups`).
 
+Права (S8R-AUDIT-042): файлы снимков, `before_restore_*`, `restore_tmp_*`, дампы и `.lock` — 0600 с момента создания; при старте сервис приводит к 0600 свои старые файлы. Каталог 0700 ставится, только если его создал сервис; у существующего каталога с открытыми правами в логе `backup_dir_permissions_open` — выполните `chmod 700 <BACKUP_DIR>`. Restore переносит на восстановленную БД права и группу прежней.
+
 ### 6.2 Cron на хосте (опционально, для off-site copy)
 
 ```cron
@@ -333,6 +335,17 @@ docker compose logs backend | grep encryption_key_mismatch   # должно бы
 - Снимок до ротации и все старые бэкапы зашифрованы старым ключом: при утечке — увести офлайн или удалить.
 - Смена `SECRET_KEY` (JWT): `docker compose run --rm backend python -m app.cli rotate-jwt-secret`, затем новый `SECRET_KEY` в `.env.production` и `docker compose restart backend`; все пользователи входят заново.
 - **Откат кода после деплоя версии с S8R-AUDIT-041 = повторный ввод ключей брокеров и AI**: новый формат шифртекста старой версией не читается.
+
+**Привязка ключей к записям (S8R-AUDIT-042)** — однократно после обновления на версию с 042:
+
+```bash
+docker compose stop backend
+docker compose run --rm backend python -m app.cli rebind-encrypted-secrets
+#   локально: cd backend && python -m app.cli rebind-encrypted-secrets --server-stopped
+docker compose start backend
+```
+
+Команда привязывает ключи брокеров и AI, сохранённые до 042, к их записям; перед записью делает снимок в `BACKUP_DIR`; повторный запуск безопасен («nothing to rebind»); `ENCRYPTION_KEY` не меняется. Снимок перед ней и все более старые снимки содержат ключи без привязки: восстановление такого снимка возвращает записи, которые приложение читает через совместимый режим. Чтобы закрыть это полностью — после rebind выполнить `rotate-encryption-key` (старые снимки после этого читаются только старым ключом — храните его вместе с ними или удалите снимки) либо увести старые снимки офлайн. Откат кода ниже 042 после rebind = повторный ввод ключей.
 
 ---
 

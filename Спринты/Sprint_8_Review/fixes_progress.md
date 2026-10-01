@@ -132,7 +132,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-022 | LOW | ✅ | RED не получен — угрозу закрыла 096 | 2 теста | «общее имя файла» → red | 4564/1s/1xf/0 | `55a964a` | — | только тест |
 | S8R-AUDIT-023 | LOW | ✅ | `assert 200 == 403`; категория `general` | 2 + 38 | «get_current_user» → red | 4566/1s/1xf/0 | `e68870e` | — | Ticker вместо regex рецепта; `..` в Ticker — закрыть в 098 |
 | S8R-AUDIT-031 | LOW | ✅ | filled без цены (`Decimal 0`); pending → closed; 1.005 → 1.00 | 10 + 4576 | «только is None», «без ветки cancelled» → red | 4576/1s/1xf/0 | `a28c2a9` | 2 | новый `app/common/money.py`; P&L «слепой» позиции → S8R-FIX-048 |
-| S8R-AUDIT-042 | LOW | ⬜ | | | | | | | |
+| S8R-AUDIT-042 | LOW | ✅ | `TypeError … 'context'`; `'sk-a...WXYZ' == '…WXYZ'`; `(16877 & 63) == 0`; токен в выводе telegram.ext/uvicorn.access | 48 + 50 | AAD header-only, по record.msg, широкий regex, без поэлементных args, без _create_private_file → red | 4627/1xf/0 | `9efb76e` | 3 | развилка AAD — п.38; CLI rebind; гайд §6а, чеклист A7 |
 | S8R-AUDIT-043 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-048 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-064 | LOW | ⬜ | | | | | | | |
