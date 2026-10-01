@@ -130,7 +130,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-018 | LOW | ✅ | `DID NOT RAISE InvalidProviderURLError` (CGNAT); тело ответа в verify; `201 in (403, 422)` | 21 тест | 3 мутации → red | 4604/1s/2xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `bde605d` | — | gotcha-84; S8R-FIX-046 |
 | S8R-AUDIT-019 | LOW | ✅ | `app.strategy.code_generator вернулся`; сводка по чужой стратегии (22 failed) | guard 21 + 1 | 2 мутации → red | 4562/1s/1xf/0 (тестов меньше — удалены вместе с кодом), coverage 91 %; ruff/mypy/bandit/typecheck/lint/build 0 | `4f31507` | — | S8R-FIX-047 |
 | S8R-AUDIT-022 | LOW | ✅ | RED не получен — угрозу закрыла 096 | 2 теста | «общее имя файла» → red | 4564/1s/1xf/0 | `55a964a` | — | только тест |
-| S8R-AUDIT-023 | LOW | ⬜ | | | | | | | |
+| S8R-AUDIT-023 | LOW | ✅ | `assert 200 == 403`; категория `general` | 2 + 38 | «get_current_user» → red | 4566/1s/1xf/0 | `e68870e` | — | Ticker вместо regex рецепта; `..` в Ticker — закрыть в 098 |
 | S8R-AUDIT-031 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-042 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-043 | LOW | ⬜ | | | | | | | |
