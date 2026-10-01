@@ -129,7 +129,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-017 | LOW | ✅ | `assert 422 == 202` (grid без strategy_id); прочее закрыто в 015 | 4 теста | «strategy_id из тела» → red | 4583/2xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `0ba87cb` | — | |
 | S8R-AUDIT-018 | LOW | ✅ | `DID NOT RAISE InvalidProviderURLError` (CGNAT); тело ответа в verify; `201 in (403, 422)` | 21 тест | 3 мутации → red | 4604/1s/2xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `bde605d` | — | gotcha-84; S8R-FIX-046 |
 | S8R-AUDIT-019 | LOW | ✅ | `app.strategy.code_generator вернулся`; сводка по чужой стратегии (22 failed) | guard 21 + 1 | 2 мутации → red | 4562/1s/1xf/0 (тестов меньше — удалены вместе с кодом), coverage 91 %; ruff/mypy/bandit/typecheck/lint/build 0 | `4f31507` | — | S8R-FIX-047 |
-| S8R-AUDIT-022 | LOW | ⬜ | | | | | | | |
+| S8R-AUDIT-022 | LOW | ✅ | RED не получен — угрозу закрыла 096 | 2 теста | «общее имя файла» → red | 4564/1s/1xf/0 | `55a964a` | — | только тест |
 | S8R-AUDIT-023 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-031 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-042 | LOW | ⬜ | | | | | | | |
