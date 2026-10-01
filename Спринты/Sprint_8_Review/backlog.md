@@ -29,6 +29,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-025 — три количества на закрытии, partially_filled терминален | HIGH | `filled_lots=6`; `P&L 700.00`; `множитель 7` → `lot_size` колонкой, `position_lots`, частичный выход по факту + пауза | `1bba46b`, `fdfbb5c` | миграция `e9e5c919fbbf`; /code-review 6 + контрольный (recovery тем же правилом); DEV на Opus |
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
+| S8R-AUDIT-018 — SSRF AI: TOCTOU, CGNAT, сырой текст в verify | LOW | DID NOT RAISE (CGNAT); тело провайдера в verify; не-admin сохранял приватный URL → not is_global, закреплённый резолв, класс ошибки, приватный URL только admin | `bde605d` | gotcha-84; NAT64 — S8R-FIX-046 |
 | S8R-AUDIT-017 — мутирующие эндпоинты с чужим id | LOW | основное закрыто в 015 → закреплено тестами; grid: strategy_id необязателен | `0ba87cb` | ТЗ §11.5 (поле strategy_id grid игнорируется) |
 | S8R-AUDIT-016 — оракул 403/404 по чужим id | LOW | чужой → 403, несуществующий → 404 → `get_owned_or_404` (владелец в SQL) | `b334a35` | ТЗ §7.9; ws_backtest — проверка после выборки без оракула (info) |
 | S8R-AUDIT-005 — downgrade base падает на idx_ai_user | LOW | `ValueError: No such index: 'idx_ai_user'` → проверка инспектором до batch | `6843a0a` (s8r/fix-low) | полный откат всей цепочки проверен |
@@ -208,6 +209,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-046 — SSRF-барьер AI: NAT64 `64:ff9b::/96` считается глобальным
+Аспект: D | Severity: low | Объём: S
+Где: `app/ai/url_validator.py::_is_forbidden_ip` (найдено DEV-AUDIT-018).
+Что не так: адрес NAT64 со встроенным приватным IPv4 даёт `is_global=True` и проходит проверку.
+Как исправить: извлекать встроенный IPv4 из `64:ff9b::/96` (и 6to4/Teredo при необходимости) и проверять его.
+Связанные: S8R-AUDIT-018.
 
 ### S8R-FIX-045 — Запись кэша справочника инструментов падает «database is locked» во время бэктеста
 Аспект: J | Severity: low | Объём: S

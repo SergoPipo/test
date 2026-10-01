@@ -127,7 +127,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-005 | LOW | ✅ | `ValueError: No such index: 'idx_ai_user'` | test_audit_s8r_alembic 3 | «безусловный drop_index» → red | 4571/1s/2xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `6843a0a` | — | ветка s8r/fix-low (стек на MEDIUM), worktree wt-s8r-fixes-c |
 | S8R-AUDIT-016 | LOW | ✅ | `чужой id → 403 {Нет доступа…}; несуществующий → 404` | 8 параметров | «проверка после выборки» → red | 4579/2xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `b334a35` | — | |
 | S8R-AUDIT-017 | LOW | ✅ | `assert 422 == 202` (grid без strategy_id); прочее закрыто в 015 | 4 теста | «strategy_id из тела» → red | 4583/2xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `0ba87cb` | — | |
-| S8R-AUDIT-018 | LOW | ⬜ | | | | | | | |
+| S8R-AUDIT-018 | LOW | ✅ | `DID NOT RAISE InvalidProviderURLError` (CGNAT); тело ответа в verify; `201 in (403, 422)` | 21 тест | 3 мутации → red | 4604/1s/2xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `bde605d` | — | gotcha-84; S8R-FIX-046 |
 | S8R-AUDIT-019 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-022 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-023 | LOW | ⬜ | | | | | | | |
