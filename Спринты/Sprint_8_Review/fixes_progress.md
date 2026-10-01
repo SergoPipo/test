@@ -125,7 +125,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-086 | MEDIUM | ✅ | `KeyError: 'auth.login'`; `cb.triggered опубликован до записи pending_events` | 15 + р.2 | 3 мутации → red | 4419/3xf/0; ruff/mypy/bandit 0 | `2f84469` (wt B) | — | /code-review 2 прохода |
 | S8R-AUDIT-087 | MEDIUM | ✅ | `ImportError: validate_ohlcv`; `no attribute consecutive_broker_rejections`; `assert 5 == 8` (остаток через 5 с) | 16 + 23 + 14 | 4 мутации → red | 4494/3xf/0; ruff/mypy/bandit 0; alembic round-trip | `f0243da` (wt B) | — | Q6: (а)/(д)/(е) — ФТ; /code-review 3 прохода; S8R-FIX-042 |
 | S8R-AUDIT-005 | LOW | ✅ | `ValueError: No such index: 'idx_ai_user'` | test_audit_s8r_alembic 3 | «безусловный drop_index» → red | 4571/1s/2xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `6843a0a` | — | ветка s8r/fix-low (стек на MEDIUM), worktree wt-s8r-fixes-c |
-| S8R-AUDIT-016 | LOW | ⬜ | | | | | | | |
+| S8R-AUDIT-016 | LOW | ✅ | `чужой id → 403 {Нет доступа…}; несуществующий → 404` | 8 параметров | «проверка после выборки» → red | 4579/2xf/0; ruff/mypy/bandit/typecheck/lint/build 0 | `b334a35` | — | |
 | S8R-AUDIT-017 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-018 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-019 | LOW | ⬜ | | | | | | | |
