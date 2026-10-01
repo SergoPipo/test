@@ -241,8 +241,8 @@ MOEX) занижал величину ровно в 10 раз.
 
 ## S8.17 Общие проверки за S8
 
-- [ ] **vitest:** `pnpm test --run` → 544 passed / 0 failed (+2 flaky `client.test.ts` pre-existing, baseline `S7` 528 + 16 новых тестов S8 widget'ов = 544).
-- [ ] **TypeScript:** `npx tsc --noEmit` → 0 errors.
+- [ ] **vitest:** `pnpm test` → 544 passed / 0 failed (+2 flaky `client.test.ts` pre-existing, baseline `S7` 528 + 16 новых тестов S8 widget'ов = 544).
+- [ ] **TypeScript:** `pnpm typecheck` (`tsc -b`; `tsc --noEmit` в проекте с references ничего не проверяет — gotcha-60) → 0 errors.
 - [ ] **Lint:** 0 errors / 9 warnings (baseline после W2; цель W3 Поток A — `--max-warnings 0`).
 - [ ] **Playwright nightly baseline 158:** не падает. Скриншоты для новых компонентов S8 (Sparkline / Health-extended / Wizard-step4 / Admin-landing) — частично собраны UX W3 (см. `Sprint_8/screenshots/`).
 - [ ] **Backend pytest:** 1490 passed / 0 failed / coverage 80%+ (gate active в W3).
@@ -304,7 +304,7 @@ MOEX) занижал величину ровно в 10 раз.
 | S8.14 Performance | 4 | BACK1 W2 |
 | S8.15 6 сценариев | 30 | UX W3 |
 | S8.16 9 Cross-DEV contracts | 9 | C-S8-1..9 |
-| S8.17 Общие S8 | 8 | baseline |
+| S8.17 Общие S8 | 9 | baseline |
 | S8.18 Статус-футер и WS сессий | 5 | S8R-FOOTER-NO-ACTIVE-SESSIONS |
 | S8.19 Дневной отчёт — unrealized + idle-сессии | 8 | S8R-DAILY-STATS-UNREALIZED-NO-LOT + S8R-DAILY-STATS-IDLE-SESSION-HIDDEN |
 
@@ -607,6 +607,6 @@ Q4=a, Q6=a) и `S8R-RECONCILE-NO-ACCOUNT-DEDUP`.
 | S8.45 Мастер и настройки уведомлений | 3 | S8R-AUDIT-085 |
 | S8.46 Торги выходного дня | 3 | S8R-FIX-025 |
 | S8.47 Пароль, вход и дисклеймер | 5 | S8R-AUDIT-043 |
-| **Итого S8 (новых пунктов)** | **299** | |
+| **Итого S8 (новых пунктов)** | **300** | |
 
 **Расширение S7 базы:** 136 новых пунктов > требуемых 50. Можно дополнить дополнительными edge-cases по факту QA-прогона в 8.R.

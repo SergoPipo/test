@@ -1,6 +1,6 @@
 # Deployment Guide — MOEX Trading Terminal
 
-> **Версия:** v1.1 (2026-09-24…26 — правки по фиксам аудита `S8R-AUDIT-NNN`, последняя — 037: реальный IP за прокси, nginx на 127.0.0.1; v1.0 — 2026-05-13, Sprint 8 W3, M4 Production-ready).
+> **Версия:** v1.2 (2026-10-01 — фиксы аудита `S8R-AUDIT-NNN` до 043 и `S8R-FIX-029`: корень НУЦ Минцифры (§6б), привязка ключей `rebind-encrypted-secrets` и права бэкапов (§6, §6а), старт backend — dummy-хеш, очистка `revoked_tokens`, дисклеймер (§3.3), head миграций `7fe0fae4293c` (§7); v1.1 — 2026-09-24…26, до 037; v1.0 — 2026-05-13, Sprint 8 W3, M4 Production-ready).
 > **Целевая платформа:** Mac mini + Docker compose + launchd + Cloudflare Tunnel.
 > Утверждено заказчиком 2026-05-12 (arch_design_s8 §7.2, batch 3 п.10).
 
