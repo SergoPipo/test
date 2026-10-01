@@ -76,7 +76,7 @@ Backend требует оба поля через `model_validator` (`schemas.py
 
 ---
 
-### A5. `S8R-FIX-029` (blocker) — gRPC к T-Invest не доверяет корню НУЦ Минцифры
+### A5. ✅ `S8R-FIX-029` (blocker) — gRPC к T-Invest не доверяет корню НУЦ Минцифры — закрыто PR #30 (корень встроен, гайд §6б)
 Все эндпоинты T-Invest подписаны «Russian Trusted Root CA»; обход (gotcha-55, `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`) не попал в compose/Dockerfile/гайд — Docker-образ к брокеру не подключится. Решение заказчика 2026-09-30: корень встраивается в код только для gRPC (карточка S8R-FIX-029, отдельный PR).
 
 ### A6. Перед обновлением с открытыми позициями sandbox/real (S8R-AUDIT-045)

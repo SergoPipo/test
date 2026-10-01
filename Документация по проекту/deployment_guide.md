@@ -335,6 +335,17 @@ docker compose logs backend | grep encryption_key_mismatch   # должно бы
 
 ---
 
+## 6б. Сертификат T-Invest — корень НУЦ Минцифры (S8R-FIX-029)
+
+Все gRPC-эндпоинты T-Invest (sandbox и prod) подписаны цепочкой до **Russian Trusted Root CA** Минцифры. Этого корня нет во встроенных корнях `grpcio`, поэтому без него любой вызов брокера падает `Tls handshake failed` (gotcha-55).
+
+- Терминал при старте сам собирает набор «встроенные корни grpc + `backend/app/broker/tinvest/certs/russian_trusted_root_ca.pem`» и выставляет `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`. Ручная настройка не нужна; в Docker-образ файл попадает вместе с кодом.
+- Если оператор задал `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH` сам — терминал её не меняет (тогда в указанном файле должен быть и этот корень).
+- HTTPS (ISS, AI, Telegram) и хранилище ОС не затрагиваются.
+- Источник: https://www.gosuslugi.ru/crt, SHA-256 `D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31`, действует до **27.02.2032**.
+- Замена: новый PEM в тот же путь, обновить `EXPECTED_SHA256` в `tests/unit/test_broker/test_grpc_trusted_roots.py`, пересобрать образ. Тест падает за 180 дней до истечения.
+- В журнале: `grpc_trusted_roots_configured` (набор собран), `grpc_trusted_roots_preset` (переменная задана оператором), `grpc_trusted_roots_setup_failed` (сбой — брокер будет недоступен).
+
 ## 7. Обновление до новой версии
 
 ```bash

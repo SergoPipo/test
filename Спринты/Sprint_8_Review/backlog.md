@@ -319,7 +319,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Как исправить: multiplexer — на общий разбор кода; наборы кодов — одна таблица категорий.
 Связанные: S8R-AUDIT-044, S8R-AUDIT-061.
 
-### S8R-FIX-029 — T-Invest перешёл на TLS-сертификаты НУЦ Минцифры: терминал не подключается к брокеру
+### S8R-FIX-029 — ✅ `54314f0`, PR #30 — T-Invest перешёл на TLS-сертификаты НУЦ Минцифры: терминал не подключается к брокеру
 Аспект: G | Severity: **blocker** | Объём: S
 Где: `app/broker/tinvest/*` — каналы gRPC SDK создаются со встроенными корнями grpc (`grpc/_cython/_credentials/roots.pem`); найдено оркестратором 2026-09-30 при подготовке живых сценариев S-1/S-2/S-7.
 Что не так: все эндпоинты T-Invest (`*.tinkoff.ru`, `*.tbank.ru`, sandbox и prod) отдают цепочку до «Russian Trusted Root CA» (Минцифры), которой нет во встроенных корнях → `Tls handshake failed` / DEADLINE_EXCEEDED на любом вызове. Доказательство (без токена): стандартные корни → `UNAVAILABLE Tls handshake failed (TSI_PROTOCOL_FAILURE)`; + корень Минцифры → `UNAUTHENTICATED 40003` (TLS проходит). Причина `CERTIFICATE_VERIFY_FAILED` в конце `tests/test_trading`.
