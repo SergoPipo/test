@@ -30,6 +30,7 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 | S8R-AUDIT-068 — CB по просадке не работает для sandbox/real | HIGH | `CheckResult(blocked=False)` → equity по сделкам, пик на сессии, свежая цена | `6fbe378` | миграция `f6a2c8e41d93`; /code-review: 3 находки (устаревшая цена, потеря пика, комиссия входа) исправлены |
 | S8R-AUDIT-026 — `max(1, …)` заказывает лот сверх бюджета | HIGH | `assert 1 == 0` → 0 лотов, пропуск + уведомление; CB той же формулой | `cbd6541` | фронтовое предупреждение не добавлено — нет источника лота (S8R-FIX-014); /code-review 4 находки |
 | S8R-AUDIT-023 — /corporate-actions/detect любому пользователю | LOW | не-admin 200 → require_admin, list[Ticker] ≤ 50, лимитер trading | `e68870e` | `..` в Ticker → в 098 |
+| S8R-AUDIT-031 — мелкие несоответствия торгового учёта | LOW | filled без цены (`Decimal 0`), pending → closed в trades_closed, 1.005 → 1.00, комиссия терялась → три источника цены, вход без цены → расхождение + пауза, cancelled вне trades_closed, `quantize_money` | `a28c2a9` | P&L «слепой» позиции при закрытии → S8R-FIX-048 |
 | S8R-AUDIT-022 — повторная генерация налогового отчёта перезаписывает файл | LOW | угрозу закрыла 096 → контрактный тест (RED не получен, мутация «общее имя файла» → red) | `55a964a` | Content-Disposition `tax_report_{year}` одинаков у отчётов года — косметика |
 | S8R-AUDIT-019 — мёртвый и дублирующий код на критических путях | LOW | «code_generator вернулся» (guard) → удалены code_generator, sandbox executor/router/schemas, dispatchers, restore_sessions, мёртвые методы BacktestService, персистентность rate_limiter | `4f31507` | тестов меньше (4562), покрытие 91 %; RestrictedPython — S8R-FIX-047; ключи Bollinger — S8R-FIX-004 |
 | S8R-AUDIT-018 — SSRF AI: TOCTOU, CGNAT, сырой текст в verify | LOW | DID NOT RAISE (CGNAT); тело провайдера в verify; не-admin сохранял приватный URL → not is_global, закреплённый резолв, класс ошибки, приватный URL только admin | `bde605d` | gotcha-84; NAT64 — S8R-FIX-046 |
@@ -212,6 +213,13 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Где: `backend/app/circuit_breaker/engine.py` (`_check_max_drawdown` вызывается только из `check_before_order` — промежуточный пик нереализованной прибыли между сигналами не ловится; `_check_daily_loss_limit` — unrealized из `ohlcv_cache` без проверки свежести, см. S8R-AUDIT-070), `DailyStat.peak_equity` — никем не пишется (найдено DEV-AUDIT-068).
 Как исправить: обновление пика на закрытии свечи (без сети), та же проверка свежести цены для дневного лимита (в составе 070), удалить или начать писать `DailyStat.peak_equity`.
 Связанные: S8R-AUDIT-068, S8R-AUDIT-070.
+
+### S8R-FIX-048 — P&L позиции, вошедшей без цены, при закрытии не считается
+Аспект: B | Severity: low | Объём: S
+Где: `app/trading/engine.py` (закрытие сделки с `entry_price IS NULL`) — после S8R-AUDIT-031 вход без цены от брокера становится `filled` с расхождением (найдено DEV-AUDIT-031).
+Что не так: при закрытии такой позиции realized P&L не вычисляется (нет базы), в статистику и CB уходит 0.
+Как исправить: при закрытии дозапросить цену входа у брокера (операции по ордеру / `GetOrderState`), при неудаче — P&L не учитывать в статистике явно и показать пометку «P&L не определён» в карточке сделки.
+Связанные: S8R-AUDIT-031.
 
 ### S8R-FIX-047 — Зависимость `RestrictedPython` больше не используется
 Аспект: Q | Severity: low | Объём: S
