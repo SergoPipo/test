@@ -237,6 +237,12 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Как исправить (предложение оркестратора): 409 с перечнем сессий с открытыми позициями (как у стратегий — S8R-FIX-026); ФТ — уточнить.
 Связанные: S8R-AUDIT-064, S8R-AUDIT-099.
 
+### S8R-FIX-057 — Бэктест: побарный `iloc` и `strftime` при сборке кривой — узкое место на годе минуток
+Аспект: H | Severity: low | Объём: S
+Где: `app/backtest/engine.py` — `close_prices` через `data_df.iloc[i]` на каждый бар и `strftime` на каждый бар для бенчмарка IMOEX (найдено DEV-AUDIT-079, 2026-10-02: после 079 это самое медленное место сборки кривой).
+Как исправить: векторно (`data_df["close"].to_numpy()`, сопоставление дат индекса один раз); замер до/после на годе минуток; метрики не меняются.
+Связанные: S8R-AUDIT-079.
+
 ### S8R-FIX-056 — Тип `Ticker` приводит тикер к верхнему регистру — ломает фьючерсы MOEX со смешанным регистром
 Аспект: B | Severity: medium | Объём: S
 Где: `app/common/ticker.py::normalize_ticker` (`value.upper()`, S8R-AUDIT-065, в develop с PR #31) — используется в `market_data/router.py` (`/candles`, `/sparkline`, `/instruments/{ticker}`, `/bonds/*`), `backtest/schemas.py`, `corporate_actions/router.py` (найдено DEV-AUDIT-098, 2026-10-02).
