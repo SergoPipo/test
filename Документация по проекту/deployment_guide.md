@@ -130,7 +130,7 @@ curl -fsS http://localhost/api/v1/health     # {"status":"ok", "cb_state":"ok", 
 с моделями (forward model drift) уже приводило к неработающему входу:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: 7fe0fae4293c (head)
+docker compose exec backend alembic current   # ожидается: fb26c08f99c8 (head)
 docker compose exec backend alembic heads     # та же ревизия — расхождений нет
 ```
 
@@ -389,8 +389,10 @@ docker compose ps            # проверить healthy
 После апдейта сверьте, что миграции доехали до головы:
 
 ```bash
-docker compose exec backend alembic current   # ожидается: 7fe0fae4293c (head)
+docker compose exec backend alembic current   # ожидается: fb26c08f99c8 (head)
 ```
+
+> **ℹ️ Обновление с версии старше `fb26c08f99c8` (S8R-FIX-056, 2026-10-02).** Индекс `ix_instruments_ticker_upper` по выражению `upper(ticker)` — поиск справочника без учёта регистра. Создаётся мгновенно, данные не меняются; `alembic downgrade -1` удаляет индекс. `alembic check` пишет предупреждение, что индекс по выражению на SQLite не читается обратно, — это ожидаемо.
 
 > **ℹ️ Обновление с версии старше `7fe0fae4293c` (S8R-AUDIT-096, 2026-10-01).** `tax_lots.report_id` (FK → `tax_reports`, CASCADE), колонка `remaining_quantity` снята; существующие лоты удаляются (производные данные, пересоздаются следующей генерацией отчёта); прежние отчёты и их файлы сохраняются; `downgrade` возвращает `remaining_quantity=0`.
 
