@@ -93,6 +93,7 @@ cp .env.example backend/.env.production
 
 ### 3.3 Сборка и запуск Docker compose
 > ℹ️ На старте backend повторно доставляет необработанные критические события прошлого запуска (`pending_events`, окно 1 ч, S8R-AUDIT-086); при остановке дожидается фоновых записей outbox (≤ 6 с).
+> ℹ️ S8R-AUDIT-050: backend ставится строго из `backend/requirements.lock` (`--no-deps --require-hashes`, хэши каждого пакета), SDK T-Invest — `scripts/install_tinvest_sdk.sh` по commit-hash из `pyproject.toml`, после установки — `pip check` и `scripts/verify_install.py` (extras); base-образы закреплены по `@sha256` и обновляются PR Dependabot (S8R-AUDIT-049); pnpm — 9.15.9 (`packageManager`). Обновление зависимостей: правка `pyproject.toml` → `backend/scripts/lock_deps.sh` → коммит обоих lock. Лицензии — `docs/licenses.md` репо кода.
 > ℹ️ S8R-AUDIT-043: на старте backend один раз считает служебный хеш Argon2 для проверки несуществующих логинов (~50 мс, в потоке) и сразу чистит истёкшие записи `revoked_tokens` (далее — раз в 24 ч). После обновления каждому пользователю при первом входе покажется окно дисклеймера (одно нажатие «Принимаю»); существующие пароли продолжают работать, новая политика (≥ 12 символов, буква и цифра) действует при смене пароля.
 
 
