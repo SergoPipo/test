@@ -136,7 +136,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-043 | LOW | ✅ | `assert 0 == 1` (verify не вызван); 423; нет `cleanup_revoked_tokens`; `200 == 403`; `assert 1 == 4` | 5 файлов pytest + 6 vitest | без dummy-verify, без гейта, read-modify-write, отказ → 401 → red | 4658/1xf/0; vitest 1058 | `842854f` | 3 | ревью 086 п.7 («сбой журнала → 401») заменён на единый 503; resume — тоже под гейтом |
 | S8R-AUDIT-048 | LOW | ✅ | нет `TInvestService`; naive vs aware `TypeError`; `'EXECUTED' == 'UNKNOWN'`; два sandbox-счёта; `['reopened','reopened']` | 78 (test_rate_limiter_registry + reopen) | кэш выкл., вся песочница в общую квоту, эпоха — время, account_id из объекта, сосед без сверки, потолок на все → red | 4759/1xf/0 | `5325063` | 3 | 059 перенесена cherry-pick → `a78e0c3`; пропуск сверки при ошибке чтения портфеля — подтверждено оркестратором |
 | S8R-AUDIT-064 | LOW | ✅ | `httpx.ConnectError`; пагинация без cursor (5001 запрос); переподключение из-за битой свечи; `503 == 200` | 3 файла pytest + vitest стора | узкий except маппера, без _stopping, без проброса, 503 при кэше → red | 4887/1s/1xf/0; vitest 1067 | `f73085f` | 2+1 | parse_candles — уже 063, удаление счёта — уже 099 |
-| S8R-AUDIT-049 | LOW | ⬜ | | | | | | | |
+| S8R-AUDIT-049 | LOW | ✅ | «нет permissions»; actions не по SHA; нет dependabot.yml; группа push без run_id | test_ci_workflows 15 | убрать permissions, группа по ref → red | 5116/0 (р.1) | `29413f8`* + docs `d0abe74` | 1+1 | *detached A, перенос после 050; команды удаления — заказчику (раздел «Команды заказчику») |
 | S8R-AUDIT-050 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-052 | LOW | ✅ | чеклист: 300 `- [ ]` при «Итого 299»; README: «старт Sprint 9», плейсхолдер, `tsc --noEmit` | — (документация) | — | — | docs | — | выполнено оркестратором (владелец — документация); расхождение счётчика — S8.17 (9 пунктов, в таблице 8) |
 | S8R-AUDIT-059 | LOW | ✅ | docs-пути не None; `DID NOT RAISE RuntimeError`; расширенные поля анониму; `200 == 401` | test_health 22+, test_main 11, test_config | расширенные анониму, без решения по подписи, без перехвата SQLAlchemyError → red | 4787/1xf/0 | `d62ad0d`* | 2+1 | *detached A, cherry-pick в s8r/fix-low после 048; решения — п.48 |
@@ -268,6 +268,30 @@ pytest **4570 passed / 1 skipped / 3 xfailed / 0 failed** (315 с), coverage **9
 - S8R-FIX-003 — ТЗ §8.4: JSON-логи с ротацией не существуют; `dev.log` без ротации и с правами 644 (low).
 - S8R-FIX-002 — `test_users_cli.py` вакуумен: CLI без ключей падает на импорте настроек (low; найдено DEV-034).
 - S8R-FIX-001 — `SOURCE=volume`: live-интерпретатор считает по close, backtrader по volume (low; найдено DEV-002).
+
+## Команды заказчику (S8R-AUDIT-049, собрано 2026-10-02; не выполнялись исполнителем)
+
+Репо кода (`Develop/`), локальные ветки, слитые в `origin/develop` (кроме develop/main/s8r/audit):
+```bash
+cd ~/Documents/Claude_Code/Test/Develop
+git branch -d docs/claude-md-stack-gotchas feat/chart-drawings-rev2 fix/fe-backtest-ui fix/fe-charts fix/fe-core-refactor fix/fe-network fix/fe-security fix/fe-ui-misc fix/s5r2-track4-relogin-401 p1/auth-hardening p1/be-trad-06 p1/wave2-backend p1/wave3-frontend pr10 s1/arch-fixes s1/auth s1/backend-init s1/db-models s1/frontend s1/infra s2/broker-settings s2/moex-iss s3/owner-review s5r/chart-hardening-and-closeout s6r/code-fixes s7/sprint-7 s8/sprint-8 s8r/fix-blocker s8r/fix-high s8r/fix-medium
+git push origin --delete feat/chart-drawings-rev2 fix/s5r2-track4-relogin-401 p1/auth-hardening p1/be-trad-06 p1/wave2-backend p1/wave3-frontend s3/owner-review s5r/chart-hardening-and-closeout s5r/ci-cleanup s5r/closeout s5r/closeout-wave3 s5r/e2e-s4-fix s5r/live-runtime-loop s5r/real-positions s7/sprint-7 s8/sprint-8 s8r/acceptance-fixes-2026-07-26 s8r/backlog-cleanup-2026-08 s8r/backlog-fixes-2026-07-27 s8r/bug-23-interpreter s8r/bug-31-unified-codegen s8r/ci-green-2026-08 s8r/fix-blocker s8r/fix-high s8r/fix-medium s8r/fix-tls-root s8r/sandbox-account-reopen s8r/sandbox-review-fixes s8r/tail-fixes s8r/tax-and-commission-tail
+git branch -f main origin/main
+git stash list   # stash@{0} — страховка правки .env.example (2026-07-29); если правка проверена: git stash drop stash@{0}
+git branch -D s8r/fix-tls-root   # локальная, смёржена (#30); -D — т.к. upstream удалён после push --delete
+```
+Ветку `s8r/fix-low` и worktree `wt-s8r-fixes`, `wt-s8r-fixes-c` уберу сам после мержа PR LOW.
+
+Репо документации (`Test/`):
+```bash
+cd ~/Documents/Claude_Code/Test
+git log --oneline -1 worktree-agent-a8dcfbad   # fa6cf3d «docs(faq): инструкция миграции на VPS» — не в main
+# если коммит не нужен:
+git worktree remove .claude/worktrees/agent-a8dcfbad && git branch -D worktree-agent-a8dcfbad
+# если нужен — cherry-pick в docs/backlog-006-strategy-builder, затем те же две команды
+git push origin docs/s5r2-skeleton-track4   # ветка опережает remote на 1 — или удалить, если не нужна
+```
+После мержа PR LOW: вкладка GitHub → Insights → Dependency graph → Dependabot — проверить, что `backend/pyproject.toml` с git-зависимостью SDK разбирается без ошибки.
 
 ## Следующий шаг
 **Обновлено 2026-10-01.** BLOCKER/HIGH/MEDIUM смёржены (develop `7b2eaf3`, PR #28–#31); worktree A (`wt-s8r-fixes`, `s8r/fix-medium`) больше не нужен для работ — убрать в конце цикла.
