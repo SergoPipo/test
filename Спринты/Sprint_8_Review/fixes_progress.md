@@ -297,11 +297,9 @@ git push origin docs/s5r2-skeleton-track4   # ветка опережает remo
 После мержа PR LOW: вкладка GitHub → Insights → Dependency graph → Dependabot — проверить, что `backend/pyproject.toml` с git-зависимостью SDK разбирается без ошибки.
 
 ## Следующий шаг
-**Обновлено 2026-10-01.** BLOCKER/HIGH/MEDIUM смёржены (develop `7b2eaf3`, PR #28–#31); worktree A (`wt-s8r-fixes`, `s8r/fix-medium`) больше не нужен для работ — убрать в конце цикла.
-Пакет LOW — worktree C `wt-s8r-fixes-c`, ветка `s8r/fix-low` (стек на `ffc2a42`): закрыто 005, 016, 017, 018, 019, 022, 023, 031, 042 (вершина `9efb76e`); **043 — раунд 4 правок у DEV** (cfg_043.json). Перед PR LOW: влить develop `7b2eaf3` (ожидаемые конфликты: `trading/engine.py` — 031 vs REV-MQ комиссия/цена входа; `stack_gotchas/INDEX.md` v41 в обеих ветках с разным содержимым).
-Очередь LOW: 048 → 064 → 049 (команды заказчику текстом) → 050 → 052 → 059 → 060 → 098 (+ запрет `..` в Ticker) → 067 → 079 → 088 + 4-я карточка «Заблокировано под заявки» (решение заказчика).
-Затем пакет S8R-FIX-030…049 (кроме требующих решения), AI_MODEL=`claude-opus-5-5` (033), ПФИ отдельной строкой (043-FIX).
-Флейк к проверке на гейте LOW: полный pytest DEV-043 завис ~40 % около `test_stream_gap.py`/`test_budget_ceiling.py` при параллельном pytest в другом worktree.
-Правило гейтов: `-o faulthandler_timeout=240`, лог в файл; bandit — как CI: `bandit -r app/ -ll -c .bandit`.
-Инструменты: `s8r-evidence/fixes/tools/` (dev_base.md, compose.py, card.sh, adhoc.py — ad-hoc промпты по находкам ревью/CI, live.sh, live_client.py, cfg_*.json).
-В конце цикла: убрать worktree `wt-s8r-live`, `live_copy.db`, scratchpad `tlsexp`; команды заказчику текстом — stash drop, удаление веток.
+**Обновлено 2026-10-02.** BLOCKER/HIGH/MEDIUM/LOW смёржены (develop `2d460cf`, PR #28–#32). Worktree: A `wt-s8r-fixes` (detached), C `wt-s8r-fixes-c` (`s8r/fix-low`, смёржена) — использовать под пакет S8R-FIX (новая ветка от develop, напр. `s8r/fix-findings`), убрать в конце цикла.
+Пакет S8R-FIX: открытые 030–039, 041–046, 048–053, 055–057 (047 и 054 закрыты, 040 → дубль 086); требует решения заказчика — 052 (предложение: 409 при stopped-сессии с открытыми позициями — вопрос задан 2026-10-02, ответа нет). Решения заказчика уже есть: 033 AI_MODEL=`claude-opus-5-5`, 043 ПФИ отдельной строкой вне базы ЦБ.
+Флейки к перепроверке: S8R-FIX-050 (зависание полного pytest при параллельных прогонах), vitest `StrategyEditPageDelete` (таймаут 5 с под нагрузкой, S8R-FIX-005).
+Правило гейтов: `-o faulthandler_timeout=240`, лог в файл; bandit — `-ll -c .bandit`.
+Инструменты: `s8r-evidence/fixes/tools/` (compose.py + card.sh; для FIX-карточек — cfg с полем CARD из backlog; adhoc.py — находки ревью/CI; stand.sh — E2E-стенд; review_compose.py + rcfg_*.json — ревью по осям).
+В конце цикла: убрать worktree A и C; команды заказчику — раздел «Команды заказчику» выше (плюс удаление `s8r/fix-low` после мержа).
