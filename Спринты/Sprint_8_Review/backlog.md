@@ -242,6 +242,12 @@ PR #27 (доказательные тесты) смёржен в `develop` пе�
 Как исправить (предложение оркестратора): 409 с перечнем сессий с открытыми позициями (как у стратегий — S8R-FIX-026); ФТ — уточнить.
 Связанные: S8R-AUDIT-064, S8R-AUDIT-099.
 
+### S8R-FIX-060 — Тест CB зависит от времени суток: `test_peak_persists_when_signal_skipped_out_of_hours`
+Аспект: Q | Severity: medium | Объём: S
+Где: `backend/tests/test_circuit_breaker/test_audit_s8r_drawdown_sandbox.py::test_peak_persists_when_signal_skipped_out_of_hours` — окно торговых часов строится как «сейчас +1–2 ч»; в 22:18 МСК (и, вероятно, около полуночи) тест падает (найдено DEV-FIX-049, 2026-10-02). CI запускается в разное время — флейк CI.
+Как исправить: зафиксировать «сейчас» (фиктивные часы/monkeypatch источника времени CB) на рабочем времени MSK; проверить соседние тесты CB/торговых часов на ту же зависимость.
+Связанные: S8R-AUDIT-068, S8R-FIX-025.
+
 ### S8R-FIX-059 — Бэктест: сборка `candle_series` (itertuples + dict на бар) — узкое место на годе минуток
 Аспект: H | Severity: low | Объём: S
 Где: `app/backtest/engine.py` — после S8R-FIX-057 основное время `run` на годе минуток — построение `candle_series` (`itertuples` и словарь на каждый бар) (найдено DEV-FIX-BT, 2026-10-02).
