@@ -11,3 +11,9 @@ Develop/
 # Playwright MCP debug artefacts (local analysis only)
 .playwright-mcp/
 chart_*.png
+
+# S8R-AUDIT-049: локальные артефакты циклов (CLAUDE.md — не коммитить)
+s8r-evidence/
+/*.png
+/*.crt
+Спринты/**/prompt_s8r_*.md
