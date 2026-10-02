@@ -729,7 +729,7 @@ docker compose exec backend python -c "from app.scheduler.service import schedul
 
 ### 9.6 Контейнер `frontend` показывает старую версию SPA после `git pull`
 
-Vite hashes JS-файлы по контенту — браузер кеш не виноват. Причина: Docker layer cache. Решение:
+Хешированные чанки `/assets/` кешируются `immutable`, а `index.html` отдаётся с `Cache-Control: no-cache` (S8R-AUDIT-057/060) — браузер после обновления сам берёт новый `index.html`. Проверка: `curl -sI https://<домен>/ | grep -i cache-control` → `no-cache`. Если версия всё равно старая — причина в Docker layer cache. Решение:
 ```bash
 docker compose build --no-cache frontend
 docker compose up -d frontend

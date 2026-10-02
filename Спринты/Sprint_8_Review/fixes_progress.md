@@ -140,7 +140,7 @@ worktree B (параллельный DEV, detached HEAD, без веток): `/U
 | S8R-AUDIT-050 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-052 | LOW | ✅ | чеклист: 300 `- [ ]` при «Итого 299»; README: «старт Sprint 9», плейсхолдер, `tsc --noEmit` | — (документация) | — | — | docs | — | выполнено оркестратором (владелец — документация); расхождение счётчика — S8.17 (9 пунктов, в таблице 8) |
 | S8R-AUDIT-059 | LOW | ✅ | docs-пути не None; `DID NOT RAISE RuntimeError`; расширенные поля анониму; `200 == 401` | test_health 22+, test_main 11, test_config | расширенные анониму, без решения по подписи, без перехвата SQLAlchemyError → red | 4787/1xf/0 | `d62ad0d`* | 2+1 | *detached A, cherry-pick в s8r/fix-low после 048; решения — п.48 |
-| S8R-AUDIT-060 | LOW | ⬜ | | | | | | | |
+| S8R-AUDIT-060 | LOW | ✅ | `'http 403' == 'close 4401'` (18, реальный uvicorn); `(4401, '') == (4401, 'logout')`; 4 канала → 4 POST | test_ws_authz 18+15, nginx 39, vitest контроллера/хуков/баннера | close до accept, без reason, без общего refresh, logout без ожидания, без эпохи → red | 4835/1xf/0; vitest 1108 | `1e45465`* | 4 | *detached A, cherry-pick после 067; отступление — п.51 |
 | S8R-AUDIT-098 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-067 | LOW | ⬜ | | | | | | | |
 | S8R-AUDIT-079 | LOW | ⬜ | | | | | | | |
