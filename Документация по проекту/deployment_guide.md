@@ -165,7 +165,11 @@ docker compose exec backend alembic heads     # та же ревизия — р�
 **Вариант B:** через CLI (если уже есть users без admin'а).
 ```bash
 docker compose exec backend python -m app.cli.users grant_admin <username>
+# снять права (S8R-AUDIT-098): последнего активного администратора — нельзя (exit 1)
+docker compose exec backend python -m app.cli.users revoke_admin <username>
 ```
+
+Ошибки БД в CLI (`users`, `backup`) — строка `Database error: …` и код выхода 1, без traceback.
 
 > **С 2026-09-24 (S8R-AUDIT-033):** `POST /api/v1/auth/setup` работает только на пустой БД —
 > после первого пользователя он возвращает **403 «Регистрация закрыта»**. Регистрируйте
